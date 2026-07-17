@@ -7,4 +7,6 @@ Currently in the research & planning phase.
 
 - [docs/PLAN.md](docs/PLAN.md) — product plan: positioning, feature blueprint, architecture
   direction, roadmap.
+- [docs/DESIGN.md](docs/DESIGN.md) — design language: principles, light/dark color system,
+  typography, motion, navigation/IA.
 - [docs/research/](docs/research/) — verified market research the plan is built on.
