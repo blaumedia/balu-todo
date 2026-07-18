@@ -1,0 +1,17 @@
+services:
+  balu-test-db:
+    image: postgres:17-alpine
+    container_name: balu-test-db
+    environment:
+      POSTGRES_USER: balu
+      POSTGRES_PASSWORD: balu
+      POSTGRES_DB: balu_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balu -d balu_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

@@ -1,0 +1,44 @@
+"""API error helper — produces the contract error envelope."""
+
+from __future__ import annotations
+
+from fastapi import HTTPException
+
+
+class ApiError(HTTPException):
+    """HTTPException whose detail matches {code, message} per the contract."""
+
+    def __init__(self, status_code: int, code: str, message: str) -> None:
+        super().__init__(status_code=status_code, detail={"code": code, "message": message})
+
+
+def invalid_credentials() -> ApiError:
+    return ApiError(401, "invalid_credentials", "Invalid email or password")
+
+
+def email_taken() -> ApiError:
+    return ApiError(409, "email_taken", "Email is already registered")
+
+
+def registration_disabled() -> ApiError:
+    return ApiError(403, "registration_disabled", "Registration is disabled")
+
+
+def invalid_token() -> ApiError:
+    return ApiError(401, "invalid_token", "Invalid or rotated token")
+
+
+def token_expired() -> ApiError:
+    return ApiError(401, "token_expired", "Token has expired")
+
+
+def not_found(message: str = "Not found") -> ApiError:
+    return ApiError(404, "not_found", message)
+
+
+def forbidden(message: str = "Forbidden") -> ApiError:
+    return ApiError(403, "forbidden", message)
+
+
+def validation_error(message: str = "Validation error") -> ApiError:
+    return ApiError(422, "validation_error", message)
