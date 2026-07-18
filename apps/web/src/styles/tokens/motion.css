@@ -1,0 +1,21 @@
+/* Balu — motion tokens
+   Calm and fast. Standard ease-out for UI; springs (in RN) for drag & the add
+   button. Reduced-motion respected everywhere. */
+
+:root {
+  --duration-fast: 120ms;    /* @kind other */  /* hover / press */
+  --duration-medium: 200ms;  /* @kind other */  /* expand / collapse, sheet */
+  --duration-nav: 280ms;     /* @kind other */  /* navigation transitions */
+  --duration-complete: 600ms;/* @kind other */  /* row lingers after check before sliding away */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);     /* @kind other */  /* ease-out */
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1.2); /* @kind other */  /* slight overshoot */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 1ms;   /* @kind other */
+    --duration-medium: 1ms; /* @kind other */
+    --duration-nav: 1ms;    /* @kind other */
+  }
+}

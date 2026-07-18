@@ -1,0 +1,5 @@
+/* Balu — webfonts
+   Web brand font is Inter (variable). Balu's spec calls for a self-hosted
+   variable Inter; here it is loaded from Google Fonts CDN as a stand-in —
+   swap in the self-hosted .woff2 files when available (see readme CAVEATS). */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");

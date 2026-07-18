@@ -1,0 +1,113 @@
+/* App-level base styles. Everything visual references design tokens only. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+textarea {
+  font-family: inherit;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--ring-focus);
+  border-radius: var(--radius-control);
+}
+
+/* Native scrollbars, calmed down. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* Completion animation (DESIGN §5): ring fill pop → linger → slide out.
+   Reduced-motion collapses movement to a fade (tokens already zero the
+   durations, this keeps the transform out of the picture). */
+@keyframes balu-complete-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes balu-row-out {
+  0% { opacity: 1; transform: translateX(0); max-height: 60px; }
+  100% { opacity: 0; transform: translateX(24px); max-height: 0; }
+}
+@keyframes balu-row-fade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes balu-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes balu-panel-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+@keyframes balu-overlay-in {
+  from { transform: translateY(-8px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.balu-completing .balu-checkbox {
+  animation: balu-complete-pop var(--duration-medium) var(--ease-emphasized);
+}
+.balu-leaving {
+  animation: balu-row-out var(--duration-medium) var(--ease-standard) forwards;
+  animation-delay: var(--duration-complete);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .balu-leaving {
+    animation: balu-row-fade 1ms linear forwards;
+    animation-delay: var(--duration-complete);
+  }
+  .balu-panel-in,
+  .balu-overlay-in {
+    animation: none !important;
+  }
+}
+
+.balu-panel-in {
+  animation: balu-panel-in var(--duration-nav) var(--ease-standard);
+}
+.balu-overlay-in {
+  animation: balu-overlay-in var(--duration-medium) var(--ease-emphasized);
+}
+
+.balu-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

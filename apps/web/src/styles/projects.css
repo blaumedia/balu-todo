@@ -1,0 +1,17 @@
+/* Project / label hue palette (contract §3.1 `color` enum). Dots & icons only,
+   never full rows (DESIGN §2). Kept in a token file so components reference the
+   hues by variable, not raw hex. */
+:root {
+  --project-slate: #64748b;
+  --project-red: #ef4444;
+  --project-orange: #f97316;
+  --project-amber: #f59e0b;
+  --project-green: #22c55e;
+  --project-teal: #14b8a6;
+  --project-cyan: #06b6d4;
+  --project-blue: #3b82f6;
+  --project-indigo: #6366f1;
+  --project-violet: #8b5cf6;
+  --project-pink: #ec4899;
+  --project-rose: #f43f5e;
+}

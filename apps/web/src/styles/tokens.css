@@ -1,0 +1,7 @@
+/* Balu Design System — global entry point.
+   Consumers link this one file. Import order: fonts, then tokens. */
+@import "./tokens/fonts.css";
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/motion.css";

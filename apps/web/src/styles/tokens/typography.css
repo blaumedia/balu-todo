@@ -1,0 +1,28 @@
+/* Balu — typography tokens
+   Web uses Inter (variable); mobile uses the platform system font. Tabular
+   numerals for dates and counts. */
+
+:root {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-numeric: "Inter", sans-serif;   /* use with font-variant-numeric: tabular-nums */
+
+  /* Type scale (web px). Pair each size with its intended weight below. */
+  --text-display: 32px;    /* view titles — Today, project names */
+  --text-title: 22px;      /* sheet & dialog titles */
+  --text-body: 16px;       /* task titles — the workhorse */
+  --text-secondary-size: 14px;  /* notes preview, metadata */
+  --text-caption: 12px;    /* chips, section headers (uppercase, tracked) */
+
+  /* Line heights */
+  --leading-tight: 1.2;
+  --leading-body: 1.4;
+
+  /* Weights */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Tracking */
+  --tracking-caption: 0.4px;   /* uppercase section headers / chips */
+}

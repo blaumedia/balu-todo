@@ -1,0 +1,93 @@
+export const en = {
+  "nav.inbox": "Inbox",
+  "nav.today": "Today",
+  "nav.upcoming": "Upcoming",
+  "nav.anytime": "Anytime",
+  "nav.someday": "Someday",
+  "nav.logbook": "Logbook",
+
+  "section.projects": "Projects",
+  "section.thisEvening": "This Evening",
+
+  "empty.inbox": "Inbox zero.",
+  "empty.today": "All clear.",
+  "empty.upcoming": "Nothing scheduled.",
+  "empty.anytime": "Nothing waiting.",
+  "empty.someday": "No someday ideas yet.",
+  "empty.logbook": "Nothing logged yet.",
+  "empty.project": "Nothing here yet.",
+
+  "sync.synced": "Synced",
+  "sync.syncing": "Syncing…",
+  "sync.offline": "Offline — saved locally",
+  "sync.error": "Sync failed",
+
+  "quickadd.placeholder": "Add a task — try dates, #project, @label, !p1",
+  "quickadd.hint": "Enter to add · Esc to close",
+  "quickadd.add": "Add task",
+
+  "toolbar.search": "Search",
+
+  "detail.notes": "Notes",
+  "detail.notesPlaceholder": "Add notes…",
+  "detail.startDate": "Start date",
+  "detail.evening": "This evening",
+  "detail.deadline": "Deadline",
+  "detail.priority": "Priority",
+  "detail.labels": "Labels",
+  "detail.project": "Project",
+  "detail.someday": "Someday",
+  "detail.delete": "Delete task",
+  "detail.recurrence": "Repeats",
+  "detail.noProject": "Inbox",
+  "detail.datePlaceholder": "e.g. tomorrow, next tue, 31.7.",
+  "detail.clear": "Clear",
+
+  "priority.none": "None",
+  "priority.p1": "P1",
+  "priority.p2": "P2",
+  "priority.p3": "P3",
+
+  "settings.title": "Settings",
+  "settings.account": "Account",
+  "settings.appearance": "Appearance",
+  "settings.name": "Name",
+  "settings.locale": "Language",
+  "settings.theme": "Theme",
+  "settings.logout": "Log out",
+  "settings.save": "Save",
+
+  "theme.system": "System",
+  "theme.light": "Light",
+  "theme.dark": "Dark",
+
+  "auth.loginTitle": "Welcome back",
+  "auth.registerTitle": "Create your account",
+  "auth.tagline": "the self-hostable todo app.",
+  "auth.email": "Email",
+  "auth.password": "Password",
+  "auth.name": "Name",
+  "auth.login": "Log in",
+  "auth.register": "Sign up",
+  "auth.toRegister": "Need an account? Sign up",
+  "auth.toLogin": "Have an account? Log in",
+  "auth.errorGeneric": "Something went wrong. Please try again.",
+  "auth.invalid_credentials": "Wrong email or password.",
+  "auth.email_taken": "That email is already registered.",
+  "auth.registration_disabled": "Registration is disabled on this server.",
+
+  "project.newProject": "New project",
+  "project.newProjectName": "Project name",
+  "project.addSection": "Add section",
+  "project.sectionName": "Section name",
+
+  "date.today": "Today",
+  "date.tomorrow": "Tomorrow",
+  "date.yesterday": "Yesterday",
+  "date.overdue": "Overdue",
+
+  "common.cancel": "Cancel",
+  "common.later": "Later this week",
+} as const;
+
+export type TranslationKey = keyof typeof en;

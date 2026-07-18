@@ -1,0 +1,84 @@
+/* Balu — color tokens
+   Blue→cyan is the brand axis: gradient for brand moments, single cyan-leaning
+   blue for interaction, cool slate neutrals for everything else. */
+
+:root {
+  /* ── Brand ─────────────────────────────────────────────── */
+  --balu-gradient-from: #2563EB;   /* blue-600 */
+  --balu-gradient-to:   #06B6D4;   /* cyan-500 */
+  --balu-gradient: linear-gradient(135deg, #2563EB 0%, #06B6D4 100%); /* @kind color */
+
+  /* ── Accent ramp ("balu") ──────────────────────────────── */
+  --balu-50:  #F0F9FF;
+  --balu-100: #E0F2FE;
+  --balu-200: #BAE6FD;
+  --balu-300: #7DD3FC;
+  --balu-400: #38BDF8;
+  --balu-500: #0EA5E9;
+  --balu-600: #0284C7;
+  --balu-700: #0369A1;
+  --balu-800: #075985;
+  --balu-900: #0C4A6E;
+
+  /* ── Cool slate neutrals ───────────────────────────────── */
+  --slate-50:  #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+  --navy-950:  #0B1120;   /* dark-mode base — navy, not pure black */
+  --navy-surface: #151E31;
+  --navy-raised:  #1C2740;
+  --navy-border:  #2A3650;
+
+  /* ── Functional / priority hues ────────────────────────── */
+  --priority-1: #DC2626;   /* P1 */
+  --priority-2: #D97706;   /* P2 */
+  --token-project: #7C3AED;  /* #project pill (light) */
+  --token-project-dark: #A78BFA;
+  --token-label: #B45309;    /* @label pill (light) */
+  --token-label-dark: #FBBF24;
+
+  /* ── Semantic — light (default) ────────────────────────── */
+  --bg: #F8FAFC;
+  --surface: #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --border: #E2E8F0;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-tertiary: #94A3B8;
+  --accent: #0284C7;          /* balu-600 — AA on white */
+  --accent-hover: #0369A1;    /* balu-700 */
+  --accent-wash: #F0F9FF;     /* balu-50 — selected-row wash */
+  --accent-hover-wash: #E0F2FE; /* balu-100 */
+  --on-accent: #FFFFFF;
+  --danger: #DC2626;
+  --warning: #D97706;
+  --success: #16A34A;
+}
+
+/* ── Semantic — dark ─────────────────────────────────────── */
+[data-theme="dark"] {
+  --bg: #0B1120;
+  --surface: #151E31;
+  --surface-raised: #1C2740;
+  --border: #2A3650;
+  --text-primary: #F1F5F9;
+  --text-secondary: #94A3B8;
+  --text-tertiary: #64748B;
+  --accent: #38BDF8;          /* balu-400 */
+  --accent-hover: #7DD3FC;    /* balu-300 */
+  --accent-wash: rgba(12, 74, 110, 0.35);  /* balu-900 low-opacity */
+  --accent-hover-wash: rgba(12, 74, 110, 0.5);
+  --on-accent: #082F49;
+  --danger: #F87171;
+  --warning: #FBBF24;
+  --success: #4ADE80;
+  --token-project: #A78BFA;
+  --token-label: #FBBF24;
+}
