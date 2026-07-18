@@ -286,7 +286,53 @@ Per-command error codes in `sync_status`: `invalid_args` (validation), `not_foun
 7. Poll cadence v1: pull on app focus + after every flush + every 60 s while visible.
    (WebSocket/SSE push is a later optimization; the protocol doesn't change.)
 
-## 7. Static hosting & CORS
+## 7. Invites & member management (REST) — v1.1
+
+Sharing UI surface. All routes require auth; role requirements noted per route.
+Invites expire after 14 days.
+
+| Endpoint | Notes |
+|---|---|
+| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. `email` is informational in v1 (no mail is sent); the client shows/copies the link `/invite/<token>`. |
+| `GET /workspaces/{id}/invites` | `{invites: [...]}`, pending only; role ≥ admin |
+| `DELETE /workspaces/{id}/invites/{invite_id}` | revoke → `204`; role ≥ admin |
+| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token` |
+| `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin; demoting/removing the **last owner** → `400 last_owner` |
+| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+
+```json
+// invite
+{"id": "…", "workspace_id": "…", "role": "member", "email": null,
+ "token": "…urlsafe…", "created_at": "…", "expires_at": "…"}
+```
+
+Membership changes bump the workspace version (members travel through sync).
+A removed member loses sync/REST access immediately (`forbidden`).
+
+## 8. Notification channels & reminders — v1.1
+
+Per-user external channels — the self-hosted answer to app-store push relays.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /me/channels` | `{channels: [...]}` |
+| `PUT /me/channels` | replaces the full list; validates per type |
+| `POST /me/channels/test` | body `{type}` → sends a test message → `204`; delivery failure → `400 channel_unavailable` |
+
+Channel shapes: `{"type": "ntfy", "url": "https://ntfy.sh/<topic>"}` ·
+`{"type": "email", "address": "…"}` · `{"type": "telegram", "chat_id": "…"}`.
+Email requires server SMTP config (`BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`), telegram
+requires `BALU_TELEGRAM_BOT_TOKEN`; configuring a channel whose transport is not set up
+server-side → `400 channel_unavailable`.
+
+**Reminder delivery (server-side):** a background loop (~every 30 s) finds open,
+non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the channels of
+the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal (not in
+sync payloads); changing `reminder_at` re-arms it. Message: task title, project name,
+deadline if set. Mobile clients additionally schedule **local** notifications from their
+replica; with external channels configured this can duplicate — accepted in v1.
+
+## 9. Static hosting & CORS
 
 - The server serves the built web client: any non-`/api`, non-`/healthz` GET falls back
   to the SPA `index.html` from `server/static/` when that directory exists.
