@@ -3,5 +3,28 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+minimumReleaseAgeExclude:
+  - '@expo/cli@57.0.10'
+  - '@expo/config-plugins@57.0.6'
+  - '@expo/config@57.0.6'
+  - '@expo/fingerprint@0.20.6'
+  - '@expo/image-utils@0.11.4'
+  - '@expo/metro-config@57.0.7'
+  - '@expo/metro-runtime@57.0.7'
+  - '@expo/prebuild-config@57.0.9'
+  - '@expo/require-utils@57.0.4'
+  - '@expo/router-server@57.0.4'
+  - babel-preset-expo@57.0.4
+  - expo-asset@57.0.7
+  - expo-constants@57.0.7
+  - expo-linking@57.0.4
+  - expo-modules-autolinking@57.0.9
+  - expo-modules-core@57.0.7
+  - expo-modules-jsi@57.0.4
+  - expo-router@57.0.8
+  - expo-splash-screen@57.0.5
+  - expo-web-browser@57.0.2
+  - expo@57.0.8
+  - expo-build-properties@57.0.7
 onlyBuiltDependencies:
   - esbuild
