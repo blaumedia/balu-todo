@@ -21,8 +21,16 @@ export function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<
     setBusy(true);
     setError(null);
     try {
-      if (mode === "register") await api.register({ email, password, name });
-      else await api.login({ email, password });
+      if (mode === "register") {
+        await api.register({ email, password, name });
+        // Accounts default to "en" server-side; adopt the browser language so
+        // German NL parsing works from the very first quick-add.
+        if (navigator.language?.toLowerCase().startsWith("de")) {
+          await api.patchMe({ locale: "de" }).catch(() => {});
+        }
+      } else {
+        await api.login({ email, password });
+      }
       await onAuthenticated();
     } catch (err) {
       const known = ["invalid_credentials", "email_taken", "registration_disabled"];

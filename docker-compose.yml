@@ -19,6 +19,8 @@ services:
     build:
       context: .
       dockerfile: server/Dockerfile
+      args:
+        SKIP_WEB: "0"
     environment:
       DATABASE_URL: postgresql+psycopg://balu:${BALU_DB_PASSWORD:-balu}@db:5432/balu
       SECRET_KEY: ${BALU_SECRET_KEY:-dev-secret-change-me}
