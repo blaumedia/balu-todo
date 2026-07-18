@@ -1,18 +1,22 @@
-// Reusable bottom sheet (DESIGN §7: radius 16, drag handle). Modal-hosted so it
-// floats above the tab bar; reanimated slide-in; drag the handle down to dismiss;
-// keyboard-aware for the quick-add / detail inputs.
-//
-// Keyboard handling: KeyboardAvoidingView is unreliable inside a Modal, and RN's
-// JS Keyboard events can mis-report there too. So the sheet padding is driven by
-// Reanimated's native keyboard tracker, with the JS Keyboard events kept as a
-// fallback — whichever mechanism reports a height wins.
+// Reusable bottom sheet (DESIGN §7: radius 16, drag handle). Rendered as a
+// plain absolute-fill overlay — the sheet components live at the root layout,
+// as siblings after the navigator, so they already stack above every screen
+// and the tab bar. Deliberately NOT an RN <Modal>: modals get their own
+// window/host where keyboard reporting (JS Keyboard events and
+// KeyboardAvoidingView alike) is unreliable, e.g. on iOS 26 and on Android
+// with statusBarTranslucent. In the normal hierarchy the keyboard height is
+// dependable; we take the max of Reanimated's native tracker and the JS
+// events and pad the sheet with it.
 import type { ReactNode } from 'react';
 import { useEffect } from 'react';
-import { Keyboard, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { BackHandler, Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  FadeIn,
+  FadeOut,
   runOnJS,
   SlideInDown,
+  SlideOutDown,
   useAnimatedKeyboard,
   useAnimatedStyle,
   useSharedValue,
@@ -43,6 +47,16 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
   useEffect(() => {
     if (visible) translateY.value = 0;
   }, [visible, translateY]);
+
+  // Android hardware back closes the sheet (the Modal used to do this).
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -82,40 +96,46 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
     };
   });
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <GestureHandlerRootView style={styles.root}>
-        <View style={styles.container}>
-          <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]} onPress={onClose} />
-          <Animated.View
-            entering={SlideInDown.springify().damping(24).stiffness(240)}
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: theme.surfaceRaised,
-                borderColor: theme.border,
-                maxHeight: full ? '92%' : '88%',
-                minHeight: full ? '70%' : undefined,
-              },
-              sheetStyle,
-            ]}
-          >
-            <GestureDetector gesture={pan}>
-              <View style={styles.handleArea}>
-                <View style={[styles.handle, { backgroundColor: theme.border }]} />
-              </View>
-            </GestureDetector>
-            {children}
-          </Animated.View>
-        </View>
-      </GestureHandlerRootView>
-    </Modal>
+    <View style={[StyleSheet.absoluteFill, styles.container]}>
+      <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} style={StyleSheet.absoluteFill}>
+        <Pressable
+          style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
+          onPress={() => {
+            Keyboard.dismiss();
+            onClose();
+          }}
+        />
+      </Animated.View>
+      <Animated.View
+        entering={SlideInDown.springify().damping(24).stiffness(240)}
+        exiting={SlideOutDown.duration(160)}
+        style={[
+          styles.sheet,
+          {
+            backgroundColor: theme.surfaceRaised,
+            borderColor: theme.border,
+            maxHeight: full ? '92%' : '88%',
+            minHeight: full ? '70%' : undefined,
+          },
+          sheetStyle,
+        ]}
+      >
+        <GestureDetector gesture={pan}>
+          <View style={styles.handleArea}>
+            <View style={[styles.handle, { backgroundColor: theme.border }]} />
+          </View>
+        </GestureDetector>
+        {children}
+      </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  container: { flex: 1, justifyContent: 'flex-end' },
+  container: { justifyContent: 'flex-end', zIndex: 100, elevation: 24 },
   sheet: {
     borderTopLeftRadius: radius.sheet,
     borderTopRightRadius: radius.sheet,
