@@ -2,7 +2,9 @@
 // (1.0→1.15→1.0) → white check. Haptic + row fade are owned by the caller.
 import type { Priority } from '@balu/domain';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+// RNGH's Pressable so taps keep working inside swipeable rows (new-arch interop).
+import { Pressable } from 'react-native-gesture-handler';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
