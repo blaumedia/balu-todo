@@ -28,6 +28,10 @@ class InvitesResponse(BaseModel):
     invites: list[InviteOut]
 
 
+class InviteCreateResponse(BaseModel):
+    invite: InviteOut
+
+
 class InviteAccept(BaseModel):
     token: str
 

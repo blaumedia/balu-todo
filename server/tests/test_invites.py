@@ -26,7 +26,7 @@ def _create_invite(client, user, role="member", email=None) -> dict:
         json={"role": role, "email": email},
     )
     assert resp.status_code == 201, resp.text
-    return resp.json()
+    return resp.json()["invite"]
 
 
 def test_create_invite_returns_token(client, user):
@@ -79,7 +79,7 @@ def test_accept_invite_adds_member_with_role(client, user):
         "/api/v1/invites/accept", headers=member["headers"], json={"token": invite["token"]}
     )
     assert resp.status_code == 200
-    assert resp.json()["id"] == user["workspace_id"]
+    assert resp.json()["workspace"]["id"] == user["workspace_id"]
 
     me = client.get("/api/v1/me", headers=member["headers"]).json()
     roles = {m["workspace"]["id"]: m["role"] for m in me["memberships"]}

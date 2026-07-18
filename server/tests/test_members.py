@@ -11,7 +11,7 @@ def _join(client, owner, role="member") -> dict:
         f"/api/v1/workspaces/{owner['workspace_id']}/invites",
         headers=owner["headers"],
         json={"role": role},
-    ).json()
+    ).json()["invite"]
     data = register_user(client, email=None, name="Otto")
     member = {
         "user": data["user"],

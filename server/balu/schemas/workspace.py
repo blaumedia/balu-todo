@@ -15,6 +15,10 @@ class WorkspaceOut(BaseModel):
     created_at: datetime
 
 
+class AcceptInviteResponse(BaseModel):
+    workspace: WorkspaceOut
+
+
 class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 

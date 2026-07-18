@@ -19,8 +19,14 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..errors import forbidden, invalid_invite_token, not_found
 from ..models import Invite, Membership, User, Workspace
-from ..schemas.invite import InviteAccept, InviteCreate, InviteOut, InvitesResponse
-from ..schemas.workspace import WorkspaceOut
+from ..schemas.invite import (
+    InviteAccept,
+    InviteCreate,
+    InviteCreateResponse,
+    InviteOut,
+    InvitesResponse,
+)
+from ..schemas.workspace import AcceptInviteResponse, WorkspaceOut
 from ..sync.engine import ROLE_RANK, bump_version
 from .workspaces import _parse_ws_id, get_membership
 
@@ -59,14 +65,14 @@ def _aware(dt: datetime) -> datetime:
 @router.post(
     "/workspaces/{workspace_id}/invites",
     status_code=status.HTTP_201_CREATED,
-    response_model=InviteOut,
+    response_model=InviteCreateResponse,
 )
 def create_invite(
     workspace_id: str,
     body: InviteCreate,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> InviteOut:
+) -> InviteCreateResponse:
     ws_id = _parse_ws_id(workspace_id)
     _require_admin(db, ws_id, user)
     raw = secrets.token_urlsafe(32)
@@ -82,7 +88,7 @@ def create_invite(
     db.add(invite)
     db.commit()
     db.refresh(invite)
-    return _invite_out(invite, token=raw)
+    return InviteCreateResponse(invite=_invite_out(invite, token=raw))
 
 
 @router.get("/workspaces/{workspace_id}/invites", response_model=InvitesResponse)
@@ -132,12 +138,12 @@ def revoke_invite(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.post("/invites/accept", response_model=WorkspaceOut)
+@router.post("/invites/accept", response_model=AcceptInviteResponse)
 def accept_invite(
     body: InviteAccept,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> WorkspaceOut:
+) -> AcceptInviteResponse:
     if not body.token:
         raise invalid_invite_token()
 
@@ -156,8 +162,10 @@ def accept_invite(
     )
     if membership is not None and not membership.is_deleted:
         # Already a member: idempotent success (role is not downgraded).
-        return WorkspaceOut(
-            id=str(workspace.id), name=workspace.name, created_at=workspace.created_at
+        return AcceptInviteResponse(
+            workspace=WorkspaceOut(
+                id=str(workspace.id), name=workspace.name, created_at=workspace.created_at
+            )
         )
 
     version = bump_version(db, invite.workspace_id)
@@ -175,6 +183,8 @@ def accept_invite(
         membership.role = invite.role
         membership.version = version
     db.commit()
-    return WorkspaceOut(
-        id=str(workspace.id), name=workspace.name, created_at=workspace.created_at
+    return AcceptInviteResponse(
+        workspace=WorkspaceOut(
+            id=str(workspace.id), name=workspace.name, created_at=workspace.created_at
+        )
     )
