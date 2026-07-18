@@ -9,6 +9,23 @@ let api: ApiClient | null = null;
 let apiBaseUrl: string | null = null;
 let sync: SyncClient | null = null;
 
+// The sync client is created asynchronously during boot, after root-level
+// components have already mounted. They observe its (re)creation through this
+// listener set so they can re-wire their replica subscriptions.
+const syncClientListeners = new Set<(s: SyncClient | null) => void>();
+
+/** Subscribe to sync-client creation/teardown. Returns an unsubscribe fn. */
+export function subscribeSyncClient(cb: (s: SyncClient | null) => void): () => void {
+  syncClientListeners.add(cb);
+  return () => {
+    syncClientListeners.delete(cb);
+  };
+}
+
+function notifySyncClient(): void {
+  for (const cb of syncClientListeners) cb(sync);
+}
+
 /** Normalize a server URL to its `/api/v1` REST base. */
 export function apiBase(serverUrl: string): string {
   const trimmed = serverUrl.replace(/\/+$/, '');
@@ -42,6 +59,7 @@ export function initSync(serverUrl: string, workspaceId: string, userId: string)
     },
   });
   sync.start();
+  notifySyncClient();
   return sync;
 }
 
@@ -52,4 +70,5 @@ export function getSync(): SyncClient | null {
 export function teardownSync(): void {
   sync?.stop();
   sync = null;
+  notifySyncClient();
 }

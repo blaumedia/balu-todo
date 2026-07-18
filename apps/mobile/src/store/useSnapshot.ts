@@ -1,7 +1,7 @@
 import type { Snapshot } from '@balu/sync-client';
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { Label, Project, Section } from '@balu/domain';
-import { getSync } from '../lib/clients';
+import { getSync, subscribeSyncClient } from '../lib/clients';
 
 const EMPTY: Snapshot = {
   projects: [],
@@ -18,7 +18,17 @@ const noopSubscribe = (): (() => void) => () => {};
 
 /** Bind the sync-client replica snapshot into React via useSyncExternalStore. */
 export function useSnapshot(): Snapshot {
-  const sync = getSync();
+  // Components (e.g. the root-level sheets) can mount before bootApp() has
+  // created the sync client. Track the client as state so its creation
+  // triggers a re-render that re-wires the store subscription — a plain
+  // `getSync()` read here left early mounters stuck on the empty snapshot
+  // forever (detail sheet never opened after a cold start).
+  const [sync, setSync] = useState(getSync);
+  useEffect(() => {
+    const unsub = subscribeSyncClient(setSync);
+    setSync(getSync()); // in case it appeared between render and effect
+    return unsub;
+  }, []);
   return useSyncExternalStore(
     sync ? sync.subscribe : noopSubscribe,
     sync ? sync.getSnapshot : () => EMPTY,

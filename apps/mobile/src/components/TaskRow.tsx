@@ -1,9 +1,6 @@
 import type { IsoDate, Label, Project, Task } from '@balu/domain';
 import { useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-// RNGH's Pressable, not RN's: on the new architecture, RN's Pressable inside
-// ReanimatedSwipeable loses the touch to the swipe gesture and taps never fire.
-import { Pressable } from 'react-native-gesture-handler';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeOut } from 'react-native-reanimated';
 import ReanimatedSwipeable, {
   SwipeDirection,
