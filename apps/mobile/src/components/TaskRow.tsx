@@ -1,4 +1,5 @@
-import type { IsoDate, Label, Project, Task } from '@balu/domain';
+import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
+import { initials } from '../lib/collab';
 import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeOut } from 'react-native-reanimated';
@@ -21,12 +22,14 @@ export interface TaskRowProps {
   today: IsoDate;
   projects: Map<string, Project>;
   labels: Map<string, Label>;
+  members?: Map<string, Member>;
+  commentCount?: number;
   /** Hide the project dot/name (e.g. inside a project view). */
   hideProject?: boolean;
   swipeable?: boolean;
 }
 
-export function TaskRow({ task, today, projects, labels, hideProject, swipeable = true }: TaskRowProps) {
+export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, swipeable = true }: TaskRowProps) {
   const theme = useTheme();
   const { t, locale } = useT();
   const openDetail = useApp((s) => s.openDetail);
@@ -69,6 +72,8 @@ export function TaskRow({ task, today, projects, labels, hideProject, swipeable 
     dateInfo?.tone === 'overdue' ? theme.danger : dateInfo?.tone === 'today' ? theme.accent : theme.textSecondary;
   const isDeadlineOnly = task.start_date == null && task.deadline != null;
   const taskLabels = task.label_ids.map((id) => labels.get(id)).filter(Boolean) as Label[];
+  const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
+  const hasComments = commentCount > 0;
 
   const content = (
     <Pressable
@@ -87,7 +92,13 @@ export function TaskRow({ task, today, projects, labels, hideProject, swipeable 
         >
           {task.title}
         </Text>
-        {(showDate || (!hideProject && project) || task.priority > 0 || task.recurrence || taskLabels.length > 0) && (
+        {(showDate ||
+          (!hideProject && project) ||
+          task.priority > 0 ||
+          task.recurrence ||
+          taskLabels.length > 0 ||
+          assignee ||
+          hasComments) && (
           <View style={styles.meta}>
             {showDate && (
               <View style={styles.metaItem}>
@@ -117,6 +128,17 @@ export function TaskRow({ task, today, projects, labels, hideProject, swipeable 
                 fill={task.priority === 1 ? theme.priority1 : theme.priority2}
                 strokeWidth={2}
               />
+            ) : null}
+            {hasComments ? (
+              <View style={styles.metaItem}>
+                <Icon name="message-square" size={12} color={theme.textTertiary} strokeWidth={2} />
+                <Text style={[styles.metaText, { color: theme.textTertiary }]}>{commentCount}</Text>
+              </View>
+            ) : null}
+            {assignee ? (
+              <View style={[styles.avatar, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
+                <Text style={[styles.avatarText, { color: theme.accent }]}>{initials(assignee.name)}</Text>
+              </View>
             ) : null}
           </View>
         )}
@@ -174,6 +196,16 @@ const styles = StyleSheet.create({
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
   metaText: { fontSize: font.caption, fontVariant: ['tabular-nums'] },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  avatar: {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { fontSize: 10, fontWeight: font.weightSemibold },
   action: {
     justifyContent: 'center',
     paddingHorizontal: gutter + 4,

@@ -1,4 +1,4 @@
-import type { Priority, Task } from '@balu/domain';
+import type { Comment, Priority, Role, Task } from '@balu/domain';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
@@ -6,7 +6,24 @@ import { Checkbox } from '../components/Checkbox';
 import { Icon } from '../components/Icon';
 import { DateField } from './DateField';
 import { ReminderField } from './ReminderField';
-import { completeTask, deleteTask, moveTask, uncompleteTask, updateTask } from '../lib/actions';
+import {
+  addComment,
+  completeTask,
+  deleteComment,
+  deleteTask,
+  moveTask,
+  uncompleteTask,
+  updateComment,
+  updateTask,
+} from '../lib/actions';
+import {
+  canComment,
+  canDeleteComment,
+  canEditComment,
+  commentsForTask,
+  initials,
+} from '../lib/collab';
+import { relativeTime } from '../lib/format';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useSnapshot } from '../store/useSnapshot';
@@ -53,6 +70,8 @@ function DetailBody({
   const [notes, setNotes] = useState(task.notes);
   const [showProjects, setShowProjects] = useState(false);
   const [showRecurrence, setShowRecurrence] = useState(false);
+  const [showAssignee, setShowAssignee] = useState(false);
+  const user = useApp((s) => s.user);
 
   useEffect(() => {
     setTitle(task.title);
@@ -61,6 +80,11 @@ function DetailBody({
 
   const completed = task.completed_at != null;
   const project = task.project_id ? snap.projects.find((p) => p.id === task.project_id) : undefined;
+
+  const members = snap.members.filter((m) => !m.is_deleted);
+  const multiMember = members.length > 1;
+  const assignee = task.assigned_to ? members.find((m) => m.id === task.assigned_to) : undefined;
+  const myRole: Role | undefined = user ? members.find((m) => m.id === user.id)?.role : undefined;
 
   const commitTitle = () => {
     const v = title.trim();
@@ -186,6 +210,52 @@ function DetailBody({
         </View>
       ) : null}
 
+      {/* Assignee — only in shared workspaces (contract §4) */}
+      {multiMember ? (
+        <>
+          <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowAssignee((s) => !s)}>
+            <Icon name="user" size={20} color={theme.textTertiary} strokeWidth={2} />
+            <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.assignee')}</Text>
+            <View style={styles.value}>
+              {assignee ? (
+                <View style={[styles.assigneeChip, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
+                  <Text style={[styles.assigneeChipText, { color: theme.accent }]}>{initials(assignee.name)}</Text>
+                </View>
+              ) : null}
+              <Text style={[styles.valueText, { color: assignee ? theme.textPrimary : theme.textTertiary }]}>
+                {assignee ? assignee.name : t('detail.unassigned')}
+              </Text>
+              <Icon name={showAssignee ? 'chevron-down' : 'chevron-right'} size={16} color={theme.textTertiary} strokeWidth={2} />
+            </View>
+          </Pressable>
+          {showAssignee ? (
+            <View style={styles.subList}>
+              <SubOption
+                label={t('detail.unassigned')}
+                active={task.assigned_to == null}
+                onPress={() => {
+                  updateTask(task.id, { assigned_to: null });
+                  setShowAssignee(false);
+                }}
+                theme={theme}
+              />
+              {members.map((m) => (
+                <SubOption
+                  key={m.id}
+                  label={user && m.id === user.id ? t('detail.assigneeMe').replace('{name}', m.name) : m.name}
+                  active={task.assigned_to === m.id}
+                  onPress={() => {
+                    updateTask(task.id, { assigned_to: m.id });
+                    setShowAssignee(false);
+                  }}
+                  theme={theme}
+                />
+              ))}
+            </View>
+          ) : null}
+        </>
+      ) : null}
+
       {/* Recurrence */}
       <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowRecurrence((s) => !s)}>
         <Icon name="repeat" size={20} color={theme.textTertiary} strokeWidth={2} />
@@ -252,6 +322,9 @@ function DetailBody({
         multiline
       />
 
+      {/* Comments */}
+      <CommentsSection task={task} snap={snap} userId={user?.id ?? null} role={myRole} />
+
       {/* Delete */}
       <Pressable
         style={styles.delete}
@@ -292,6 +365,177 @@ function ToggleRow({
         trackColor={{ true: theme.accent, false: theme.border }}
         thumbColor="#fff"
       />
+    </View>
+  );
+}
+
+function CommentsSection({
+  task,
+  snap,
+  userId,
+  role,
+}: {
+  task: Task;
+  snap: ReturnType<typeof useSnapshot>;
+  userId: string | null;
+  role: Role | undefined;
+}) {
+  const theme = useTheme();
+  const { t, locale } = useT();
+  const [draft, setDraft] = useState('');
+  const comments = commentsForTask(snap, task.id);
+  const writable = canComment(role);
+  const now = Date.now();
+
+  const submit = () => {
+    const body = draft.trim();
+    if (!body) return;
+    addComment(task.id, body);
+    setDraft(''); // sheet stays open (contract §5.4: composer keeps context)
+  };
+
+  return (
+    <View style={[styles.comments, { borderTopColor: theme.border }]}>
+      <View style={styles.commentsHeader}>
+        <Icon name="message-square" size={18} color={theme.textTertiary} strokeWidth={2} />
+        <Text style={[styles.commentsTitle, { color: theme.textSecondary }]}>{t('comment.section')}</Text>
+        {comments.length > 0 ? (
+          <Text style={[styles.commentsCount, { color: theme.textTertiary }]}>{comments.length}</Text>
+        ) : null}
+      </View>
+
+      {comments.length === 0 ? (
+        <Text style={[styles.commentsEmpty, { color: theme.textTertiary }]}>{t('comment.empty')}</Text>
+      ) : (
+        comments.map((c) => (
+          <CommentItem
+            key={c.id}
+            comment={c}
+            authorName={snap.members.find((m) => m.id === c.author_id)?.name ?? '?'}
+            canEdit={canEditComment(c, userId)}
+            canDelete={canDeleteComment(c, userId, role)}
+            now={now}
+            locale={locale}
+            t={t}
+            theme={theme}
+          />
+        ))
+      )}
+
+      {writable ? (
+        <View style={[styles.composer, { borderColor: theme.border }]}>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={t('comment.placeholder')}
+            placeholderTextColor={theme.textTertiary}
+            style={[styles.composerInput, { color: theme.textPrimary }]}
+            multiline
+          />
+          <Pressable
+            onPress={submit}
+            disabled={draft.trim().length === 0}
+            hitSlop={8}
+            accessibilityLabel={t('comment.send')}
+            style={[
+              styles.sendBtn,
+              { backgroundColor: draft.trim() ? theme.accent : theme.border },
+            ]}
+          >
+            <Icon name="send" size={16} color={draft.trim() ? theme.onAccent : theme.textTertiary} strokeWidth={2} />
+          </Pressable>
+        </View>
+      ) : (
+        <Text style={[styles.commentsEmpty, { color: theme.textTertiary }]}>{t('comment.readOnly')}</Text>
+      )}
+    </View>
+  );
+}
+
+function CommentItem({
+  comment,
+  authorName,
+  canEdit,
+  canDelete,
+  now,
+  locale,
+  t,
+  theme,
+}: {
+  comment: Comment;
+  authorName: string;
+  canEdit: boolean;
+  canDelete: boolean;
+  now: number;
+  locale: ReturnType<typeof useT>['locale'];
+  t: ReturnType<typeof useT>['t'];
+  theme: ReturnType<typeof useTheme>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(comment.body);
+  const edited = comment.updated_at > comment.created_at;
+
+  const save = () => {
+    const body = text.trim();
+    if (body && body !== comment.body) updateComment(comment.id, body);
+    setEditing(false);
+  };
+
+  return (
+    <View style={[styles.comment, { borderBottomColor: theme.border }]}>
+      <View style={[styles.commentAvatar, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
+        <Text style={[styles.commentAvatarText, { color: theme.accent }]}>{initials(authorName)}</Text>
+      </View>
+      <View style={styles.commentBody}>
+        <View style={styles.commentMeta}>
+          <Text style={[styles.commentAuthor, { color: theme.textPrimary }]} numberOfLines={1}>
+            {authorName}
+          </Text>
+          <Text style={[styles.commentTime, { color: theme.textTertiary }]}>
+            {relativeTime(comment.created_at, now, locale, t)}
+            {edited ? ` · ${t('comment.edited')}` : ''}
+          </Text>
+        </View>
+        {editing ? (
+          <>
+            <TextInput
+              value={text}
+              onChangeText={setText}
+              autoFocus
+              multiline
+              style={[styles.commentEditInput, { color: theme.textPrimary, borderColor: theme.border }]}
+            />
+            <View style={styles.commentActions}>
+              <Pressable onPress={() => { setText(comment.body); setEditing(false); }} hitSlop={6}>
+                <Text style={[styles.commentAction, { color: theme.textTertiary }]}>{t('common.cancel')}</Text>
+              </Pressable>
+              <Pressable onPress={save} hitSlop={6}>
+                <Text style={[styles.commentAction, { color: theme.accent }]}>{t('comment.save')}</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={[styles.commentText, { color: theme.textPrimary }]}>{comment.body}</Text>
+            {canEdit || canDelete ? (
+              <View style={styles.commentActions}>
+                {canEdit ? (
+                  <Pressable onPress={() => { setText(comment.body); setEditing(true); }} hitSlop={6} style={styles.commentActionBtn}>
+                    <Icon name="pencil" size={13} color={theme.textTertiary} strokeWidth={2} />
+                    <Text style={[styles.commentAction, { color: theme.textTertiary }]}>{t('comment.edit')}</Text>
+                  </Pressable>
+                ) : null}
+                {canDelete ? (
+                  <Pressable onPress={() => deleteComment(comment.id)} hitSlop={6} style={styles.commentActionBtn}>
+                    <Icon name="trash-2" size={13} color={theme.danger} strokeWidth={2} />
+                    <Text style={[styles.commentAction, { color: theme.danger }]}>{t('comment.delete')}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -343,4 +587,59 @@ const styles = StyleSheet.create({
   notes: { fontSize: font.body, paddingTop: space.s4, minHeight: 80, lineHeight: font.body * 1.4 },
   delete: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingVertical: space.s4 },
   deleteText: { fontSize: font.body, fontWeight: font.weightMedium },
+  assigneeChip: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assigneeChipText: { fontSize: 11, fontWeight: font.weightSemibold },
+  // ── Comments ──
+  comments: { paddingTop: space.s5, borderTopWidth: StyleSheet.hairlineWidth, marginTop: space.s4 },
+  commentsHeader: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingBottom: space.s3 },
+  commentsTitle: { fontSize: font.secondary, fontWeight: font.weightSemibold },
+  commentsCount: { fontSize: font.caption, fontVariant: ['tabular-nums'] },
+  commentsEmpty: { fontSize: font.secondary, paddingVertical: space.s2 },
+  comment: { flexDirection: 'row', gap: space.s3, paddingVertical: space.s3, borderBottomWidth: StyleSheet.hairlineWidth },
+  commentAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  commentAvatarText: { fontSize: 12, fontWeight: font.weightSemibold },
+  commentBody: { flex: 1, gap: 3 },
+  commentMeta: { flexDirection: 'row', alignItems: 'baseline', gap: space.s2 },
+  commentAuthor: { fontSize: font.secondary, fontWeight: font.weightMedium, flexShrink: 1 },
+  commentTime: { fontSize: font.caption },
+  commentText: { fontSize: font.secondary, lineHeight: font.secondary * 1.4 },
+  commentEditInput: {
+    fontSize: font.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.control,
+    paddingHorizontal: space.s3,
+    paddingVertical: space.s2,
+    minHeight: 44,
+  },
+  commentActions: { flexDirection: 'row', gap: space.s4, paddingTop: 2 },
+  commentActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  commentAction: { fontSize: font.caption, fontWeight: font.weightMedium },
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: space.s2,
+    marginTop: space.s3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.control,
+    paddingLeft: space.s3,
+    paddingRight: space.s2,
+    paddingVertical: space.s2,
+  },
+  composerInput: { flex: 1, fontSize: font.secondary, maxHeight: 120, paddingTop: 4, paddingBottom: 4 },
+  sendBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
 });

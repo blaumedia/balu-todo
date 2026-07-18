@@ -59,3 +59,16 @@ export function setPriority(id: string, priority: Priority) {
 export function addProject(args: { name: string; color?: string; sort_order?: number }) {
   return mutate('project_add', args);
 }
+
+// ── Comments (contract §5.4, v1.2) ────────────────────────────────────────
+export function addComment(taskId: string, body: string) {
+  return mutate('comment_add', { task_id: taskId, body });
+}
+
+export function updateComment(id: string, body: string) {
+  return mutate('comment_update', { id, body });
+}
+
+export function deleteComment(id: string) {
+  return mutate('comment_delete', { id });
+}

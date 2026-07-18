@@ -3,6 +3,7 @@
 
 import {
   nextSortOrder,
+  type Comment,
   type IsoDate,
   type Label,
   type Priority,
@@ -215,6 +216,9 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
       break;
     }
     case "task_delete": {
+      // Collect the task and its subtasks — deleting a task cascades to its
+      // subtasks (contract §5.4) and to every one of their comments (§3.4).
+      const deletedIds = new Set<string>([id]);
       const t = replica.tasks.get(id);
       if (t) {
         t.is_deleted = true;
@@ -224,6 +228,13 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
         if (sub.parent_task_id === id) {
           sub.is_deleted = true;
           sub.updated_at = now;
+          deletedIds.add(sub.id);
+        }
+      }
+      for (const c of replica.comments.values()) {
+        if (deletedIds.has(c.task_id) && !c.is_deleted) {
+          c.is_deleted = true;
+          c.updated_at = now;
         }
       }
       break;
@@ -272,6 +283,35 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
           t.label_ids = t.label_ids.filter((x) => x !== id);
           t.updated_at = now;
         }
+      }
+      break;
+    }
+    case "comment_add": {
+      const comment: Comment = {
+        id,
+        workspace_id: ctx.workspaceId,
+        task_id: str(a["task_id"]) ?? "",
+        author_id: ctx.userId,
+        body: str(a["body"]) ?? "",
+        created_at: now,
+        updated_at: now,
+        is_deleted: false,
+      };
+      replica.comments.set(id, comment);
+      break;
+    }
+    case "comment_update": {
+      const c = replica.comments.get(id);
+      if (!c) break;
+      patch(c, a, ["body"]);
+      c.updated_at = now;
+      break;
+    }
+    case "comment_delete": {
+      const c = replica.comments.get(id);
+      if (c) {
+        c.is_deleted = true;
+        c.updated_at = now;
       }
       break;
     }

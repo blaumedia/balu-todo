@@ -4,6 +4,7 @@ import { getSync } from "../lib/clients.js";
 import { spacedOrders } from "../lib/reorder.js";
 import { useMaps } from "../lib/maps.js";
 import { useT } from "../lib/useT.js";
+import { useApp } from "../store/app.js";
 import type { TranslationKey } from "../i18n/index.js";
 import { TaskListSurface, type DndConfig, type TaskGroup } from "./TaskListSurface.js";
 
@@ -16,8 +17,9 @@ const REORDERABLE: Partial<Record<SmartList, boolean>> = { inbox: true, someday:
 export function SimpleListView({ snapshot, list }: { snapshot: Snapshot; list: SmartList }) {
   const { t, locale } = useT();
   const maps = useMaps(snapshot);
+  const userId = useApp((s) => s.user?.id);
   const today = todayLocalISO();
-  const tasks = selectList(snapshot.tasks, list, today);
+  const tasks = selectList(snapshot.tasks, list, today, userId);
 
   // Anytime is grouped by project (each project is its own reorder container,
   // contract §4 "project order, then sort_order").

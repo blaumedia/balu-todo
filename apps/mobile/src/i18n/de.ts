@@ -10,6 +10,7 @@ export const de: Record<TranslationKey, string> = {
   'nav.logbook': 'Logbuch',
   'nav.browse': 'Übersicht',
   'nav.search': 'Suche',
+  'nav.assigned': 'Mir zugewiesen',
 
   'section.projects': 'Projekte',
   'section.labels': 'Labels',
@@ -24,6 +25,7 @@ export const de: Record<TranslationKey, string> = {
   'empty.project': 'Hier ist noch nichts.',
   'empty.search': 'Aufgaben, Projekte und Labels suchen',
   'empty.searchNone': 'Keine Treffer.',
+  'empty.assigned': 'Dir ist nichts zugewiesen.',
 
   'search.tasks': 'Aufgaben',
   'search.showCompleted': 'Erledigte einschließen',
@@ -56,6 +58,20 @@ export const de: Record<TranslationKey, string> = {
   'detail.clear': 'Löschen',
   'detail.pickDate': 'Datum wählen',
   'detail.none': 'Keine',
+  'detail.assignee': 'Zuständig',
+  'detail.unassigned': 'Niemand',
+  'detail.assigneeMe': '{name} (ich)',
+
+  'comment.section': 'Kommentare',
+  'comment.empty': 'Noch keine Kommentare.',
+  'comment.placeholder': 'Kommentar hinzufügen…',
+  'comment.send': 'Senden',
+  'comment.edit': 'Bearbeiten',
+  'comment.delete': 'Löschen',
+  'comment.save': 'Speichern',
+  'comment.edited': 'bearbeitet',
+  'comment.justNow': 'gerade eben',
+  'comment.readOnly': 'Du hast nur Lesezugriff.',
 
   'priority.none': 'Keine',
   'priority.p1': 'P1',

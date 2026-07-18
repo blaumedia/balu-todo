@@ -1,4 +1,4 @@
-import { addDaysISO, compareISO, diffDaysISO, type IsoDate, type Locale } from "@balu/domain";
+import { addDaysISO, compareISO, diffDaysISO, type IsoDate, type IsoDateTime, type Locale } from "@balu/domain";
 import type { TranslationKey } from "../i18n/index.js";
 
 export type DateTone = "today" | "overdue" | "future";
@@ -47,4 +47,30 @@ export function relativeDate(
   const ahead = diffDaysISO(today, iso);
   if (ahead < 7) return { text: weekdayShort(iso, locale), tone: "future" };
   return { text: dayMonth(iso, locale), tone: "future" };
+}
+
+const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+  ["year", 31_536_000],
+  ["month", 2_592_000],
+  ["week", 604_800],
+  ["day", 86_400],
+  ["hour", 3_600],
+  ["minute", 60],
+];
+
+/** Calm relative label for a datetime (comment timestamps). */
+export function relativeTime(
+  iso: IsoDateTime,
+  nowMs: number,
+  locale: Locale,
+  t: (k: TranslationKey) => string,
+): string {
+  const diffSec = Math.round((new Date(iso).getTime() - nowMs) / 1000);
+  const abs = Math.abs(diffSec);
+  if (abs < 60) return t("time.justNow");
+  const rtf = new Intl.RelativeTimeFormat(localeTag(locale), { numeric: "auto" });
+  for (const [unit, secs] of RELATIVE_UNITS) {
+    if (abs >= secs) return rtf.format(Math.round(diffSec / secs), unit);
+  }
+  return t("time.justNow");
 }

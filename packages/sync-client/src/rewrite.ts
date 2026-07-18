@@ -20,9 +20,13 @@ export function rewriteReplicaRefs(replica: Replica, mapping: Mapping): void {
     t.assigned_to = map(mapping, t.assigned_to);
     if (t.label_ids.length) t.label_ids = t.label_ids.map((l) => mapping[l] ?? l);
   }
+  // A comment created against a not-yet-synced task references it by temp_id.
+  for (const c of replica.comments.values()) {
+    c.task_id = map(mapping, c.task_id) ?? c.task_id;
+  }
 }
 
-const ID_KEYS = ["id", "project_id", "section_id", "parent_task_id", "assigned_to"];
+const ID_KEYS = ["id", "project_id", "section_id", "parent_task_id", "assigned_to", "task_id"];
 
 export function rewriteCommandRefs(commands: SyncCommand[], mapping: Mapping): void {
   for (const cmd of commands) {
@@ -48,6 +52,7 @@ export function removeTempEntries(replica: Replica, mapping: Mapping): void {
     replica.sections.delete(temp);
     replica.tasks.delete(temp);
     replica.labels.delete(temp);
+    replica.comments.delete(temp);
     replica.members.delete(temp);
   }
 }

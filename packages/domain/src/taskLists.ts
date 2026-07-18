@@ -48,7 +48,16 @@ export function isLogbook(t: Task, _today: IsoDate): boolean {
   return t.completed_at != null && !t.is_deleted && isTopLevel(t);
 }
 
-const PREDICATES: Record<SmartList, (t: Task, today: IsoDate) => boolean> = {
+/**
+ * "Assigned to me" (contract §4, v1.2): open ∧ `assigned_to == current user`.
+ * Subtasks never surface independently (top-level only, like every smart list).
+ */
+export function isAssignedToMe(t: Task, userId: string | null | undefined): boolean {
+  return isOpen(t) && isTopLevel(t) && userId != null && t.assigned_to === userId;
+}
+
+// The date-based predicates; `assigned` is handled separately (it needs userId).
+const PREDICATES: Record<Exclude<SmartList, "assigned">, (t: Task, today: IsoDate) => boolean> = {
   inbox: isInbox,
   today: isToday,
   upcoming: isUpcoming,
@@ -57,7 +66,13 @@ const PREDICATES: Record<SmartList, (t: Task, today: IsoDate) => boolean> = {
   logbook: isLogbook,
 };
 
-export function matchesList(t: Task, list: SmartList, today: IsoDate): boolean {
+export function matchesList(
+  t: Task,
+  list: SmartList,
+  today: IsoDate,
+  userId?: string | null,
+): boolean {
+  if (list === "assigned") return isAssignedToMe(t, userId);
   return PREDICATES[list](t, today);
 }
 
@@ -103,6 +118,21 @@ function compareUpcoming(a: Task, b: Task, today: IsoDate): number {
   return a.sort_order - b.sort_order;
 }
 
+/**
+ * Assigned-to-me ordering (contract §4): deadline ascending with nulls last,
+ * then priority (1<2<3<0), then sort_order.
+ */
+function compareAssigned(a: Task, b: Task): number {
+  const da = a.deadline;
+  const db = b.deadline;
+  if (da != null && db != null) {
+    const c = compareISO(da, db);
+    if (c !== 0) return c;
+  } else if (da != null) return -1; // a has a deadline, b doesn't → a first
+  else if (db != null) return 1;
+  return priorityRank(a.priority) - priorityRank(b.priority) || a.sort_order - b.sort_order;
+}
+
 function compareAnytime(a: Task, b: Task): number {
   // Approximation of "project order": group by project id, then sort_order.
   // Views iterate projects in their real sort order for the visible grouping.
@@ -121,14 +151,18 @@ export function selectList(
   tasks: ReadonlyArray<Task>,
   list: SmartList,
   today: IsoDate,
+  userId?: string | null,
 ): Task[] {
-  const filtered = tasks.filter((t) => matchesList(t, list, today));
+  const filtered = tasks.filter((t) => matchesList(t, list, today, userId));
   switch (list) {
     case "today":
       filtered.sort((a, b) => compareToday(a, b, today));
       break;
     case "upcoming":
       filtered.sort((a, b) => compareUpcoming(a, b, today));
+      break;
+    case "assigned":
+      filtered.sort(compareAssigned);
       break;
     case "anytime":
       filtered.sort(compareAnytime);

@@ -7,6 +7,7 @@ export const en = {
   'nav.logbook': 'Logbook',
   'nav.browse': 'Browse',
   'nav.search': 'Search',
+  'nav.assigned': 'Assigned to me',
 
   'section.projects': 'Projects',
   'section.labels': 'Labels',
@@ -21,6 +22,7 @@ export const en = {
   'empty.project': 'Nothing here yet.',
   'empty.search': 'Search tasks, projects and labels',
   'empty.searchNone': 'No matches.',
+  'empty.assigned': 'Nothing assigned to you.',
 
   'search.tasks': 'Tasks',
   'search.showCompleted': 'Include completed',
@@ -53,6 +55,20 @@ export const en = {
   'detail.clear': 'Clear',
   'detail.pickDate': 'Pick a date',
   'detail.none': 'None',
+  'detail.assignee': 'Assignee',
+  'detail.unassigned': 'Unassigned',
+  'detail.assigneeMe': '{name} (me)',
+
+  'comment.section': 'Comments',
+  'comment.empty': 'No comments yet.',
+  'comment.placeholder': 'Add a comment…',
+  'comment.send': 'Send',
+  'comment.edit': 'Edit',
+  'comment.delete': 'Delete',
+  'comment.save': 'Save',
+  'comment.edited': 'edited',
+  'comment.justNow': 'just now',
+  'comment.readOnly': 'You have read-only access.',
 
   'priority.none': 'None',
   'priority.p1': 'P1',

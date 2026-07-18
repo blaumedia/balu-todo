@@ -25,6 +25,8 @@ export function TaskItems({
           today={today}
           projects={maps.projects}
           labels={maps.labels}
+          members={maps.members}
+          commentCount={maps.commentCounts.get(task.id) ?? 0}
           hideProject={hideProject}
           swipeable={swipeable}
         />

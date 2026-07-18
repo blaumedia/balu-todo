@@ -1,10 +1,11 @@
-import type { Label, Member, Project, Section, Task } from "@balu/domain";
+import type { Comment, Label, Member, Project, Section, Task } from "@balu/domain";
 
 export interface Replica {
   projects: Map<string, Project>;
   sections: Map<string, Section>;
   tasks: Map<string, Task>;
   labels: Map<string, Label>;
+  comments: Map<string, Comment>;
   members: Map<string, Member>;
 }
 
@@ -14,6 +15,7 @@ export function emptyReplica(): Replica {
     sections: new Map(),
     tasks: new Map(),
     labels: new Map(),
+    comments: new Map(),
     members: new Map(),
   };
 }
@@ -23,6 +25,7 @@ export interface SerializedReplica {
   sections: Section[];
   tasks: Task[];
   labels: Label[];
+  comments: Comment[];
   members: Member[];
 }
 
@@ -32,6 +35,7 @@ export function serializeReplica(r: Replica): SerializedReplica {
     sections: [...r.sections.values()],
     tasks: [...r.tasks.values()],
     labels: [...r.labels.values()],
+    comments: [...r.comments.values()],
     members: [...r.members.values()],
   };
 }
@@ -42,6 +46,7 @@ export function hydrateReplica(data: SerializedReplica): Replica {
   for (const s of data.sections ?? []) r.sections.set(s.id, s);
   for (const t of data.tasks ?? []) r.tasks.set(t.id, t);
   for (const l of data.labels ?? []) r.labels.set(l.id, l);
+  for (const c of data.comments ?? []) r.comments.set(c.id, c);
   for (const m of data.members ?? []) r.members.set(m.id, m);
   return r;
 }

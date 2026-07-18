@@ -20,6 +20,7 @@ export default function BrowseScreen() {
   const insets = useSafeAreaInsets();
   const snap = useSnapshot();
   const setContext = useApp((s) => s.setContext);
+  const user = useApp((s) => s.user);
   const today = todayLocalISO();
   const [newName, setNewName] = useState('');
   const [adding, setAdding] = useState(false);
@@ -36,6 +37,10 @@ export default function BrowseScreen() {
   }, [snap.tasks]);
 
   const inboxCount = selectList(snap.tasks, 'inbox', today).length;
+  // "Assigned to me" is only meaningful in a shared workspace (contract §4).
+  const memberCount = snap.members.filter((m) => !m.is_deleted).length;
+  const showAssigned = memberCount > 1 && user != null;
+  const assignedCount = user ? selectList(snap.tasks, 'assigned', today, user.id).length : 0;
   const projects = snap.projects.filter((p) => !p.is_deleted && p.archived_at == null).sort((a, b) => a.sort_order - b.sort_order);
   const labels = snap.labels.filter((l) => !l.is_deleted).sort((a, b) => a.sort_order - b.sort_order);
 
@@ -54,6 +59,9 @@ export default function BrowseScreen() {
         <ListRow icon="layers" label={t('nav.anytime')} chevron onPress={() => router.push({ pathname: '/list/[list]', params: { list: 'anytime' } })} />
         <ListRow icon="archive" label={t('nav.someday')} chevron onPress={() => router.push({ pathname: '/list/[list]', params: { list: 'someday' } })} />
         <ListRow icon="check-circle" label={t('nav.logbook')} chevron onPress={() => router.push({ pathname: '/list/[list]', params: { list: 'logbook' } })} />
+        {showAssigned ? (
+          <ListRow icon="user-check" label={t('nav.assigned')} count={assignedCount} chevron onPress={() => router.push('/assigned')} />
+        ) : null}
 
         <SectionHeader>{t('section.projects')}</SectionHeader>
         <Divider />

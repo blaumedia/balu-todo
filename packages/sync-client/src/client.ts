@@ -3,6 +3,7 @@
 
 import {
   todayLocalISO,
+  type Comment,
   type CommandInput,
   type IsoDate,
   type Label,
@@ -46,6 +47,7 @@ export interface Snapshot {
   sections: Section[];
   tasks: Task[];
   labels: Label[];
+  comments: Comment[];
   members: Member[];
   status: SyncStatus;
   syncToken: string;
@@ -120,6 +122,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       sections: [...replica.sections.values()],
       tasks: [...replica.tasks.values()],
       labels: [...replica.labels.values()],
+      comments: [...replica.comments.values()],
       members: [...replica.members.values()],
       status,
       syncToken,
@@ -175,6 +178,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       for (const s of resp.sections) if (!s.is_deleted) replica.sections.set(s.id, s);
       for (const t of resp.tasks) if (!t.is_deleted) replica.tasks.set(t.id, t);
       for (const l of resp.labels) if (!l.is_deleted) replica.labels.set(l.id, l);
+      for (const c of resp.comments ?? []) if (!c.is_deleted) replica.comments.set(c.id, c);
       for (const m of resp.members) if (!m.is_deleted) replica.members.set(m.id, m);
     } else {
       if (hasMapping) {
@@ -185,6 +189,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       mergeInto(replica.sections, resp.sections);
       mergeInto(replica.tasks, resp.tasks);
       mergeInto(replica.labels, resp.labels);
+      mergeInto(replica.comments, resp.comments ?? []);
       mergeInto(replica.members, resp.members);
     }
 

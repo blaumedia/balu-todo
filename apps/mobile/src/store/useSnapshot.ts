@@ -1,13 +1,15 @@
 import type { Snapshot } from '@balu/sync-client';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { Label, Project, Section } from '@balu/domain';
+import type { Label, Member, Project, Section } from '@balu/domain';
 import { getSync, subscribeSyncClient } from '../lib/clients';
+import { commentCountsByTask } from '../lib/collab';
 
 const EMPTY: Snapshot = {
   projects: [],
   sections: [],
   tasks: [],
   labels: [],
+  comments: [],
   members: [],
   status: 'offline',
   syncToken: '*',
@@ -40,6 +42,10 @@ export interface ReplicaMaps {
   projects: Map<string, Project>;
   labels: Map<string, Label>;
   sections: Map<string, Section>;
+  /** Workspace members by id — drives the assignee chip on rows. */
+  members: Map<string, Member>;
+  /** Open comment count per task id — drives the comment chip on rows. */
+  commentCounts: Map<string, number>;
 }
 
 export function useMaps(snapshot: Snapshot): ReplicaMaps {
@@ -48,7 +54,9 @@ export function useMaps(snapshot: Snapshot): ReplicaMaps {
       projects: new Map(snapshot.projects.map((p) => [p.id, p])),
       labels: new Map(snapshot.labels.map((l) => [l.id, l])),
       sections: new Map(snapshot.sections.map((s) => [s.id, s])),
+      members: new Map(snapshot.members.map((m) => [m.id, m])),
+      commentCounts: commentCountsByTask(snapshot),
     }),
-    [snapshot.projects, snapshot.labels, snapshot.sections],
+    [snapshot.projects, snapshot.labels, snapshot.sections, snapshot.members, snapshot.comments],
   );
 }

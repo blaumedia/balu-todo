@@ -16,11 +16,20 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { IsoDate, Label, Locale, Project, Task } from "@balu/domain";
+import type { IsoDate, Label, Locale, Member, Project, Task } from "@balu/domain";
 import type { TranslationKey } from "../i18n/index.js";
 import { useApp } from "../store/app.js";
+import { useSnapshot } from "../store/useSync.js";
 import { Icon } from "../components/Icon.js";
 import { TaskItem } from "./TaskItem.js";
+
+/** Per-row assignment/comment context, derived once from the replica. */
+export interface RowMeta {
+  members: Map<string, Member>;
+  currentUserId: string | null;
+  isShared: boolean;
+  commentCounts: Map<string, number>;
+}
 
 export interface TaskGroup {
   key: string;
@@ -96,6 +105,7 @@ interface RowProps {
   task: Task;
   projects: Map<string, Project>;
   labels: Map<string, Label>;
+  meta: RowMeta;
   showProject?: boolean;
   selected: boolean;
   today: IsoDate;
@@ -106,7 +116,7 @@ interface RowProps {
 
 /** A sortable/draggable wrapper around TaskItem. A 6px activation distance keeps
  *  plain clicks (open detail) working; only a real drag lifts the row. */
-function DraggableRow({ task, draggable, ...rest }: RowProps) {
+function DraggableRow({ task, draggable, meta, ...rest }: RowProps) {
   const selectTask = useApp((s) => s.selectTask);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -123,6 +133,10 @@ function DraggableRow({ task, draggable, ...rest }: RowProps) {
         task={task}
         projects={rest.projects}
         labels={rest.labels}
+        members={meta.members}
+        currentUserId={meta.currentUserId}
+        isShared={meta.isShared}
+        commentCount={meta.commentCounts.get(task.id) ?? 0}
         showProject={rest.showProject}
         selected={rest.selected}
         today={rest.today}
@@ -156,7 +170,19 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
   const focusedIndex = useApp((s) => s.focusedIndex);
   const selectTask = useApp((s) => s.selectTask);
   const setVisibleTaskIds = useApp((s) => s.setVisibleTaskIds);
+  const user = useApp((s) => s.user);
+  const snapshot = useSnapshot();
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Assignment + comment context, derived once per snapshot for every row.
+  const meta = useMemo<RowMeta>(() => {
+    const members = new Map(snapshot.members.filter((m) => !m.is_deleted).map((m) => [m.id, m]));
+    const commentCounts = new Map<string, number>();
+    for (const c of snapshot.comments) {
+      if (!c.is_deleted) commentCounts.set(c.task_id, (commentCounts.get(c.task_id) ?? 0) + 1);
+    }
+    return { members, currentUserId: user?.id ?? null, isShared: members.size > 1, commentCounts };
+  }, [snapshot.members, snapshot.comments, user?.id]);
 
   const flat = groups.flatMap((g) => g.tasks);
   const idsKey = flat.map((t) => t.id).join(",");
@@ -240,6 +266,7 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
                 task={task}
                 projects={projects}
                 labels={labels}
+                meta={meta}
                 showProject={showProject}
                 selected={selected}
                 today={today}
@@ -255,6 +282,10 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
               task={task}
               projects={projects}
               labels={labels}
+              members={meta.members}
+              currentUserId={meta.currentUserId}
+              isShared={meta.isShared}
+              commentCount={meta.commentCounts.get(task.id) ?? 0}
               showProject={showProject}
               selected={selected}
               today={today}
@@ -314,6 +345,10 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
                     task={activeTask}
                     projects={projects}
                     labels={labels}
+                    members={meta.members}
+                    currentUserId={meta.currentUserId}
+                    isShared={meta.isShared}
+                    commentCount={meta.commentCounts.get(activeTask.id) ?? 0}
                     showProject={showProject}
                     selected={false}
                     today={today}

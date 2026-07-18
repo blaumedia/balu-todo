@@ -5,6 +5,7 @@ export const en = {
   "nav.anytime": "Anytime",
   "nav.someday": "Someday",
   "nav.logbook": "Logbook",
+  "nav.assigned": "Assigned to me",
 
   "section.projects": "Projects",
   "section.thisEvening": "This Evening",
@@ -15,6 +16,7 @@ export const en = {
   "empty.anytime": "Nothing waiting.",
   "empty.someday": "No someday ideas yet.",
   "empty.logbook": "Nothing logged yet.",
+  "empty.assigned": "Nothing assigned to you.",
   "empty.project": "Nothing here yet.",
 
   "sync.synced": "Synced",
@@ -45,6 +47,24 @@ export const en = {
   "detail.reminder": "Remind me",
   "detail.reminderPlaceholder": "e.g. tomorrow 9am",
   "detail.reminderClear": "Clear reminder",
+  "detail.assignee": "Assignee",
+  "detail.assignNobody": "Nobody",
+  "detail.assignMe": "Assign to me",
+
+  "assign.me": "Me",
+
+  "comments.title": "Comments",
+  "comments.empty": "No comments yet.",
+  "comments.placeholder": "Write a comment…",
+  "comments.hint": "Enter to send · Shift+Enter for a new line",
+  "comments.send": "Send",
+  "comments.edit": "Edit comment",
+  "comments.delete": "Delete comment",
+  "comments.save": "Save",
+  "comments.edited": "edited",
+  "comments.deleteConfirm": "Delete this comment?",
+
+  "time.justNow": "just now",
 
   "priority.none": "None",
   "priority.p1": "P1",

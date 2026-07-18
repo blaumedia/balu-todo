@@ -1,4 +1,4 @@
-import type { Project, Task } from "@balu/domain";
+import type { Comment, Project, Task } from "@balu/domain";
 
 let seq = 0;
 export function makeTask(over: Partial<Task> & { id: string }): Task {
@@ -44,6 +44,19 @@ export function makeProject(over: Partial<Project> & { id: string }): Project {
   };
 }
 
+export function makeComment(over: Partial<Comment> & { id: string }): Comment {
+  return {
+    workspace_id: "w1",
+    task_id: "t1",
+    author_id: "u1",
+    body: "comment",
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+    is_deleted: false,
+    ...over,
+  };
+}
+
 /**
  * A minimal in-memory sync server: resolves temp_ids, echoes created objects,
  * and records every request body so tests can assert batching / rewrites.
@@ -58,11 +71,11 @@ export function makeServer() {
     const req = JSON.parse(init.body);
     calls.push(req);
     const mapping: Record<string, string> = {};
-    const objects: any = { projects: [], sections: [], tasks: [], labels: [], members: [] };
+    const objects: any = { projects: [], sections: [], tasks: [], labels: [], comments: [], members: [] };
 
     for (const cmd of req.commands ?? []) {
       const args = { ...(cmd.args ?? {}) };
-      for (const k of ["project_id", "section_id", "parent_task_id", "id", "assigned_to"]) {
+      for (const k of ["project_id", "section_id", "parent_task_id", "id", "assigned_to", "task_id"]) {
         if (typeof args[k] === "string" && tempMap[args[k]]) args[k] = tempMap[args[k]];
       }
       if (cmd.type === "project_add") {
@@ -75,6 +88,11 @@ export function makeServer() {
         tempMap[cmd.temp_id] = real;
         mapping[cmd.temp_id] = real;
         objects.tasks.push(makeTask({ id: real, title: args.title, project_id: args.project_id ?? null }));
+      } else if (cmd.type === "comment_add") {
+        const real = `C${++counter}`;
+        tempMap[cmd.temp_id] = real;
+        mapping[cmd.temp_id] = real;
+        objects.comments.push(makeComment({ id: real, task_id: args.task_id ?? null, body: args.body }));
       }
     }
 

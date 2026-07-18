@@ -74,6 +74,13 @@ export interface Label extends SyncBase {
   sort_order: number;
 }
 
+/** Per-task comment thread entry (contract §3.4, v1.2). */
+export interface Comment extends SyncBase {
+  task_id: string;
+  author_id: string;
+  body: string;
+}
+
 export interface Member extends SyncBase {
   /** `id` equals the user id (contract §3.5). */
   name: string;
@@ -170,7 +177,27 @@ export type CommandType =
   | "task_reorder"
   | "label_add"
   | "label_update"
-  | "label_delete";
+  | "label_delete"
+  | "comment_add"
+  | "comment_update"
+  | "comment_delete";
+
+// ── Comment command args (contract §5.4, v1.2) ────────────────────────
+
+/** `comment_add` args — `task_id` may be a `temp_id` (contract §5.3). */
+export interface CommentAddArgs {
+  task_id: string;
+  body: string;
+}
+/** `comment_update` args — author only (contract §3.4). */
+export interface CommentUpdateArgs {
+  id: string;
+  body: string;
+}
+/** `comment_delete` args — author or admin+ (contract §3.4). */
+export interface CommentDeleteArgs {
+  id: string;
+}
 
 /** A durable, queued command. `uuid` is the idempotency key (contract §5.1). */
 export interface SyncCommand {
@@ -203,6 +230,7 @@ export interface SyncResponse {
   sections: Section[];
   tasks: Task[];
   labels: Label[];
+  comments: Comment[];
   members: Member[];
 }
 
@@ -212,6 +240,7 @@ export type SmartList =
   | "upcoming"
   | "anytime"
   | "someday"
-  | "logbook";
+  | "logbook"
+  | "assigned";
 
 export type SyncStatus = "synced" | "syncing" | "offline" | "error";

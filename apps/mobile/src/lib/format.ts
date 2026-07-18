@@ -1,7 +1,7 @@
 // Calm relative date labels (DESIGN §6). Manual name tables per locale instead
 // of Intl.DateTimeFormat — Hermes' Intl timezone support is uneven across
 // platforms, and we only need de/en.
-import { addDaysISO, compareISO, diffDaysISO, dowISO, type IsoDate, type Locale } from '@balu/domain';
+import { addDaysISO, compareISO, diffDaysISO, dowISO, type IsoDate, type IsoDateTime, type Locale } from '@balu/domain';
 import type { TranslationKey } from '../i18n';
 
 export type DateTone = 'today' | 'overdue' | 'future';
@@ -48,6 +48,29 @@ export function dayMonth(iso: IsoDate, locale: Locale): string {
 export function monthLong(iso: IsoDate, locale: Locale): string {
   const { y, m } = parts(iso);
   return `${MONTH_LONG[locale][m - 1]} ${y}`;
+}
+
+/**
+ * Compact relative label for a past timestamp (comment meta). Under a minute
+ * → "just now"; then Xm / Xh / Xd; beyond a week falls back to the date.
+ */
+export function relativeTime(
+  iso: IsoDateTime,
+  nowMs: number,
+  locale: Locale,
+  t: (k: TranslationKey) => string,
+): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+  const sec = Math.max(0, Math.floor((nowMs - then) / 1000));
+  if (sec < 60) return t('comment.justNow');
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d`;
+  return dayMonth(iso.slice(0, 10), locale);
 }
 
 /** Human, calm relative label for a date (DESIGN §6). */

@@ -8,6 +8,7 @@ export const de: Record<TranslationKey, string> = {
   "nav.anytime": "Irgendwann",
   "nav.someday": "Vielleicht",
   "nav.logbook": "Logbuch",
+  "nav.assigned": "Mir zugewiesen",
 
   "section.projects": "Projekte",
   "section.thisEvening": "Heute Abend",
@@ -18,6 +19,7 @@ export const de: Record<TranslationKey, string> = {
   "empty.anytime": "Nichts wartet.",
   "empty.someday": "Noch keine Ideen.",
   "empty.logbook": "Noch nichts protokolliert.",
+  "empty.assigned": "Dir ist nichts zugewiesen.",
   "empty.project": "Hier ist noch nichts.",
 
   "sync.synced": "Synchron",
@@ -48,6 +50,24 @@ export const de: Record<TranslationKey, string> = {
   "detail.reminder": "Erinnere mich",
   "detail.reminderPlaceholder": "z. B. morgen 9 Uhr",
   "detail.reminderClear": "Erinnerung löschen",
+  "detail.assignee": "Zuständig",
+  "detail.assignNobody": "Niemand",
+  "detail.assignMe": "Mir zuweisen",
+
+  "assign.me": "Ich",
+
+  "comments.title": "Kommentare",
+  "comments.empty": "Noch keine Kommentare.",
+  "comments.placeholder": "Kommentar schreiben…",
+  "comments.hint": "Enter zum Senden · Shift+Enter für neue Zeile",
+  "comments.send": "Senden",
+  "comments.edit": "Kommentar bearbeiten",
+  "comments.delete": "Kommentar löschen",
+  "comments.save": "Speichern",
+  "comments.edited": "bearbeitet",
+  "comments.deleteConfirm": "Diesen Kommentar löschen?",
+
+  "time.justNow": "gerade eben",
 
   "priority.none": "Keine",
   "priority.p1": "P1",

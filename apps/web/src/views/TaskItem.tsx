@@ -1,11 +1,12 @@
 import { useState, type AnimationEvent } from "react";
-import type { IsoDate, Label, Locale, Project, Task } from "@balu/domain";
+import type { IsoDate, Label, Locale, Member, Project, Task } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
 import { relativeDate, type DateTone } from "../lib/format.js";
 import type { TranslationKey } from "../i18n/index.js";
 import { Checkbox } from "../components/Checkbox.js";
 import { PriorityFlag } from "../components/PriorityFlag.js";
 import { Icon } from "../components/Icon.js";
+import { AssigneeChip } from "../components/AssigneeChip.js";
 
 const DATE_TONE: Record<DateTone, string> = {
   today: "var(--accent)",
@@ -17,6 +18,11 @@ export interface TaskItemProps {
   task: Task;
   projects: Map<string, Project>;
   labels: Map<string, Label>;
+  members?: Map<string, Member>;
+  currentUserId?: string | null;
+  /** Workspace has more than one member — assignment is meaningful. */
+  isShared?: boolean;
+  commentCount?: number;
   showProject?: boolean;
   selected?: boolean;
   today: IsoDate;
@@ -25,7 +31,7 @@ export interface TaskItemProps {
   onOpen: () => void;
 }
 
-export function TaskItem({ task, projects, labels, showProject = false, selected = false, today, locale, t, onOpen }: TaskItemProps) {
+export function TaskItem({ task, projects, labels, members, currentUserId, isShared = false, commentCount = 0, showProject = false, selected = false, today, locale, t, onOpen }: TaskItemProps) {
   const [hover, setHover] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const isCompleted = task.completed_at != null;
@@ -49,6 +55,10 @@ export function TaskItem({ task, projects, labels, showProject = false, selected
   }
 
   const project = task.project_id ? projects.get(task.project_id) : undefined;
+  const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
+  const assignedToMe = task.assigned_to != null && task.assigned_to === currentUserId;
+  // Chip when assigned to someone else, or to me in a shared workspace.
+  const showAssignee = assignee != null && (!assignedToMe || isShared);
   const start = task.start_date ? relativeDate(task.start_date, today, locale, t) : null;
   const deadline = task.deadline ? relativeDate(task.deadline, today, locale, t) : null;
   const taskLabels = task.label_ids.map((id) => labels.get(id)).filter((l): l is Label => l != null && !l.is_deleted);
@@ -115,6 +125,13 @@ export function TaskItem({ task, projects, labels, showProject = false, selected
         )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+        {commentCount > 0 && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: "var(--text-secondary-size)", color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+            <Icon name="message-circle" size={13} />
+            {commentCount}
+          </span>
+        )}
+        {showAssignee && assignee && <AssigneeChip name={assignee.name} me={assignedToMe} meLabel={t("assign.me")} />}
         {priority && <PriorityFlag priority={priority} />}
         {showProject && project && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--text-secondary-size)", color: "var(--text-secondary)" }}>

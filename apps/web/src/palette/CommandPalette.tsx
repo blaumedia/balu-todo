@@ -61,6 +61,7 @@ export function CommandPalette() {
   const snapshot = useSnapshot();
   const writable = canWrite(useMyRole());
   const today = todayLocalISO();
+  const shared = snapshot.members.filter((m) => !m.is_deleted).length > 1;
 
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -170,6 +171,18 @@ export function CommandPalette() {
         label: t("cmd.goto").replace("{name}", t(key)),
         run: () => {
           setView({ kind: "list", list });
+          close();
+        },
+      });
+    }
+    // "Assigned to me" follows the sidebar's shared-workspace visibility.
+    if (shared) {
+      commands.push({
+        id: "cmd:go:assigned",
+        icon: "user-check",
+        label: t("cmd.goto").replace("{name}", t("nav.assigned")),
+        run: () => {
+          setView({ kind: "list", list: "assigned" });
           close();
         },
       });

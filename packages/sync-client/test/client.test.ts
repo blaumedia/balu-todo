@@ -77,6 +77,68 @@ describe("optimistic apply", () => {
   });
 });
 
+describe("comments (v1.2)", () => {
+  it("applies comment_add optimistically against a task", () => {
+    const c = track(createSyncClient(base()));
+    const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "T" } });
+    const { temp_id: cm } = c.mutate({ type: "comment_add", args: { task_id: t, body: "hi" } });
+    const comments = c.getSnapshot().comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.id).toBe(cm);
+    expect(comments[0]!.task_id).toBe(t);
+    expect(comments[0]!.body).toBe("hi");
+    expect(comments[0]!.author_id).toBe("u1");
+  });
+
+  it("comment_update edits the body; comment_delete soft-removes it from the snapshot", () => {
+    const c = track(createSyncClient(base()));
+    const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "T" } });
+    const { temp_id: cm } = c.mutate({ type: "comment_add", args: { task_id: t, body: "draft" } });
+    c.mutate({ type: "comment_update", args: { id: cm, body: "final" } });
+    expect(c.getSnapshot().comments[0]!.body).toBe("final");
+    c.mutate({ type: "comment_delete", args: { id: cm } });
+    expect(c.getSnapshot().comments[0]!.is_deleted).toBe(true);
+  });
+
+  it("task_delete cascades to the task's comments", () => {
+    const c = track(createSyncClient(base()));
+    const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "T" } });
+    c.mutate({ type: "comment_add", args: { task_id: t, body: "a" } });
+    c.mutate({ type: "comment_add", args: { task_id: t, body: "b" } });
+    c.mutate({ type: "task_delete", args: { id: t } });
+    expect(c.getSnapshot().comments.every((x) => x.is_deleted)).toBe(true);
+  });
+
+  it("rewrites a comment's temp task_id to the real id after flush", async () => {
+    const server = makeServer();
+    // maxBatch 1 forces task_add and comment_add into separate requests.
+    const c = track(createSyncClient(base({ fetch: server.fetch, maxBatch: 1 })));
+    const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "T" } });
+    c.mutate({ type: "comment_add", args: { task_id: t, body: "hi" } });
+    await c.flush();
+    const commentReq = server.calls[1]!.commands[0]!;
+    expect(commentReq.args.task_id).toBe("T1"); // real id, not the temp id
+    const snap = c.getSnapshot();
+    expect(snap.comments[0]!.task_id).toBe("T1");
+    expect(snap.comments.map((x) => x.id)).toEqual(["C2"]);
+  });
+
+  it("keeps comments durable across client re-instantiation", async () => {
+    const storage = memoryKV();
+    const offline: typeof fetch = (async () => {
+      throw new TypeError("network down");
+    }) as unknown as typeof fetch;
+    const c1 = track(createSyncClient(base({ storage, fetch: offline })));
+    const { temp_id: t } = c1.mutate({ type: "task_add", args: { title: "T" } });
+    c1.mutate({ type: "comment_add", args: { task_id: t, body: "persist me" } });
+    await c1.flush();
+
+    const c2 = track(createSyncClient(base({ storage, fetch: offline })));
+    await c2.hydrate();
+    expect(c2.getSnapshot().comments.map((x) => x.body)).toEqual(["persist me"]);
+  });
+});
+
 describe("flush + batching", () => {
   it("splits > maxBatch commands across multiple requests", async () => {
     const server = makeServer();

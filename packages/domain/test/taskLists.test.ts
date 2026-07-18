@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAnytime,
+  isAssignedToMe,
   isInbox,
   isLogbook,
   isSomeday,
@@ -176,6 +177,44 @@ describe("selectList Logbook ordering", () => {
     const c = task({ completed_at: "2026-07-21T09:00:00Z" });
     const out = selectList([a, b, c], "logbook", TODAY);
     expect(out.map((t) => t.id)).toEqual([b.id, a.id, c.id]);
+  });
+});
+
+describe("isAssignedToMe", () => {
+  it("matches an open task assigned to the current user", () => {
+    expect(isAssignedToMe(task({ assigned_to: "u1" }), "u1")).toBe(true);
+  });
+  it("excludes tasks assigned to someone else", () => {
+    expect(isAssignedToMe(task({ assigned_to: "u2" }), "u1")).toBe(false);
+  });
+  it("excludes unassigned tasks", () => {
+    expect(isAssignedToMe(task({ assigned_to: null }), "u1")).toBe(false);
+  });
+  it("excludes completed tasks", () => {
+    expect(isAssignedToMe(task({ assigned_to: "u1", completed_at: "2026-07-22T00:00:00Z" }), "u1")).toBe(false);
+  });
+  it("excludes subtasks", () => {
+    expect(isAssignedToMe(task({ assigned_to: "u1", parent_task_id: "p" }), "u1")).toBe(false);
+  });
+  it("false when no user id is known", () => {
+    expect(isAssignedToMe(task({ assigned_to: "u1" }), null)).toBe(false);
+  });
+});
+
+describe("selectList Assigned ordering", () => {
+  it("deadline ascending with nulls last, then priority, then sort_order", () => {
+    const noDeadlineP1 = task({ assigned_to: "u1", deadline: null, priority: 1, sort_order: 100 });
+    const noDeadlineP3 = task({ assigned_to: "u1", deadline: null, priority: 3, sort_order: 50 });
+    const early = task({ assigned_to: "u1", deadline: "2026-07-25", sort_order: 9000 });
+    const late = task({ assigned_to: "u1", deadline: "2026-08-10", sort_order: 10 });
+    const other = task({ assigned_to: "u2", deadline: "2026-07-24" });
+    const out = selectList([noDeadlineP1, other, late, noDeadlineP3, early], "assigned", TODAY, "u1");
+    expect(out.map((t) => t.id)).toEqual([
+      early.id, // earliest deadline
+      late.id, // later deadline
+      noDeadlineP1.id, // nulls last, then priority P1 before P3
+      noDeadlineP3.id,
+    ]);
   });
 });
 
