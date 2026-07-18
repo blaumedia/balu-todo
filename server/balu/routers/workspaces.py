@@ -27,8 +27,12 @@ def _parse_ws_id(workspace_id: str) -> uuid.UUID:
 
 def get_membership(db: Session, workspace_id: uuid.UUID, user_id: uuid.UUID) -> Membership:
     m = db.get(Membership, {"workspace_id": workspace_id, "user_id": user_id})
-    if m is None or m.is_deleted:
+    if m is None:
+        # Never a member: don't reveal whether the workspace exists.
         raise not_found("workspace not found")
+    if m.is_deleted:
+        # Removed member: access is revoked immediately (§7).
+        raise forbidden("you are no longer a member of this workspace")
     return m
 
 

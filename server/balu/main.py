@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,7 +15,10 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
 from .routers import auth as auth_router
+from .routers import channels as channels_router
+from .routers import invites as invites_router
 from .routers import me as me_router
+from .routers import members as members_router
 from .routers import sync as sync_router
 from .routers import workspaces as workspaces_router
 
@@ -27,7 +31,26 @@ async def lifespan(app: FastAPI):
         from .migrate import run_migrations
 
         run_migrations()
-    yield
+
+    settings = get_settings()
+    stop_event: asyncio.Event | None = None
+    reminder_task: asyncio.Task | None = None
+    if settings.reminders_enabled:
+        from .reminders import reminder_loop
+
+        stop_event = asyncio.Event()
+        reminder_task = asyncio.create_task(reminder_loop(stop_event))
+
+    try:
+        yield
+    finally:
+        if stop_event is not None and reminder_task is not None:
+            stop_event.set()
+            reminder_task.cancel()
+            try:
+                await reminder_task
+            except asyncio.CancelledError:
+                pass
 
 
 def create_app() -> FastAPI:
@@ -68,6 +91,9 @@ def create_app() -> FastAPI:
     api.include_router(auth_router.router)
     api.include_router(me_router.router)
     api.include_router(workspaces_router.router)
+    api.include_router(invites_router.router)
+    api.include_router(members_router.router)
+    api.include_router(channels_router.router)
     api.include_router(sync_router.router)
     app.mount("/api/v1", api)
 

@@ -49,6 +49,10 @@ class Task(Base):
     someday: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     deadline: Mapped[date | None] = mapped_column(Date, nullable=True)
     reminder_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Server-internal: when the reminder was delivered. NEVER appears in sync payloads.
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     recurrence: Mapped[str | None] = mapped_column(String(200), nullable=True)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     assigned_to: Mapped[uuid.UUID | None] = mapped_column(

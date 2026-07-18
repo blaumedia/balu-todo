@@ -199,6 +199,8 @@ def _apply_task_fields(ctx: Ctx, task: Task, args: dict, *, creating: bool) -> N
         task.deadline = _parse_date(args.get("deadline"), "deadline")
     if "reminder_at" in args:
         task.reminder_at = _parse_dt(args.get("reminder_at"), "reminder_at")
+        # Re-arm delivery: a changed/cleared reminder must be able to fire again.
+        task.reminder_sent_at = None
     if "recurrence" in args:
         task.recurrence = _validate_recurrence(args.get("recurrence"))
     if "priority" in args:

@@ -42,3 +42,16 @@ def forbidden(message: str = "Forbidden") -> ApiError:
 
 def validation_error(message: str = "Validation error") -> ApiError:
     return ApiError(422, "validation_error", message)
+
+
+def invalid_invite_token() -> ApiError:
+    # §7: invite accept with an unknown/revoked/expired token → 400 invalid_token.
+    return ApiError(400, "invalid_token", "Invite is invalid, revoked, or expired")
+
+
+def last_owner() -> ApiError:
+    return ApiError(400, "last_owner", "A workspace must keep at least one owner")
+
+
+def channel_unavailable(message: str = "Channel transport is not configured") -> ApiError:
+    return ApiError(400, "channel_unavailable", message)
