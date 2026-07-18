@@ -2,17 +2,18 @@
 // floats above the tab bar; reanimated slide-in; drag the handle down to dismiss;
 // keyboard-aware for the quick-add / detail inputs.
 //
-// Keyboard handling is done with explicit Keyboard listeners padding the sheet
-// instead of KeyboardAvoidingView: KAV inside a Modal is unreliable — it ignores
-// the keyboard entirely on Android when the modal is statusBarTranslucent, and
-// mis-measures inside modals on recent iOS.
+// Keyboard handling: KeyboardAvoidingView is unreliable inside a Modal, and RN's
+// JS Keyboard events can mis-report there too. So the sheet padding is driven by
+// Reanimated's native keyboard tracker, with the JS Keyboard events kept as a
+// fallback — whichever mechanism reports a height wins.
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Keyboard, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   SlideInDown,
+  useAnimatedKeyboard,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -29,34 +30,34 @@ export interface BottomSheetProps {
   full?: boolean;
 }
 
-function useKeyboardHeight(): number {
-  const [height, setHeight] = useState(0);
-
-  useEffect(() => {
-    // willShow fires early enough on iOS for the padding to animate with the
-    // keyboard; Android only has did* events.
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, (e) => setHeight(e.endCoordinates.height));
-    const hide = Keyboard.addListener(hideEvent, () => setHeight(0));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-
-  return height;
-}
-
 export function BottomSheet({ visible, onClose, children, full }: BottomSheetProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const translateY = useSharedValue(0);
-  const keyboardHeight = useKeyboardHeight();
+  const keyboard = useAnimatedKeyboard({
+    isStatusBarTranslucentAndroid: true,
+    isNavigationBarTranslucentAndroid: true,
+  });
+  const keyboardJS = useSharedValue(0);
 
   useEffect(() => {
     if (visible) translateY.value = 0;
   }, [visible, translateY]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, (e) => {
+      keyboardJS.value = e.endCoordinates.height;
+    });
+    const hide = Keyboard.addListener(hideEvent, () => {
+      keyboardJS.value = 0;
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, [keyboardJS]);
 
   const pan = Gesture.Pan()
     .onUpdate((e) => {
@@ -70,11 +71,16 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
       }
     });
 
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
-
-  // With the keyboard up, its height replaces the home-indicator inset (the
-  // keyboard already covers that area).
-  const bottomPad = keyboardHeight > 0 ? keyboardHeight + space.s3 : insets.bottom + space.s4;
+  const insetBottom = insets.bottom;
+  const sheetStyle = useAnimatedStyle(() => {
+    const kb = Math.max(keyboard.height.value, keyboardJS.value);
+    return {
+      transform: [{ translateY: translateY.value }],
+      // With the keyboard up, its height replaces the home-indicator inset
+      // (the keyboard already covers that area).
+      paddingBottom: kb > 0 ? kb + space.s3 : insetBottom + space.s4,
+    };
+  });
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -88,7 +94,6 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
               {
                 backgroundColor: theme.surfaceRaised,
                 borderColor: theme.border,
-                paddingBottom: bottomPad,
                 maxHeight: full ? '92%' : '88%',
                 minHeight: full ? '70%' : undefined,
               },
