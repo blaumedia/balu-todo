@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..db import get_db, get_sessionmaker
+from ..events import EventSender, get_event_sender
 from ..models import User
 from ..schemas.sync import SyncRequest, SyncResponse
 from ..sync.commands import process_commands
@@ -22,6 +23,7 @@ def sync(
     body: SyncRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    event_sender: EventSender = Depends(get_event_sender),
 ) -> SyncResponse:
     ws_id = _parse_ws_id(workspace_id)
     membership = get_membership(db, ws_id, user.id)
@@ -29,7 +31,7 @@ def sync(
     # Apply commands first (each in its own transaction via the sessionmaker).
     sm = get_sessionmaker()
     sync_status, temp_id_mapping = process_commands(
-        sm, ws_id, user.id, membership.role, body.commands
+        sm, ws_id, user.id, membership.role, body.commands, event_sender=event_sender
     )
 
     # Then read the (post-command) changes for this client.
@@ -47,5 +49,6 @@ def sync(
         sections=changes["sections"],
         tasks=changes["tasks"],
         labels=changes["labels"],
+        comments=changes["comments"],
         members=changes["members"],
     )

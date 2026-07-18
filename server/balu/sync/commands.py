@@ -9,14 +9,22 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..events import (
+    AssignmentEvent,
+    CommentEvent,
+    Event,
+    EventSender,
+    dispatch_events,
+)
 from ..models import (
+    Comment,
     Label,
     Membership,
     Project,
@@ -26,6 +34,7 @@ from ..models import (
     TempIdMap,
     task_labels,
 )
+from ..notifications import send_to_channel
 from .engine import ROLE_RANK, bump_version
 from .recurrence import next_occurrence, parse_recurrence
 
@@ -35,7 +44,7 @@ VALID_COLORS = {
 }
 
 # Keys within command args that may carry an id or temp_id reference.
-_REF_KEYS = ("id", "project_id", "section_id", "parent_task_id")
+_REF_KEYS = ("id", "project_id", "section_id", "parent_task_id", "task_id")
 
 
 class CommandError(Exception):
@@ -52,6 +61,7 @@ class Ctx:
     user_id: uuid.UUID
     role: str
     temp_map: dict[str, str]  # in-request + persisted temp_id resolution cache
+    events: list[Event] = field(default_factory=list)  # fire-and-forget, dispatched post-commit
 
     def bump(self) -> int:
         return bump_version(self.session, self.workspace_id)
@@ -73,6 +83,15 @@ def _require_str(args: dict, key: str) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value.strip():
         raise CommandError("invalid_args", f"{key} is required")
+    return value
+
+
+def _require_body(args: dict) -> str:
+    value = args.get("body")
+    if not isinstance(value, str) or not value.strip():
+        raise CommandError("invalid_args", "body is required")
+    if len(value) > 5000:
+        raise CommandError("invalid_args", "body must be at most 5000 characters")
     return value
 
 
@@ -167,6 +186,13 @@ def _get_label(ctx: Ctx, ref: Any) -> Label:
     return obj
 
 
+def _get_comment(ctx: Ctx, ref: Any) -> Comment:
+    obj = ctx.session.get(Comment, _as_uuid(ref))
+    if obj is None or obj.is_deleted or obj.workspace_id != ctx.workspace_id:
+        raise CommandError("not_found", "comment not found")
+    return obj
+
+
 def _is_member(ctx: Ctx, user_id: uuid.UUID) -> bool:
     m = ctx.session.get(Membership, {"workspace_id": ctx.workspace_id, "user_id": user_id})
     return m is not None and not m.is_deleted
@@ -220,6 +246,13 @@ def _apply_task_fields(ctx: Ctx, task: Task, args: dict, *, creating: bool) -> N
     # someday forces start_date null (mutually exclusive)
     if task.someday:
         task.start_date = None
+
+
+def _record_assignment(ctx: Ctx, task: Task, previous: uuid.UUID | None) -> None:
+    """Queue an assignment notification when a task is assigned to someone new (not self)."""
+    new = task.assigned_to
+    if new is not None and new != previous and new != ctx.user_id:
+        ctx.events.append(AssignmentEvent(task_id=task.id, assignee_id=new))
 
 
 def _check_parent(ctx: Ctx, parent_ref: Any) -> uuid.UUID | None:
@@ -355,6 +388,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
         version=version,
     )
     _apply_task_fields(ctx, task, args, creating=True)
+    _record_assignment(ctx, task, previous=None)
     sort_order = args.get("sort_order")
     if sort_order is None:
         if parent_task_id is not None:
@@ -370,7 +404,9 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
 
 def h_task_update(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
+    previous_assignee = task.assigned_to
     _apply_task_fields(ctx, task, args, creating=False)
+    _record_assignment(ctx, task, previous=previous_assignee)
     task.version = ctx.bump()
     return {}
 
@@ -437,6 +473,16 @@ def h_task_delete(ctx: Ctx, args: dict) -> dict:
     for st in subtasks:
         st.is_deleted = True
         st.version = version
+    # Cascade to comments of the task and its subtasks (§3.4).
+    task_ids = [task.id, *(st.id for st in subtasks)]
+    comments = ctx.session.execute(
+        select(Comment).where(
+            Comment.task_id.in_(task_ids), Comment.is_deleted.is_(False)
+        )
+    ).scalars().all()
+    for c in comments:
+        c.is_deleted = True
+        c.version = version
     return {}
 
 
@@ -519,6 +565,43 @@ def h_label_delete(ctx: Ctx, args: dict) -> dict:
     return {}
 
 
+def h_comment_add(ctx: Ctx, args: dict) -> dict:
+    task = _get_task(ctx, args.get("task_id"))
+    body = _require_body(args)
+    version = ctx.bump()
+    comment = Comment(
+        id=uuid.uuid4(),
+        workspace_id=ctx.workspace_id,
+        task_id=task.id,
+        author_id=ctx.user_id,
+        body=body,
+        version=version,
+    )
+    ctx.session.add(comment)
+    ctx.events.append(CommentEvent(task_id=task.id, comment_id=comment.id))
+    return {"object_id": comment.id}
+
+
+def h_comment_update(ctx: Ctx, args: dict) -> dict:
+    comment = _get_comment(ctx, args.get("id"))
+    if comment.author_id != ctx.user_id:
+        raise CommandError("forbidden", "only the author can edit a comment")
+    comment.body = _require_body(args)
+    comment.version = ctx.bump()
+    return {}
+
+
+def h_comment_delete(ctx: Ctx, args: dict) -> dict:
+    comment = _get_comment(ctx, args.get("id"))
+    is_author = comment.author_id == ctx.user_id
+    is_admin = ROLE_RANK.get(ctx.role, 0) >= ROLE_RANK["admin"]
+    if not (is_author or is_admin):
+        raise CommandError("forbidden", "only the author or an admin can delete a comment")
+    comment.is_deleted = True
+    comment.version = ctx.bump()
+    return {}
+
+
 HANDLERS: dict[str, Callable[[Ctx, dict], dict]] = {
     "project_add": h_project_add,
     "project_update": h_project_update,
@@ -536,9 +619,12 @@ HANDLERS: dict[str, Callable[[Ctx, dict], dict]] = {
     "label_add": h_label_add,
     "label_update": h_label_update,
     "label_delete": h_label_delete,
+    "comment_add": h_comment_add,
+    "comment_update": h_comment_update,
+    "comment_delete": h_comment_delete,
 }
 
-_ADD_COMMANDS = {"project_add", "section_add", "task_add", "label_add"}
+_ADD_COMMANDS = {"project_add", "section_add", "task_add", "label_add", "comment_add"}
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +673,7 @@ def process_commands(
     user_id: uuid.UUID,
     role: str,
     commands: list,
+    event_sender: EventSender = send_to_channel,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Apply commands in order, each in its own transaction.
 
@@ -666,6 +753,8 @@ def process_commands(
             )
             session.commit()
             sync_status[str(cmd_uuid)] = status
+            # Fire-and-forget: post-commit so rows are durable; never affects status.
+            dispatch_events(sm, user_id, ctx.events, event_sender)
         except CommandError as exc:
             session.rollback()
             status = {"error_code": exc.code, "error": exc.message}

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Any
 
-from ..models import Membership, Project, Section, Task, User
+from ..models import Comment, Membership, Project, Section, Task, User
 
 
 def iso_dt(value: datetime | None) -> str | None:
@@ -88,6 +88,19 @@ def serialize_label(label) -> dict[str, Any]:
         "created_at": iso_dt(label.created_at),
         "updated_at": iso_dt(label.updated_at),
         "is_deleted": label.is_deleted,
+    }
+
+
+def serialize_comment(c: Comment) -> dict[str, Any]:
+    return {
+        "id": str(c.id),
+        "workspace_id": str(c.workspace_id),
+        "task_id": str(c.task_id),
+        "author_id": str(c.author_id) if c.author_id else None,
+        "body": c.body,
+        "created_at": iso_dt(c.created_at),
+        "updated_at": iso_dt(c.updated_at),
+        "is_deleted": c.is_deleted,
     }
 
 

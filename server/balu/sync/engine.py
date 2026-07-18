@@ -9,8 +9,9 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ..models import Label, Membership, Project, Section, Task, User
+from ..models import Comment, Label, Membership, Project, Section, Task, User
 from .serialize import (
+    serialize_comment,
     serialize_label,
     serialize_member,
     serialize_project,
@@ -84,6 +85,7 @@ def collect_changes(
     sections = [serialize_section(s) for s in fetch(Section)]
     tasks = [serialize_task(t) for t in fetch(Task)]
     labels = [serialize_label(label) for label in fetch(Label)]
+    comments = [serialize_comment(c) for c in fetch(Comment)]
 
     mstmt = select(Membership, User).join(User, User.id == Membership.user_id).where(
         Membership.workspace_id == workspace_id
@@ -99,6 +101,7 @@ def collect_changes(
         "sections": sections,
         "tasks": tasks,
         "labels": labels,
+        "comments": comments,
         "members": members,
     }
 

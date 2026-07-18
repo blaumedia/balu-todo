@@ -96,6 +96,9 @@ def create_app() -> FastAPI:
     api.include_router(channels_router.router)
     api.include_router(sync_router.router)
     app.mount("/api/v1", api)
+    # Expose the API sub-app so tests can install dependency overrides on it
+    # (overrides on the parent app do not reach a mounted sub-application).
+    app.state.api = api
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
