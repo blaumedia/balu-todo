@@ -144,7 +144,23 @@ strictly after `max(start_date, today)`; if `deadline` was set, it moves by the 
 delta; the task stays open. (Completion history for recurring tasks is a v2 concern.)
 `task_complete` on a non-recurring task sets `completed_at`/`completed_by`.
 
-### 3.4 `label`
+### 3.4 `comment` — v1.2
+
+Per-task comment threads, synced like every other resource.
+
+```json
+{"id": "…", "workspace_id": "…", "task_id": "…", "author_id": "…",
+ "body": "Ist erledigt, war aber knapp.",
+ "created_at": "…", "updated_at": "…", "is_deleted": false}
+```
+
+- `body`: plain text, 1–5000 chars (client may render minimal markdown later).
+- Ordering: `created_at` ascending within a task.
+- Deleting a task soft-deletes its comments (cascade, versions bumped).
+- Roles: `viewer` reads but cannot write; `member`+ can comment; edit/delete only by
+  the author (admins may delete).
+
+### 3.5 `label`
 
 ```json
 {"id": "…", "workspace_id": "…", "name": "privat", "color": "amber",
@@ -154,7 +170,7 @@ delta; the task stays open. (Completion history for recurring tasks is a v2 conc
 Label names unique per workspace case-insensitively (`label_add` with an existing name →
 error `name_taken`).
 
-### 3.5 `member` (read-only via sync; managed via REST later)
+### 3.6 `member` (read-only via sync; managed via REST + invites §7)
 
 ```json
 {"id": "<user_id>", "workspace_id": "…", "name": "Dennis", "email": "…",
@@ -174,6 +190,9 @@ Defined here so every client and the server agree exactly. `open` means
 | **Anytime** | open ∧ `!someday` ∧ `start_date == null` ∧ `project_id != null` | project order, then `sort_order` |
 | **Someday** | open ∧ `someday` | `sort_order` |
 | **Logbook** | `completed_at != null` ∧ `!is_deleted` | `completed_at` desc, grouped by day |
+| **Assigned to me** (v1.2) | open ∧ `assigned_to == <current user>` | deadline asc (nulls last), then priority, then `sort_order` |
+
+Clients show "Assigned to me" only when the workspace has more than one member.
 
 Subtasks never appear in smart lists independently in v1 (only under their parent).
 The Today view additionally splits into "Today" and "This Evening" via `evening`.
@@ -213,7 +232,8 @@ effects of those commands) are returned.
   "full_sync": false,
   "sync_status": {"9f1e…": "ok", "8c2d…": {"error_code": "not_found", "error": "…"}},
   "temp_id_mapping": {"tmp-a": "3d0f…"},
-  "projects": [...], "sections": [...], "tasks": [...], "labels": [...], "members": [...]
+  "projects": [...], "sections": [...], "tasks": [...], "labels": [...],
+  "comments": [...], "members": [...]
 }
 ```
 
@@ -255,9 +275,13 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
 | `label_delete` | `id` — removed from all tasks |
+| `comment_add` (v1.2) | `temp_id`, `task_id`, `body` |
+| `comment_update` (v1.2) | `id`, `body` — author only |
+| `comment_delete` (v1.2) | `id` — author or admin+ |
 
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
-(id/temp_id unknown or deleted), `forbidden` (viewer role), `name_taken` (labels).
+(id/temp_id unknown or deleted), `forbidden` (viewer role; or comment edit/delete by
+a non-author non-admin), `name_taken` (labels).
 
 ### 5.5 Conflict policy (documented behavior, tested)
 
@@ -331,6 +355,16 @@ the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal
 sync payloads); changing `reminder_at` re-arms it. Message: task title, project name,
 deadline if set. Mobile clients additionally schedule **local** notifications from their
 replica; with external channels configured this can duplicate — accepted in v1.
+
+**Event notifications (v1.2)** — sent through the same per-user channels, fire-and-forget
+from the command handlers (failures logged, never fail the command):
+
+- **Assignment**: `task_add`/`task_update`/`task_move` that sets `assigned_to` to a user
+  other than the actor → notify the new assignee: actor name, task title, project,
+  deadline if set.
+- **Comment**: `comment_add` → notify the task's participants (assignee, task creator,
+  prior comment authors) minus the comment's author: actor name, task title, body.
+- No notification for self-actions. No batching/digest in v1.2 (accepted).
 
 ## 9. Static hosting & CORS
 
