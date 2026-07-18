@@ -4,28 +4,35 @@ packages:
 allowBuilds:
   esbuild: true
 minimumReleaseAgeExclude:
-  - '@expo/cli@57.0.10'
-  - '@expo/config-plugins@57.0.6'
-  - '@expo/config@57.0.6'
-  - '@expo/fingerprint@0.20.6'
-  - '@expo/image-utils@0.11.4'
-  - '@expo/metro-config@57.0.7'
-  - '@expo/metro-runtime@57.0.7'
-  - '@expo/prebuild-config@57.0.9'
-  - '@expo/require-utils@57.0.4'
-  - '@expo/router-server@57.0.4'
-  - babel-preset-expo@57.0.4
-  - expo-asset@57.0.7
-  - expo-constants@57.0.7
-  - expo-linking@57.0.4
-  - expo-modules-autolinking@57.0.9
-  - expo-modules-core@57.0.7
+  - '@expo/cli@56.1.21 || 57.0.10'
+  - '@expo/config-plugins@56.0.14 || 57.0.6'
+  - '@expo/config@56.0.13 || 57.0.6'
+  - '@expo/fingerprint@0.19.9 || 0.20.6'
+  - '@expo/image-utils@0.10.4 || 0.11.4'
+  - '@expo/metro-config@56.0.18 || 57.0.7'
+  - '@expo/metro-runtime@56.0.18 || 57.0.7'
+  - '@expo/prebuild-config@56.0.21 || 57.0.9'
+  - '@expo/require-utils@56.1.6 || 57.0.4'
+  - '@expo/router-server@56.0.17 || 57.0.4'
+  - babel-preset-expo@56.0.18 || 57.0.4
+  - expo-asset@56.0.21 || 57.0.7
+  - expo-constants@56.0.22 || 57.0.7
+  - expo-linking@56.0.16 || 57.0.4
+  - expo-modules-autolinking@56.0.21 || 57.0.9
+  - expo-modules-core@56.0.22 || 57.0.7
   - expo-modules-jsi@57.0.4
-  - expo-router@57.0.8
-  - expo-splash-screen@57.0.5
+  - expo-router@56.2.16 || 57.0.8
+  - expo-splash-screen@56.0.14 || 57.0.5
   - expo-web-browser@57.0.2
-  - expo@57.0.8
-  - expo-build-properties@57.0.7
-  - expo-notifications@57.0.7
+  - expo@56.0.17 || 57.0.8
+  - expo-build-properties@56.0.24 || 57.0.7
+  - expo-notifications@56.0.22 || 57.0.7
+  - '@expo/ui@56.0.23'
 onlyBuiltDependencies:
   - esbuild
+
+# datetimepicker's config plugin requires @expo/config-plugins but doesn't declare it
+packageExtensions:
+  "@react-native-community/datetimepicker":
+    dependencies:
+      "@expo/config-plugins": "*"
