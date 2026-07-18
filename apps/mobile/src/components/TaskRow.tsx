@@ -53,11 +53,12 @@ export function TaskRow({ task, today, projects, labels, hideProject, swipeable 
 
   const onSwipeableOpen = (direction: SwipeDirection) => {
     swipeRef.current?.close();
-    if (direction === SwipeDirection.LEFT) {
-      // Swiped right → complete.
+    // SwipeDirection is the direction of the swipe itself: RIGHT = swiped
+    // rightward (left/green check actions revealed) = complete; LEFT = swiped
+    // leftward (right/calendar actions revealed) = schedule.
+    if (direction === SwipeDirection.RIGHT) {
       completeWithLinger();
     } else {
-      // Swiped left → schedule.
       openSchedule(task.id);
     }
   };
