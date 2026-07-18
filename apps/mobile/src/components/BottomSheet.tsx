@@ -2,22 +2,22 @@
 // plain absolute-fill overlay — the sheet components live at the root layout,
 // as siblings after the navigator, so they already stack above every screen
 // and the tab bar. Deliberately NOT an RN <Modal>: modals get their own
-// window/host where keyboard reporting (JS Keyboard events and
-// KeyboardAvoidingView alike) is unreliable, e.g. on iOS 26 and on Android
-// with statusBarTranslucent. In the normal hierarchy the keyboard height is
-// dependable; we take the max of Reanimated's native tracker and the JS
-// events and pad the sheet with it.
+// window/host where keyboard reporting is unreliable (e.g. iOS 26).
+//
+// Two hard-won constraints shape this component:
+// - Keyboard padding is plain React STATE, not a shared-value style: layout
+//   props driven from useAnimatedStyle don't reliably relayout a view that
+//   also runs a layout animation (the sheet stayed behind the keyboard until
+//   some content change forced a reflow).
+// - The slide-in is a manual spring on translateY, not an entering()
+//   animation, for the same reason.
 import type { ReactNode } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { BackHandler, Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
-  FadeOut,
   runOnJS,
-  SlideInDown,
-  SlideOutDown,
-  useAnimatedKeyboard,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -34,18 +34,36 @@ export interface BottomSheetProps {
   full?: boolean;
 }
 
+const SLIDE_FROM = 700;
+
+function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, (e) => setHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener(hideEvent, () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  return height;
+}
+
 export function BottomSheet({ visible, onClose, children, full }: BottomSheetProps) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const translateY = useSharedValue(0);
-  const keyboard = useAnimatedKeyboard({
-    isStatusBarTranslucentAndroid: true,
-    isNavigationBarTranslucentAndroid: true,
-  });
-  const keyboardJS = useSharedValue(0);
+  const translateY = useSharedValue(SLIDE_FROM);
+  const keyboardHeight = useKeyboardHeight();
 
   useEffect(() => {
-    if (visible) translateY.value = 0;
+    if (visible) {
+      translateY.value = SLIDE_FROM;
+      translateY.value = withSpring(0, { damping: 24, stiffness: 240 });
+    }
   }, [visible, translateY]);
 
   // Android hardware back closes the sheet (the Modal used to do this).
@@ -57,21 +75,6 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
     });
     return () => sub.remove();
   }, [visible, onClose]);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const show = Keyboard.addListener(showEvent, (e) => {
-      keyboardJS.value = e.endCoordinates.height;
-    });
-    const hide = Keyboard.addListener(hideEvent, () => {
-      keyboardJS.value = 0;
-    });
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, [keyboardJS]);
 
   const pan = Gesture.Pan()
     .onUpdate((e) => {
@@ -85,22 +88,17 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
       }
     });
 
-  const insetBottom = insets.bottom;
-  const sheetStyle = useAnimatedStyle(() => {
-    const kb = Math.max(keyboard.height.value, keyboardJS.value);
-    return {
-      transform: [{ translateY: translateY.value }],
-      // With the keyboard up, its height replaces the home-indicator inset
-      // (the keyboard already covers that area).
-      paddingBottom: kb > 0 ? kb + space.s3 : insetBottom + space.s4,
-    };
-  });
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
 
   if (!visible) return null;
 
+  // With the keyboard up, its height replaces the home-indicator inset (the
+  // keyboard already covers that area).
+  const bottomPad = keyboardHeight > 0 ? keyboardHeight + space.s3 : insets.bottom + space.s4;
+
   return (
     <View style={[StyleSheet.absoluteFill, styles.container]}>
-      <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(120)} style={StyleSheet.absoluteFill}>
+      <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
           onPress={() => {
@@ -110,13 +108,12 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
         />
       </Animated.View>
       <Animated.View
-        entering={SlideInDown.springify().damping(24).stiffness(240)}
-        exiting={SlideOutDown.duration(160)}
         style={[
           styles.sheet,
           {
             backgroundColor: theme.surfaceRaised,
             borderColor: theme.border,
+            paddingBottom: bottomPad,
             maxHeight: full ? '92%' : '88%',
             minHeight: full ? '70%' : undefined,
           },

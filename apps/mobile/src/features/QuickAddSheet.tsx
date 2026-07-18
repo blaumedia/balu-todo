@@ -62,9 +62,12 @@ export function QuickAddSheet() {
           ref={inputRef}
           autoFocus={open}
           value={text}
-          onChangeText={setText}
+          onChangeText={(v) => setText(v.replace(/\n/g, ' '))}
           onSubmitEditing={submit}
-          blurOnSubmit={false}
+          // On the new architecture, blurOnSubmit is ignored for multiline
+          // inputs — submitBehavior is what makes the return key submit
+          // (and keep focus) instead of inserting a newline.
+          submitBehavior="submit"
           returnKeyType="done"
           placeholder={t('quickadd.placeholder')}
           placeholderTextColor={theme.textTertiary}
