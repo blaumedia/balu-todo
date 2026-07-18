@@ -25,6 +25,9 @@ export const de: Record<TranslationKey, string> = {
   'empty.search': 'Aufgaben, Projekte und Labels suchen',
   'empty.searchNone': 'Keine Treffer.',
 
+  'search.tasks': 'Aufgaben',
+  'search.showCompleted': 'Erledigte einschließen',
+
   'sync.synced': 'Synchron',
   'sync.syncing': 'Synchronisiere…',
   'sync.offline': 'Offline — lokal gespeichert',
@@ -47,6 +50,7 @@ export const de: Record<TranslationKey, string> = {
   'detail.someday': 'Vielleicht',
   'detail.delete': 'Aufgabe löschen',
   'detail.recurrence': 'Wiederholung',
+  'detail.reminder': 'Erinnerung',
   'detail.noProject': 'Eingang',
   'detail.datePlaceholder': 'z. B. morgen, nächsten Di, 31.7.',
   'detail.clear': 'Löschen',
@@ -71,6 +75,12 @@ export const de: Record<TranslationKey, string> = {
   'settings.title': 'Einstellungen',
   'settings.account': 'Konto',
   'settings.appearance': 'Darstellung',
+  'settings.notifications': 'Benachrichtigungen',
+  'settings.reminders': 'Erinnerungen',
+  'settings.remindersHint':
+    'Erhalte eine lokale Benachrichtigung, wenn eine Aufgabenerinnerung fällig ist. Wenn du zusätzlich serverseitige Kanäle (ntfy, E-Mail …) einrichtest, kann es zu Doppelungen kommen.',
+  'settings.remindersDenied':
+    'Benachrichtigungen sind deaktiviert. Aktiviere sie für Balu in den Systemeinstellungen und versuche es erneut.',
   'settings.server': 'Server',
   'settings.serverUrl': 'Server-URL',
   'settings.name': 'Name',

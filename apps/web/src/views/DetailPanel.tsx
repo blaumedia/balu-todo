@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { todayLocalISO, type Priority } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { IconButton } from "../components/IconButton.js";
 import { Icon } from "../components/Icon.js";
 import { DateField } from "./DateField.js";
+import { ReminderField } from "./ReminderField.js";
 
 const PRIORITY_COLORS: Record<number, string> = {
   1: "var(--priority-1)",
@@ -61,6 +63,7 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const focusDeadline = useApp((s) => s.focusDeadline);
   const selectTask = useApp((s) => s.selectTask);
+  const writable = canWrite(useMyRole());
   const today = todayLocalISO();
 
   const task = snapshot.tasks.find((tk) => tk.id === selectedTaskId && !tk.is_deleted);
@@ -79,7 +82,10 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
   if (!task) return null;
 
   const sync = getSync();
-  const update = (args: Record<string, unknown>) => sync?.mutate({ type: "task_update", args: { id: task.id, ...args } });
+  const update = (args: Record<string, unknown>) => {
+    if (!writable) return; // viewers are read-only (contract §2)
+    sync?.mutate({ type: "task_update", args: { id: task.id, ...args } });
+  };
 
   const projects = snapshot.projects
     .filter((p) => !p.is_deleted && p.archived_at == null)
@@ -107,16 +113,23 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 12px 12px 20px" }}>
-        <IconButton icon="trash-2" label={t("detail.delete")} onClick={() => {
-          sync?.mutate({ type: "task_delete", args: { id: task.id } });
-          selectTask(null);
-        }} />
+        {writable ? (
+          <IconButton icon="trash-2" label={t("detail.delete")} onClick={() => {
+            sync?.mutate({ type: "task_delete", args: { id: task.id } });
+            selectTask(null);
+          }} />
+        ) : (
+          <span style={{ fontSize: 12, color: "var(--text-tertiary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Icon name="users" size={13} /> {t("members.readonlyHint")}
+          </span>
+        )}
         <IconButton icon="x" label={t("common.cancel")} onClick={() => selectTask(null)} />
       </div>
 
       <div style={{ padding: "0 20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
         <input
           value={title}
+          readOnly={!writable}
           onChange={(e) => setTitle(e.target.value)}
           onBlur={() => title.trim() && title !== task.title && update({ title: title.trim() })}
           onKeyDown={(e) => {
@@ -135,6 +148,7 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
 
         <textarea
           value={notes}
+          readOnly={!writable}
           placeholder={t("detail.notesPlaceholder")}
           onChange={(e) => setNotes(e.target.value)}
           onBlur={() => notes !== task.notes && update({ notes })}
@@ -152,7 +166,14 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
           }}
         />
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            ...(writable ? {} : { pointerEvents: "none", opacity: 0.7 }),
+          }}
+        >
           <Row label={t("detail.startDate")}>
             <DateField value={task.start_date} today={today} locale={locale} t={t} onChange={(v) => update({ start_date: v, ...(v ? { someday: false } : {}) })} />
           </Row>
@@ -161,6 +182,9 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
           </Row>
           <Row label={t("detail.deadline")}>
             <DateField value={task.deadline} today={today} locale={locale} t={t} asDeadline autoOpen={focusDeadline} onChange={(v) => update({ deadline: v })} />
+          </Row>
+          <Row label={t("detail.reminder")}>
+            <ReminderField value={task.reminder_at} today={today} locale={locale} t={t} onChange={(v) => update({ reminder_at: v })} />
           </Row>
           <Row label={t("detail.priority")}>
             {[0, 1, 2, 3].map((p) => (

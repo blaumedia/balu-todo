@@ -1,9 +1,12 @@
 import { useState } from "react";
 import type { Locale, Theme } from "@balu/domain";
+import type { Snapshot } from "@balu/sync-client";
 import { api, teardownSync } from "../lib/clients.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { Button } from "../components/Button.js";
+import { MembersSection } from "./MembersSection.js";
+import { ChannelsSection } from "./ChannelsSection.js";
 
 const controlStyle: React.CSSProperties = {
   height: 40,
@@ -28,7 +31,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export function SettingsView() {
+export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
   const { t } = useT();
   const user = useApp((s) => s.user);
   const theme = useApp((s) => s.theme);
@@ -86,6 +89,14 @@ export function SettingsView() {
               <option value="dark">{t("theme.dark")}</option>
             </select>
           </label>
+        </Section>
+
+        <Section title={t("settings.members")}>
+          <MembersSection snapshot={snapshot} />
+        </Section>
+
+        <Section title={t("settings.notifications")}>
+          <ChannelsSection />
         </Section>
 
         <div>

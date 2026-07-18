@@ -1,4 +1,5 @@
 import '../lib/polyfills'; // must run first — installs crypto.randomUUID for the sync client
+import { useLastNotificationResponse } from 'expo-notifications';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -11,11 +12,20 @@ import { ScheduleSheet } from '../features/ScheduleSheet';
 import { TaskDetailSheet } from '../features/TaskDetailSheet';
 import { bootApp } from '../lib/boot';
 import { getSync } from '../lib/clients';
+import { configureNotifications, openTaskFromNotification, taskIdFromResponse } from '../lib/notifications';
 import { ThemeProvider, useScheme, useTheme } from '../theme/ThemeProvider';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
+configureNotifications();
 
 export default function RootLayout() {
+  // Deep-link a tapped reminder to its task detail (cold-start + warm handled).
+  const notificationResponse = useLastNotificationResponse();
+  useEffect(() => {
+    const taskId = taskIdFromResponse(notificationResponse ?? null);
+    if (taskId) openTaskFromNotification(taskId);
+  }, [notificationResponse]);
+
   useEffect(() => {
     void bootApp().finally(() => {
       SplashScreen.hideAsync().catch(() => {});

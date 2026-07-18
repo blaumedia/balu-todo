@@ -1,16 +1,27 @@
-import { useCallback, useEffect } from "react";
-import { api, initSync } from "./lib/clients.js";
+import { useCallback, useEffect, useState } from "react";
+import { api } from "./lib/clients.js";
+import { bootSession } from "./lib/boot.js";
 import { applyTheme } from "./lib/theme.js";
 import { useApp } from "./store/app.js";
 import { LoginView } from "./views/LoginView.js";
 import { Shell } from "./views/Shell.js";
+import { InviteAcceptView } from "./views/InviteAcceptView.js";
 import { Icon } from "./components/Icon.js";
+
+/** Extract the invite token from `/invite/:token`, or null. */
+function matchInvite(pathname: string): string | null {
+  const m = /^\/invite\/([^/]+)\/?$/.exec(pathname);
+  return m ? decodeURIComponent(m[1]!) : null;
+}
 
 export function App() {
   const boot = useApp((s) => s.boot);
   const theme = useApp((s) => s.theme);
   const setBoot = useApp((s) => s.setBoot);
-  const setSession = useApp((s) => s.setSession);
+
+  const [inviteToken, setInviteToken] = useState<string | null>(() =>
+    matchInvite(globalThis.location?.pathname ?? ""),
+  );
 
   // Theme: apply now and react to system changes when following the OS.
   useEffect(() => {
@@ -22,22 +33,12 @@ export function App() {
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
 
-  const bootSession = useCallback(async () => {
-    try {
-      const me = await api.getMe();
-      const first = me.memberships[0];
-      if (!first) {
-        setBoot("login");
-        return;
-      }
-      initSync(first.workspace.id, me.user.id);
-      setSession(me.user, me.memberships, first.workspace);
-    } catch {
-      setBoot("login");
-    }
-  }, [setBoot, setSession]);
+  const authenticate = useCallback(async () => {
+    await bootSession();
+  }, []);
 
   useEffect(() => {
+    if (inviteToken) return; // the invite flow drives its own boot
     void (async () => {
       await api.hydrate();
       if (!api.isAuthenticated()) {
@@ -46,7 +47,20 @@ export function App() {
       }
       await bootSession();
     })();
-  }, [bootSession, setBoot]);
+  }, [inviteToken, setBoot]);
+
+  if (inviteToken) {
+    return (
+      <InviteAcceptView
+        token={inviteToken}
+        onDone={() => {
+          globalThis.history?.replaceState(null, "", "/");
+          setInviteToken(null);
+          if (!api.isAuthenticated()) setBoot("login");
+        }}
+      />
+    );
+  }
 
   if (boot === "loading") {
     return (
@@ -76,6 +90,6 @@ export function App() {
     );
   }
 
-  if (boot === "login") return <LoginView onAuthenticated={bootSession} />;
+  if (boot === "login") return <LoginView onAuthenticated={authenticate} />;
   return <Shell />;
 }

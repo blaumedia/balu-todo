@@ -3,6 +3,7 @@
 import {
   Archive,
   ArrowLeft,
+  Bell,
   Calendar,
   CalendarDays,
   Check,
@@ -38,6 +39,7 @@ import type { ComponentType } from 'react';
 const MAP = {
   archive: Archive,
   'arrow-left': ArrowLeft,
+  bell: Bell,
   calendar: Calendar,
   'calendar-days': CalendarDays,
   check: Check,

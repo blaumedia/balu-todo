@@ -5,6 +5,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { Checkbox } from '../components/Checkbox';
 import { Icon } from '../components/Icon';
 import { DateField } from './DateField';
+import { ReminderField } from './ReminderField';
 import { completeTask, deleteTask, moveTask, uncompleteTask, updateTask } from '../lib/actions';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -99,6 +100,12 @@ function DetailBody({
         label={t('detail.deadline')}
         value={task.deadline}
         onChange={(v) => updateTask(task.id, { deadline: v })}
+      />
+
+      {/* Reminder — writes reminder_at (drives local notifications) */}
+      <ReminderField
+        value={task.reminder_at}
+        onChange={(v) => updateTask(task.id, { reminder_at: v })}
       />
 
       {/* Evening / Someday toggles */}

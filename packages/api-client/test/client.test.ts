@@ -100,11 +100,121 @@ describe("auth", () => {
   it("logout clears tokens", async () => {
     const fetchImpl = (async (u: any) => {
       if (String(u).endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
-      return new Response("", { status: 204 });
+      return new Response(null, { status: 204 });
     }) as unknown as typeof fetch;
     const c = createApiClient({ storage: memoryKV(), fetch: fetchImpl });
     await c.login({ email: "d@example.com", password: "pw" });
     await c.logout();
     expect(c.isAuthenticated()).toBe(false);
+  });
+});
+
+const INVITE = {
+  id: "inv1", workspace_id: "w1", role: "member", email: null,
+  token: "tok-abc", created_at: "2026-07-01T00:00:00Z", expires_at: "2026-07-15T00:00:00Z",
+};
+
+/** A client already holding an access token, plus a recorder of requests. */
+async function authedClient(handler: (path: string, init: any) => Response) {
+  const storage = memoryKV();
+  const calls: Array<{ method: string; path: string; body: any }> = [];
+  const fetchImpl = (async (u: any, init: any) => {
+    const path = String(u);
+    calls.push({ method: init.method, path, body: init.body ? JSON.parse(init.body) : undefined });
+    if (path.endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+    return handler(path, init);
+  }) as unknown as typeof fetch;
+  const c = createApiClient({ storage, fetch: fetchImpl });
+  await c.login({ email: "d@example.com", password: "pw" });
+  return { c, calls };
+}
+
+describe("invites & members (contract §7)", () => {
+  it("createInvite posts role/email and unwraps {invite}", async () => {
+    const { c, calls } = await authedClient((path) =>
+      path.endsWith("/workspaces/w1/invites") ? json({ invite: INVITE }, 201) : json({}, 404),
+    );
+    const invite = await c.createInvite("w1", { role: "member", email: "x@example.com" });
+    expect(invite.token).toBe("tok-abc");
+    const req = calls.find((x) => x.path.endsWith("/workspaces/w1/invites"))!;
+    expect(req.method).toBe("POST");
+    expect(req.body).toEqual({ role: "member", email: "x@example.com" });
+  });
+
+  it("listInvites unwraps {invites}", async () => {
+    const { c } = await authedClient((path) =>
+      path.endsWith("/workspaces/w1/invites") ? json({ invites: [INVITE] }) : json({}, 404),
+    );
+    expect(await c.listInvites("w1")).toHaveLength(1);
+  });
+
+  it("revokeInvite issues a DELETE", async () => {
+    const { c, calls } = await authedClient(() => new Response(null, { status: 204 }));
+    await c.revokeInvite("w1", "inv1");
+    expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: expect.stringContaining("/workspaces/w1/invites/inv1") });
+  });
+
+  it("acceptInvite posts the token and returns the workspace", async () => {
+    const ws = { id: "w2", name: "Team", created_at: "2026-07-01T00:00:00Z" };
+    const { c, calls } = await authedClient((path) =>
+      path.endsWith("/invites/accept") ? json({ workspace: ws }) : json({}, 404),
+    );
+    const workspace = await c.acceptInvite("tok-abc");
+    expect(workspace.id).toBe("w2");
+    expect(calls.at(-1)!.body).toEqual({ token: "tok-abc" });
+  });
+
+  it("acceptInvite surfaces invalid_token as ApiError", async () => {
+    const { c } = await authedClient((path) =>
+      path.endsWith("/invites/accept")
+        ? json({ detail: { code: "invalid_token", message: "expired" } }, 400)
+        : json({}, 404),
+    );
+    await expect(c.acceptInvite("bad")).rejects.toMatchObject({ code: "invalid_token" });
+  });
+
+  it("updateMember PATCHes a role; last_owner surfaces as ApiError", async () => {
+    const { c, calls } = await authedClient((path) =>
+      path.includes("/members/u9")
+        ? json({ detail: { code: "last_owner", message: "cannot demote" } }, 400)
+        : json({}, 404),
+    );
+    await expect(c.updateMember("w1", "u9", { role: "member" })).rejects.toMatchObject({ code: "last_owner" });
+    expect(calls.at(-1)).toMatchObject({ method: "PATCH" });
+  });
+
+  it("removeMember issues a DELETE on the member path", async () => {
+    const { c, calls } = await authedClient(() => new Response(null, { status: 204 }));
+    await c.removeMember("w1", "u9");
+    expect(calls.at(-1)).toMatchObject({ method: "DELETE", path: expect.stringContaining("/workspaces/w1/members/u9") });
+  });
+});
+
+describe("notification channels (contract §8)", () => {
+  it("getChannels unwraps {channels}", async () => {
+    const { c } = await authedClient((path) =>
+      path.endsWith("/me/channels") ? json({ channels: [{ type: "ntfy", url: "https://ntfy.sh/x" }] }) : json({}, 404),
+    );
+    const channels = await c.getChannels();
+    expect(channels).toEqual([{ type: "ntfy", url: "https://ntfy.sh/x" }]);
+  });
+
+  it("putChannels sends {channels} and returns the saved list", async () => {
+    const list = [{ type: "email" as const, address: "d@example.com" }];
+    const { c, calls } = await authedClient((path, init) =>
+      path.endsWith("/me/channels") && init.method === "PUT" ? json({ channels: list }) : json({}, 404),
+    );
+    expect(await c.putChannels(list)).toEqual(list);
+    expect(calls.at(-1)!.body).toEqual({ channels: list });
+  });
+
+  it("testChannel posts the type; channel_unavailable surfaces as ApiError", async () => {
+    const { c, calls } = await authedClient((path) =>
+      path.endsWith("/me/channels/test")
+        ? json({ detail: { code: "channel_unavailable", message: "no SMTP" } }, 400)
+        : json({}, 404),
+    );
+    await expect(c.testChannel("email")).rejects.toMatchObject({ code: "channel_unavailable" });
+    expect(calls.at(-1)!.body).toEqual({ type: "email" });
   });
 });

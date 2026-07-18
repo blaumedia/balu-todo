@@ -20,6 +20,7 @@
     "expo-image": "~57.0.1",
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.4",
+    "expo-notifications": "~57.0.7",
     "expo-router": "~57.0.8",
     "expo-splash-screen": "~57.0.5",
     "expo-sqlite": "~57.0.1",
@@ -42,7 +43,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^2.1.8"
   },
   "scripts": {
     "start": "expo start",
@@ -50,7 +52,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "vitest run"
   },
   "private": true
 }

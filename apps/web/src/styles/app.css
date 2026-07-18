@@ -103,6 +103,19 @@ textarea {
   animation: balu-overlay-in var(--duration-medium) var(--ease-emphasized);
 }
 
+/* Drag & drop lift (DESIGN §5): the DragOverlay clone scales up with a shadow;
+   the surface's sortable items open a gap via dnd-kit's own transform+transition.
+   Reduced-motion drops the scale (the shadow alone signals the lift). */
+.balu-drag-lift {
+  transform: scale(1.03);
+  cursor: grabbing;
+}
+@media (prefers-reduced-motion: reduce) {
+  .balu-drag-lift {
+    transform: none;
+  }
+}
+
 .balu-visually-hidden {
   position: absolute;
   width: 1px;

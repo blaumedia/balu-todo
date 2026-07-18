@@ -1,9 +1,16 @@
 import { addDaysISO, selectList, todayLocalISO, upcomingGroupDate, type Task } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
+import { getSync } from "../lib/clients.js";
 import { useMaps } from "../lib/maps.js";
 import { useT } from "../lib/useT.js";
 import { dayMonth, weekdayLong } from "../lib/format.js";
 import { TaskListSurface, type TaskGroup } from "./TaskListSurface.js";
+
+/** Decode a group key back to the target calendar date. Day groups are the
+ *  date itself; week groups are `w-<monday>`. */
+function groupKeyToDate(key: string): string {
+  return key.startsWith("w-") ? key.slice(2) : key;
+}
 
 export function UpcomingView({ snapshot }: { snapshot: Snapshot }) {
   const { t, locale } = useT();
@@ -46,6 +53,17 @@ export function UpcomingView({ snapshot }: { snapshot: Snapshot }) {
     groups.push({ key: `w-${monday}`, header: b.header, tasks: b.tasks });
   }
 
+  // Drop onto another day/week group → move the date that placed the task there
+  // (start_date if it drove the grouping, else deadline) to the target date.
+  function reschedule(taskId: string, targetGroupKey: string) {
+    const task = snapshot.tasks.find((tk) => tk.id === taskId);
+    if (!task) return;
+    const target = groupKeyToDate(targetGroupKey);
+    const gd = upcomingGroupDate(task, today);
+    const field = task.start_date != null && task.start_date === gd ? "start_date" : "deadline";
+    getSync()?.mutate({ type: "task_update", args: { id: taskId, [field]: target } });
+  }
+
   return (
     <TaskListSurface
       groups={groups}
@@ -56,6 +74,7 @@ export function UpcomingView({ snapshot }: { snapshot: Snapshot }) {
       today={today}
       locale={locale}
       t={t}
+      dnd={{ mode: "reschedule", onReschedule: reschedule }}
     />
   );
 }

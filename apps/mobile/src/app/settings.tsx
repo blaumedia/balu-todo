@@ -1,7 +1,7 @@
 import type { Locale, Theme } from '@balu/domain';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
@@ -9,6 +9,7 @@ import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
 import { getApi } from '../lib/clients';
 import { logout } from '../lib/boot';
+import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
@@ -27,8 +28,29 @@ export default function SettingsScreen() {
   const setLocale = useApp((s) => s.setLocale);
   const setUser = useApp((s) => s.setUser);
   const setServerUrl = useApp((s) => s.setServerUrl);
+  const remindersEnabled = useApp((s) => s.remindersEnabled);
+  const setRemindersEnabled = useApp((s) => s.setRemindersEnabled);
 
   const [name, setName] = useState(user?.name ?? '');
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
+  const toggleReminders = async (next: boolean) => {
+    if (!next) {
+      setRemindersEnabled(false);
+      stopReminderScheduler();
+      setPermissionDenied(false);
+      return;
+    }
+    const granted = await requestReminderPermission();
+    if (granted) {
+      setPermissionDenied(false);
+      setRemindersEnabled(true);
+      startReminderScheduler();
+    } else {
+      setPermissionDenied(true);
+      setRemindersEnabled(false);
+    }
+  };
 
   const bestEffortPatch = (body: Partial<{ name: string; locale: Locale; theme: Theme }>) => {
     getApi()?.patchMe(body).catch(() => {});
@@ -139,6 +161,26 @@ export default function SettingsScreen() {
             })}
           </View>
         </View>
+
+        {/* Notifications */}
+        <SectionHeader>{t('settings.notifications')}</SectionHeader>
+        <View style={styles.card}>
+          <View style={styles.field}>
+            <Icon name="bell" size={18} color={theme.textTertiary} strokeWidth={2} />
+            <Text style={[styles.fieldLabel, { color: theme.textSecondary, width: undefined, flex: 1, marginLeft: space.s2 }]}>
+              {t('settings.reminders')}
+            </Text>
+            <Switch
+              value={remindersEnabled}
+              onValueChange={toggleReminders}
+              trackColor={{ true: theme.accent, false: theme.border }}
+              thumbColor="#fff"
+            />
+          </View>
+        </View>
+        <Text style={[styles.note, { color: permissionDenied ? theme.danger : theme.textTertiary }]}>
+          {permissionDenied ? t('settings.remindersDenied') : t('settings.remindersHint')}
+        </Text>
 
         {/* Server */}
         <SectionHeader>{t('settings.server')}</SectionHeader>

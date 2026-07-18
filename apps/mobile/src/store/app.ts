@@ -17,6 +17,8 @@ export interface AppState {
   memberships: Membership[];
   theme: Theme;
   locale: Locale;
+  /** Local reminder notifications on (permission granted + user opted in). */
+  remindersEnabled: boolean;
 
   /** Where a new task lands when created from the FAB. */
   context: ComposeContext;
@@ -32,6 +34,7 @@ export interface AppState {
   setUser(user: User): void;
   setTheme(theme: Theme): void;
   setLocale(locale: Locale): void;
+  setRemindersEnabled(enabled: boolean): void;
   setContext(context: ComposeContext): void;
 
   openQuickAdd(): void;
@@ -52,6 +55,7 @@ export const useApp = create<AppState>((set) => ({
   memberships: [],
   theme: 'system',
   locale: 'en',
+  remindersEnabled: false,
   context: { kind: 'list', list: 'today' },
 
   quickAddOpen: false,
@@ -76,6 +80,10 @@ export const useApp = create<AppState>((set) => ({
   setLocale: (locale) => {
     void sqliteKV.setItem(SETTINGS.locale, locale);
     set({ locale });
+  },
+  setRemindersEnabled: (remindersEnabled) => {
+    void sqliteKV.setItem(SETTINGS.remindersEnabled, remindersEnabled ? '1' : '0');
+    set({ remindersEnabled });
   },
   setContext: (context) => set({ context }),
 

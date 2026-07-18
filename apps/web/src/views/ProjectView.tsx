@@ -2,7 +2,9 @@ import { useState } from "react";
 import { todayLocalISO, type Task } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
+import { spacedOrders } from "../lib/reorder.js";
 import { useMaps } from "../lib/maps.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { Icon } from "../components/Icon.js";
 import { TaskListSurface, type TaskGroup } from "./TaskListSurface.js";
@@ -10,6 +12,7 @@ import { TaskListSurface, type TaskGroup } from "./TaskListSurface.js";
 export function ProjectView({ snapshot, projectId }: { snapshot: Snapshot; projectId: string }) {
   const { t, locale } = useT();
   const maps = useMaps(snapshot);
+  const writable = canWrite(useMyRole());
   const today = todayLocalISO();
   const [addingSection, setAddingSection] = useState(false);
   const [sectionName, setSectionName] = useState("");
@@ -46,7 +49,9 @@ export function ProjectView({ snapshot, projectId }: { snapshot: Snapshot; proje
         today={today}
         locale={locale}
         t={t}
+        dnd={writable ? { mode: "reorder", onReorder: (_key, ids) => getSync()?.mutate({ type: "task_reorder", args: { items: spacedOrders(ids) } }) } : undefined}
       />
+      {writable && (
       <div style={{ maxWidth: "var(--content-max)", width: "100%", margin: "0 auto", padding: "0 24px 24px" }}>
         {addingSection ? (
           <input
@@ -95,6 +100,7 @@ export function ProjectView({ snapshot, projectId }: { snapshot: Snapshot; proje
           </button>
         )}
       </div>
+      )}
     </div>
   );
 }

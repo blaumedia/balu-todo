@@ -13,6 +13,8 @@ import { ProjectView } from "./ProjectView.js";
 import { SettingsView } from "./SettingsView.js";
 import { DetailPanel } from "./DetailPanel.js";
 import { QuickAdd } from "../quickadd/QuickAdd.js";
+import { CommandPalette } from "../palette/CommandPalette.js";
+import { Toast } from "../components/Toast.js";
 
 function isTyping(el: EventTarget | null): boolean {
   const t = el as HTMLElement | null;
@@ -28,15 +30,27 @@ export function Shell() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const st = useApp.getState();
-      if ((e.metaKey || e.ctrlKey) && (e.key === "n" || e.key === "k")) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        st.setPalette(true);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "n") {
         e.preventDefault();
         st.setQuickAdd(true);
         return;
       }
-      if (st.quickAddOpen) return; // overlay owns its keys
+      if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
 
       if (isTyping(e.target)) {
         if (e.key === "Escape") (e.target as HTMLElement).blur();
+        return;
+      }
+
+      // "/" opens the command palette (search + commands).
+      if (e.key === "/") {
+        e.preventDefault();
+        st.setPalette(true);
         return;
       }
 
@@ -98,7 +112,7 @@ export function Shell() {
   }, []);
 
   let content: React.ReactNode;
-  if (view.kind === "settings") content = <SettingsView />;
+  if (view.kind === "settings") content = <SettingsView snapshot={snapshot} />;
   else if (view.kind === "project") content = <ProjectView snapshot={snapshot} projectId={view.projectId} />;
   else if (view.list === "today") content = <TodayView snapshot={snapshot} />;
   else if (view.list === "upcoming") content = <UpcomingView snapshot={snapshot} />;
@@ -116,6 +130,8 @@ export function Shell() {
         </div>
       </div>
       <QuickAdd />
+      <CommandPalette />
+      <Toast />
     </div>
   );
 }

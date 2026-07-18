@@ -14,9 +14,16 @@ when online — so it works fully offline and converges when the network returns
 - **4 tabs** — Today (with *This Evening*), Upcoming (day/week groups), Browse
   (Inbox · Anytime · Someday · Logbook · Projects · Labels), Search.
 - **Quick-add sheet** (the floating brand-gradient button) with live NL token
-  pills; **task detail** bottom sheet; **schedule** sheet.
+  pills; **task detail** bottom sheet (with a **Remind me** row); **schedule**
+  sheet.
 - Swipe a row **right to complete** (haptic + checkbox animation), **left to
   schedule**.
+- **Search** across tasks (title + notes, open + completed via a toggle),
+  projects and labels — grouped results, tap to open / navigate.
+- **Local reminder notifications** (opt-in in Settings): the app mirrors each
+  open task's future `reminder_at` onto the OS scheduler and fires a local
+  notification; tapping it deep-links to the task. Local only — no remote push
+  (see below).
 - Light/dark theme from the Balu design tokens (system-follow + manual
   override); German + English throughout.
 
@@ -85,6 +92,37 @@ in. The URL is saved and is editable later in **Settings → Server**.
 5. Turn networking back on — the queue flushes and converges with the web
    client.
 
+## Reminder notifications test (Expo Go)
+
+Local reminders are scheduled on-device from the replica — **no dev build and no
+remote push server are involved**, so this works fully in Expo Go.
+
+1. In the app, open **Settings → Notifications** and turn **Reminders** on. iOS/
+   Android prompts for notification permission — allow it. (If you deny, the
+   toggle stays off and a hint explains how to re-enable it in system settings.)
+2. Open any task's detail sheet and set **Remind me** to ~2 minutes from now:
+   type a day in the natural-language field (fires at 09:00) or use the native
+   date **and time** picker for a precise moment.
+3. **Background the app** (go to the home screen) or lock the phone.
+4. At the reminder time a local notification appears: title = the task title,
+   body = `Project · deadline`. **Tap it** — the app opens and the task's detail
+   sheet is shown (deep link via expo-router).
+5. Completing, deleting, or rescheduling the task re-reconciles automatically
+   (the pending notification is cancelled / re-armed). Toggling **Reminders**
+   off cancels every scheduled reminder.
+
+Notes & limits:
+
+- **Local only.** Expo Go (SDK 53+) does not support **remote push**; that is
+  out of scope here. Balu's server-side channels (ntfy / email / telegram,
+  contract §8) are the remote path and are configured separately. With both a
+  local reminder and a server channel set up, you may receive **two**
+  notifications — accepted in v1 (the Settings hint says so).
+- The scheduler caps at the **next 50** upcoming reminders, soonest first (iOS
+  caps pending local notifications at 64).
+- Reminders are re-armed on login/boot when the permission is still granted; if
+  permission was revoked in system settings, the toggle reconciles back to off.
+
 ## Caveats & notes
 
 - **Cleartext HTTP on LAN.** Self-hosted dev servers are plain `http://`.
@@ -96,21 +134,24 @@ in. The URL is saved and is editable later in **Settings → Server**.
     proxy in front of Balu for production and use `https://`.
 - **Native modules.** Everything used (expo-sqlite, expo-haptics, expo-crypto,
   expo-linear-gradient, react-native-svg, @react-native-community/datetimepicker,
-  reanimated, gesture-handler) ships inside Expo Go for SDK 57, so no custom dev
-  build is required to try it.
+  expo-notifications, reanimated, gesture-handler) ships inside Expo Go for SDK
+  57, so no custom dev build is required to try it. `expo-notifications` is used
+  for **local** scheduling only.
 - **Monorepo Metro.** `metro.config.js` watches the workspace root, resolves
   from both node_modules trees, and remaps the `@balu/*` packages' `.js`
   import specifiers onto their real `.ts` source (they ship raw TypeScript).
 - **`crypto.randomUUID`.** Polyfilled at startup (`src/lib/polyfills.ts`) via
   expo-crypto because the sync client needs it and Hermes doesn't provide it.
-- **Not in v1** (per the plan): push notifications, widgets, share-sheet capture,
-  drag-to-place FAB, background sync. Foreground sync (on app focus + every 60s)
-  is wired.
+- **Not in v1** (per the plan): remote push notifications, widgets, share-sheet
+  capture, drag-to-place FAB, background sync. Foreground sync (on app focus +
+  every 60s) is wired; **local** reminder notifications are wired (Settings →
+  Notifications).
 
 ## Verify locally
 
 ```bash
 pnpm --filter @balu/mobile typecheck        # tsc --noEmit — clean
+pnpm --filter @balu/mobile test             # vitest — reminder + search logic
 npx expo export --platform ios              # full Metro bundle
 npx expo-doctor                             # project health
 ```
@@ -127,11 +168,15 @@ src/
     project/[id].tsx       project view (sections, progress ring)
     list/[list].tsx        inbox · anytime · someday · logbook
     label/[id].tsx         label-filtered list
-    settings.tsx           account · appearance · server · logout
+    settings.tsx           account · appearance · notifications · server · logout
   components/              Icon, Checkbox, TaskRow, BottomSheet, Fab, …
-  features/                QuickAddSheet, TaskDetailSheet, ScheduleSheet, DateField
-  lib/                     clients, boot, kv (SQLite), actions, format, haptics
+  features/                QuickAddSheet, TaskDetailSheet, ScheduleSheet,
+                           DateField, ReminderField
+  lib/                     clients, boot, kv (SQLite), actions, format, haptics,
+                           notifications (local scheduler), reminderPlan (pure),
+                           search (pure)
   store/                   zustand app store + replica snapshot hooks
   theme/                   design tokens (TS) + ThemeProvider
   i18n/                    de / en dictionaries
+test/                      vitest — reminderPlan + search (pure logic)
 ```

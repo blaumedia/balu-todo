@@ -4,8 +4,13 @@
 import type {
   AuthResult,
   AuthTokens,
+  Channel,
+  ChannelType,
+  Invite,
+  InviteRole,
   Locale,
   MeResponse,
+  Role,
   Theme,
   User,
   Workspace,
@@ -55,6 +60,19 @@ export interface ApiClient {
   createWorkspace(body: { name: string }): Promise<Workspace>;
   patchWorkspace(id: string, body: { name: string }): Promise<Workspace>;
   deleteWorkspace(id: string): Promise<void>;
+
+  // ── Invites & members (contract §7) ─────────────────────────────────
+  createInvite(workspaceId: string, body: { role: InviteRole; email?: string }): Promise<Invite>;
+  listInvites(workspaceId: string): Promise<Invite[]>;
+  revokeInvite(workspaceId: string, inviteId: string): Promise<void>;
+  acceptInvite(token: string): Promise<Workspace>;
+  updateMember(workspaceId: string, userId: string, body: { role: Role }): Promise<void>;
+  removeMember(workspaceId: string, userId: string): Promise<void>;
+
+  // ── Notification channels (contract §8) ─────────────────────────────
+  getChannels(): Promise<Channel[]>;
+  putChannels(channels: Channel[]): Promise<Channel[]>;
+  testChannel(type: ChannelType): Promise<void>;
 }
 
 export function createApiClient(opts: ApiClientOptions): ApiClient {
@@ -185,5 +203,39 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     patchWorkspace: (id, body) =>
       authed<Workspace>(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     deleteWorkspace: (id) => authed<void>(`/workspaces/${id}`, { method: "DELETE" }),
+
+    createInvite: (workspaceId, body) =>
+      authed<{ invite: Invite }>(`/workspaces/${workspaceId}/invites`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }).then((r) => r.invite),
+    listInvites: (workspaceId) =>
+      authed<{ invites: Invite[] }>(`/workspaces/${workspaceId}/invites`, { method: "GET" }).then(
+        (r) => r.invites,
+      ),
+    revokeInvite: (workspaceId, inviteId) =>
+      authed<void>(`/workspaces/${workspaceId}/invites/${inviteId}`, { method: "DELETE" }),
+    acceptInvite: (token) =>
+      authed<{ workspace: Workspace }>("/invites/accept", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }).then((r) => r.workspace),
+    updateMember: (workspaceId, userId, body) =>
+      authed<void>(`/workspaces/${workspaceId}/members/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    removeMember: (workspaceId, userId) =>
+      authed<void>(`/workspaces/${workspaceId}/members/${userId}`, { method: "DELETE" }),
+
+    getChannels: () =>
+      authed<{ channels: Channel[] }>("/me/channels", { method: "GET" }).then((r) => r.channels),
+    putChannels: (channels) =>
+      authed<{ channels: Channel[] }>("/me/channels", {
+        method: "PUT",
+        body: JSON.stringify({ channels }),
+      }).then((r) => r.channels),
+    testChannel: (type) =>
+      authed<void>("/me/channels/test", { method: "POST", body: JSON.stringify({ type }) }),
   };
 }

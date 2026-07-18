@@ -3,6 +3,18 @@ import type { ApiClient } from '@balu/api-client';
 import { useApp } from '../store/app';
 import { getApi, initApi, initSync } from './clients';
 import { SETTINGS, sqliteKV } from './kv';
+import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
+
+/**
+ * Start the local reminder scheduler if the user opted in and the OS still
+ * grants permission; otherwise reconcile the preference back to off (permission
+ * may have been revoked in system settings since last launch).
+ */
+async function resumeReminders(): Promise<void> {
+  if (!useApp.getState().remindersEnabled) return;
+  if (await getReminderPermissionGranted()) startReminderScheduler();
+  else useApp.getState().setRemindersEnabled(false);
+}
 
 /** Fetch /me, pick the boot workspace, wire up the sync client. */
 export async function establishSession(serverUrl: string, api: ApiClient): Promise<boolean> {
@@ -11,6 +23,7 @@ export async function establishSession(serverUrl: string, api: ApiClient): Promi
   if (!membership) return false;
   useApp.getState().setSession(me.user, me.memberships, membership.workspace);
   initSync(serverUrl, membership.workspace.id, me.user.id);
+  void resumeReminders();
   return true;
 }
 
@@ -18,10 +31,11 @@ export async function establishSession(serverUrl: string, api: ApiClient): Promi
 export async function bootApp(): Promise<void> {
   const store = useApp.getState();
 
-  const [serverUrl, themeRaw, localeRaw, sessionRaw] = await Promise.all([
+  const [serverUrl, themeRaw, localeRaw, remindersRaw, sessionRaw] = await Promise.all([
     sqliteKV.getItem(SETTINGS.serverUrl),
     sqliteKV.getItem(SETTINGS.theme),
     sqliteKV.getItem(SETTINGS.locale),
+    sqliteKV.getItem(SETTINGS.remindersEnabled),
     sqliteKV.getItem(SETTINGS.session),
   ]);
 
@@ -30,6 +44,9 @@ export async function bootApp(): Promise<void> {
   }
   if (localeRaw === 'de' || localeRaw === 'en') {
     store.setLocale(localeRaw as Locale);
+  }
+  if (remindersRaw === '1') {
+    store.setRemindersEnabled(true);
   }
 
   if (!serverUrl) {
@@ -57,6 +74,7 @@ export async function bootApp(): Promise<void> {
         const cached = JSON.parse(sessionRaw) as { user: User; workspace: Workspace };
         store.setSession(cached.user, [], cached.workspace);
         initSync(serverUrl, cached.workspace.id, cached.user.id);
+        void resumeReminders();
         return;
       } catch {
         /* corrupt cache — fall through */
@@ -75,6 +93,7 @@ export async function logout(): Promise<void> {
     /* best-effort */
   }
   await sqliteKV.removeItem(SETTINGS.session);
+  stopReminderScheduler();
   const { teardownSync } = await import('./clients');
   teardownSync();
   useApp.getState().reset();

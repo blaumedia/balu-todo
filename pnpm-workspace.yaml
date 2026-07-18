@@ -26,5 +26,6 @@ minimumReleaseAgeExclude:
   - expo-web-browser@57.0.2
   - expo@57.0.8
   - expo-build-properties@57.0.7
+  - expo-notifications@57.0.7
 onlyBuiltDependencies:
   - esbuild

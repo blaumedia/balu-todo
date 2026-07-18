@@ -6,7 +6,7 @@ import { api } from "../lib/clients.js";
 import { syncLabelKey } from "../components/SyncIndicator.js";
 import { SyncIndicator } from "../components/SyncIndicator.js";
 import { IconButton } from "../components/IconButton.js";
-import { Input } from "../components/Input.js";
+import { Icon } from "../components/Icon.js";
 import { ProgressRing } from "../components/ProgressRing.js";
 import type { TranslationKey } from "../i18n/index.js";
 
@@ -19,6 +19,7 @@ export function Toolbar({ snapshot }: { snapshot: Snapshot }) {
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
   const setView = useApp((s) => s.setView);
+  const setPalette = useApp((s) => s.setPalette);
 
   let title = "Balu";
   let progress: { value: number; total: number } | null = null;
@@ -57,9 +58,29 @@ export function Toolbar({ snapshot }: { snapshot: Snapshot }) {
       </h1>
       {progress && <ProgressRing value={progress.value} total={progress.total} showLabel />}
       <div style={{ flex: 1 }} />
-      <div style={{ width: 200 }}>
-        <Input icon="search" placeholder={t("toolbar.search")} size="sm" disabled />
-      </div>
+      <button
+        type="button"
+        onClick={() => setPalette(true)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: 200,
+          height: 32,
+          padding: "0 12px",
+          background: "var(--surface)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-control)",
+          color: "var(--text-tertiary)",
+          cursor: "pointer",
+          fontFamily: "var(--font-sans)",
+          fontSize: "var(--text-secondary-size)",
+        }}
+      >
+        <Icon name="search" size={16} color="var(--text-tertiary)" />
+        <span style={{ flex: 1, textAlign: "left" }}>{t("toolbar.search")}</span>
+        <span style={{ fontSize: 12 }}>⌘K</span>
+      </button>
       <SyncIndicator state={snapshot.status} label={t(syncLabelKey(snapshot.status) as TranslationKey)} />
       <IconButton icon={THEME_ICON[theme]} label={t("settings.theme")} onClick={cycleTheme} />
       <IconButton

@@ -101,6 +101,41 @@ export interface Membership {
   role: Role;
 }
 
+// ── Invites & members (contract §7) ───────────────────────────────────
+
+/** Roles that can be granted through an invite (never `owner`). */
+export type InviteRole = "admin" | "member" | "viewer";
+
+export interface Invite {
+  id: string;
+  workspace_id: string;
+  role: InviteRole;
+  email: string | null;
+  token: string;
+  created_at: IsoDateTime;
+  expires_at: IsoDateTime;
+}
+
+// ── Notification channels (contract §8) ───────────────────────────────
+
+export type ChannelType = "ntfy" | "email" | "telegram";
+
+export interface NtfyChannel {
+  type: "ntfy";
+  url: string;
+}
+export interface EmailChannel {
+  type: "email";
+  address: string;
+}
+export interface TelegramChannel {
+  type: "telegram";
+  chat_id: string;
+}
+
+/** A per-user external notification channel (contract §8). */
+export type Channel = NtfyChannel | EmailChannel | TelegramChannel;
+
 // ── Auth REST payloads (contract §1–2) ────────────────────────────────
 
 export interface AuthTokens {

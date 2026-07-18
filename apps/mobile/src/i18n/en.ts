@@ -22,6 +22,9 @@ export const en = {
   'empty.search': 'Search tasks, projects and labels',
   'empty.searchNone': 'No matches.',
 
+  'search.tasks': 'Tasks',
+  'search.showCompleted': 'Include completed',
+
   'sync.synced': 'Synced',
   'sync.syncing': 'Syncing…',
   'sync.offline': 'Offline — saved locally',
@@ -44,6 +47,7 @@ export const en = {
   'detail.someday': 'Someday',
   'detail.delete': 'Delete task',
   'detail.recurrence': 'Repeats',
+  'detail.reminder': 'Remind me',
   'detail.noProject': 'Inbox',
   'detail.datePlaceholder': 'e.g. tomorrow, next tue, 31.7.',
   'detail.clear': 'Clear',
@@ -68,6 +72,11 @@ export const en = {
   'settings.title': 'Settings',
   'settings.account': 'Account',
   'settings.appearance': 'Appearance',
+  'settings.notifications': 'Notifications',
+  'settings.reminders': 'Reminders',
+  'settings.remindersHint':
+    'Get a local notification when a task reminder is due. If you also set up server-side channels (ntfy, email…), you may receive both.',
+  'settings.remindersDenied': 'Notifications are turned off. Enable them for Balu in your system settings, then try again.',
   'settings.server': 'Server',
   'settings.serverUrl': 'Server URL',
   'settings.name': 'Name',
