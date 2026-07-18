@@ -293,3 +293,15 @@ def test_invalid_color_is_invalid_args(client, user):
     add = cmd("project_add", temp_id="p", name="P", color="chartreuse")
     r = sync(client, user, "*", [add])
     assert r["sync_status"][add["uuid"]]["error_code"] == "invalid_args"
+
+
+def test_temp_id_reuse_rejected_cleanly(client, user):
+    """Reusing a temp_id must yield invalid_args, not a raw DB error (§5.3)."""
+    r1 = sync(client, user, "*", [cmd("task_add", temp_id="reused-tmp", title="first")])
+    assert list(r1["sync_status"].values())[0] == "ok"
+
+    r2 = sync(client, user, "*", [cmd("task_add", temp_id="reused-tmp", title="second")])
+    status = list(r2["sync_status"].values())[0]
+    assert status["error_code"] == "invalid_args"
+    assert "temp_id" in status["error"]
+    assert "psycopg" not in status["error"]

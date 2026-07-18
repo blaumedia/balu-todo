@@ -720,6 +720,18 @@ def process_commands(
                 raise CommandError("invalid_args", f"unknown command type: {command.type}")
             if ROLE_RANK.get(role, 0) < ROLE_RANK["member"]:
                 raise CommandError("forbidden", "viewer role is read-only")
+            # A temp_id names exactly one object per workspace, forever (§5.3).
+            # Reusing one for a new object is a client bug — reject it cleanly
+            # instead of letting the unique constraint surface a raw DB error.
+            if (
+                command.type in _ADD_COMMANDS
+                and command.temp_id
+                and command.temp_id in temp_map
+            ):
+                raise CommandError(
+                    "invalid_args",
+                    f"temp_id already used in this workspace: {command.temp_id}",
+                )
 
             resolved_args = _resolve_args(temp_map, command.args or {})
             ctx = Ctx(
