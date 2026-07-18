@@ -185,8 +185,10 @@ test/                      vitest — reminderPlan + search (pure logic)
 
 - **"Project is incompatible with this version of Expo Go"** — the app must be on the
   same Expo SDK as the Expo Go app from the store. The store build lags new SDK
-  releases by days to weeks, so this repo pins the SDK Expo Go actually supports
-  (currently 56). If it happens again after an SDK bump here, update Expo Go; if Expo
+  releases, so this repo pins the SDK Expo Go actually supports (currently **54** —
+  the App Store build has been 54.0.2 since Sep 2025; newer-SDK Expo Go builds are
+  only distributed via expo.dev/go, and the store error message misleadingly says to
+  "download the latest version"). If it happens again after an SDK bump here, update Expo Go; if Expo
   Go is behind, downgrade: set `"expo"` in `package.json` to the store-supported SDK,
   run `npx expo install --fix`, and restart with `npx expo start -c`.
 - `npx expo-doctor` misdetects the project root in this pnpm monorepo (it walks up to
