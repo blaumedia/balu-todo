@@ -3,6 +3,20 @@
 A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 **The self-hostable todo app that feels like Things and syncs like Todoist.**
 
+- Offline-first everywhere: every client keeps a full local replica and a durable
+  command queue — no spinners, airplane mode just works.
+- Natural-language quick-add in German and English ("Wäsche waschen jeden zweiten
+  Dienstag #Haushalt bis Freitag"), with live token highlighting.
+- Start dates and deadlines are separate things, like they should be.
+- Workspaces, roles (incl. read-only viewers), invite links, task assignment,
+  per-task comments.
+- Notifications where self-hosters live: **ntfy, email, Telegram** — reminders,
+  assignments, and comments reach you without app-store push relays.
+
+| Light | Dark |
+|---|---|
+| ![Today, light](docs/screenshots/web-today-light.png) | ![Today, dark](docs/screenshots/web-today-dark.png) |
+
 ## Run it
 
 ```sh
@@ -12,6 +26,15 @@ docker compose up --build
 Open http://localhost:8080, register, done. One app container + Postgres — that's the
 whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
 `BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`.
+
+### Production notes
+
+- Set a real `BALU_SECRET_KEY` (e.g. `openssl rand -hex 32`) and `BALU_DB_PASSWORD`.
+- Put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front and set
+  `BALU_ALLOW_REGISTRATION=false` after creating your accounts — invites still work.
+- Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`
+  enable email, `BALU_TELEGRAM_BOT_TOKEN` enables Telegram; ntfy needs nothing.
+- Back up the `balu-db` volume; the app container is stateless.
 
 ## Repo layout
 
@@ -35,3 +58,8 @@ whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
 - [docs/DESIGN.md](docs/DESIGN.md) — design language: color system, typography, motion, IA
 - [docs/api/CONTRACT.md](docs/api/CONTRACT.md) — API + sync-protocol contract (source of truth)
 - [docs/research/](docs/research/) — verified market research
+- [CHANGELOG.md](CHANGELOG.md)
+
+## License
+
+[MIT](LICENSE)

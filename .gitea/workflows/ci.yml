@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: balu
+          POSTGRES_PASSWORD: balu
+          POSTGRES_DB: balu_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Tests
+        working-directory: server
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://balu:balu@postgres:5432/balu_test
+        run: |
+          uv sync --frozen
+          uv run ruff check .
+          uv run pytest -q
+
+  clients:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build, typecheck, test
+        run: |
+          pnpm -r build
+          pnpm -r typecheck
+          pnpm -r test

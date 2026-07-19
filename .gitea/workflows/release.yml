@@ -1,0 +1,27 @@
+name: release
+
+# Tag vX.Y.Z → build the self-hosting image (web client baked in) and push it
+# to the Gitea packages registry as <owner>/balu:<version> and :latest.
+# Image tags are the version — rollback is a re-point, never a rebuild.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Login to registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login git.example.internal -u "${{ github.actor }}" --password-stdin
+      - name: Build
+        run: >
+          docker build -f server/Dockerfile --build-arg SKIP_WEB=0
+          -t git.example.internal/${{ github.repository_owner }}/balu:$VERSION
+          -t git.example.internal/${{ github.repository_owner }}/balu:latest .
+      - name: Push
+        run: |
+          docker push git.example.internal/${{ github.repository_owner }}/balu:$VERSION
+          docker push git.example.internal/${{ github.repository_owner }}/balu:latest
