@@ -19,6 +19,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Wait for Postgres
+        # The service container races the job when its image is already cached
+        # on the runner (first run passed only because the pull was slow).
+        run: |
+          for i in $(seq 1 60); do
+            (echo > /dev/tcp/postgres/5432) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "postgres not reachable after 60s" >&2
+          exit 1
       - name: Tests
         working-directory: server
         env:
