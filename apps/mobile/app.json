@@ -56,6 +56,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "owner": "blue1337s-team",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "15cf3cf0-f37b-47c5-91f4-c9317587c65a"
+      }
     }
   }
 }
