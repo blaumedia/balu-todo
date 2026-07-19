@@ -18,6 +18,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
   runOnJS,
+  useAnimatedKeyboard,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -51,6 +52,21 @@ function useKeyboardHeight(): number {
   }, []);
 
   return height;
+}
+
+// On Android (edge-to-edge is mandatory since SDK 54) the window does NOT
+// resize for the keyboard and the Keyboard event's endCoordinates.height is
+// garbage (negative) — the sheet would stay put with only its first row
+// peeking out above the IME. Reanimated's useAnimatedKeyboard reads the real
+// IME inset via WindowInsetsAnimation, so an animated-height spacer under the
+// sheet content lifts it. Android-only: on iOS 26 that hook is broken
+// (reanimated #8270) and the Keyboard-event path above works fine.
+function AndroidKeyboardSpacer({ bottomInset }: { bottomInset: number }) {
+  const keyboard = useAnimatedKeyboard();
+  const style = useAnimatedStyle(() => ({
+    height: Math.max(keyboard.height.value - bottomInset, 0),
+  }));
+  return <Animated.View style={style} />;
 }
 
 export function BottomSheet({ visible, onClose, children, full }: BottomSheetProps) {
@@ -93,8 +109,12 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
   if (!visible) return null;
 
   // With the keyboard up, its height replaces the home-indicator inset (the
-  // keyboard already covers that area).
-  const bottomPad = keyboardHeight > 0 ? keyboardHeight + space.s3 : insets.bottom + space.s4;
+  // keyboard already covers that area). On Android the lift comes from the
+  // AndroidKeyboardSpacer instead — the event height is unusable there.
+  const bottomPad =
+    Platform.OS !== 'android' && keyboardHeight > 0
+      ? keyboardHeight + space.s3
+      : insets.bottom + space.s4;
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.container]}>
@@ -126,6 +146,7 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
           </View>
         </GestureDetector>
         {children}
+        {Platform.OS === 'android' ? <AndroidKeyboardSpacer bottomInset={insets.bottom} /> : null}
       </Animated.View>
     </View>
   );
