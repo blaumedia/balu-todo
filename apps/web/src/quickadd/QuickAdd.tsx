@@ -34,7 +34,9 @@ const SHARED_TEXT: CSSProperties = {
   lineHeight: "28px",
   letterSpacing: "normal",
   whiteSpace: "pre",
-  padding: 0,
+  // Applied to textarea AND highlight mirror alike - keep in sync or the
+  // token pills drift from the caret.
+  padding: "0 12px",
   margin: 0,
 };
 
