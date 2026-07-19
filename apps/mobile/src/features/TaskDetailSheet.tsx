@@ -1,5 +1,5 @@
 import type { Comment, Priority, Role, Task } from '@balu/domain';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Checkbox } from '../components/Checkbox';
@@ -85,6 +85,13 @@ function DetailBody({
   const multiMember = members.length > 1;
   const assignee = task.assigned_to ? members.find((m) => m.id === task.assigned_to) : undefined;
   const myRole: Role | undefined = user ? members.find((m) => m.id === user.id)?.role : undefined;
+  const writable = myRole != null && myRole !== 'viewer';
+  const scrollRef = useRef<ScrollView>(null);
+  // The composer sits at the sheet's bottom — when it gains focus the keyboard
+  // pads the sheet, but the ScrollView doesn't follow on its own.
+  const scrollToComposer = () => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
+  };
 
   const commitTitle = () => {
     const v = title.trim();
@@ -95,16 +102,17 @@ function DetailBody({
   };
 
   return (
-    <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       {/* Title row */}
       <View style={styles.titleRow}>
         <Checkbox
           checked={completed}
           priority={task.priority}
-          onToggle={() => (completed ? uncompleteTask(task.id) : completeTask(task.id))}
+          onToggle={() => writable && (completed ? uncompleteTask(task.id) : completeTask(task.id))}
         />
         <TextInput
           value={title}
+          editable={writable}
           onChangeText={setTitle}
           onBlur={commitTitle}
           style={[styles.titleInput, { color: theme.textPrimary }]}
@@ -112,6 +120,8 @@ function DetailBody({
         />
       </View>
 
+      {/* Editable fields — inert for read-only viewers (server enforces too) */}
+      <View pointerEvents={writable ? 'auto' : 'none'}>
       {/* Dates */}
       <DateField
         icon="calendar"
@@ -311,9 +321,11 @@ function DetailBody({
         </View>
       ) : null}
 
+      </View>
       {/* Notes */}
       <TextInput
         value={notes}
+        editable={writable}
         onChangeText={setNotes}
         onBlur={commitNotes}
         placeholder={t('detail.notesPlaceholder')}
@@ -323,19 +335,27 @@ function DetailBody({
       />
 
       {/* Comments */}
-      <CommentsSection task={task} snap={snap} userId={user?.id ?? null} role={myRole} />
+      <CommentsSection
+        task={task}
+        snap={snap}
+        userId={user?.id ?? null}
+        role={myRole}
+        onComposerFocus={scrollToComposer}
+      />
 
-      {/* Delete */}
-      <Pressable
-        style={styles.delete}
-        onPress={() => {
-          deleteTask(task.id);
-          onClose();
-        }}
-      >
-        <Icon name="trash-2" size={18} color={theme.danger} strokeWidth={2} />
-        <Text style={[styles.deleteText, { color: theme.danger }]}>{t('detail.delete')}</Text>
-      </Pressable>
+      {/* Delete — hidden for read-only viewers */}
+      {writable && (
+        <Pressable
+          style={styles.delete}
+          onPress={() => {
+            deleteTask(task.id);
+            onClose();
+          }}
+        >
+          <Icon name="trash-2" size={18} color={theme.danger} strokeWidth={2} />
+          <Text style={[styles.deleteText, { color: theme.danger }]}>{t('detail.delete')}</Text>
+        </Pressable>
+      )}
       <View style={{ height: space.s8 }} />
     </ScrollView>
   );
@@ -374,11 +394,13 @@ function CommentsSection({
   snap,
   userId,
   role,
+  onComposerFocus,
 }: {
   task: Task;
   snap: ReturnType<typeof useSnapshot>;
   userId: string | null;
   role: Role | undefined;
+  onComposerFocus?: () => void;
 }) {
   const theme = useTheme();
   const { t, locale } = useT();
@@ -427,6 +449,7 @@ function CommentsSection({
           <TextInput
             value={draft}
             onChangeText={setDraft}
+            onFocus={onComposerFocus}
             placeholder={t('comment.placeholder')}
             placeholderTextColor={theme.textTertiary}
             style={[styles.composerInput, { color: theme.textPrimary }]}

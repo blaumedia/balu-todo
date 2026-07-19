@@ -1,7 +1,7 @@
 import { ApiError } from '@balu/api-client';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -41,6 +41,10 @@ export default function Onboarding() {
   const insets = useSafeAreaInsets();
   const serverUrl = useApp((s) => s.serverUrl);
   const setServerUrl = useApp((s) => s.setServerUrl);
+  // "Change server" clears the stored URL; keep the last value so the input
+  // is pre-filled for editing instead of starting from scratch.
+  const lastServerUrl = useRef(serverUrl);
+  if (serverUrl) lastServerUrl.current = serverUrl;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -56,17 +60,17 @@ export default function Onboarding() {
         {serverUrl ? (
           <AuthStep serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
         ) : (
-          <ServerStep onConfirm={setServerUrl} />
+          <ServerStep initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
         )}
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-function ServerStep({ onConfirm }: { onConfirm: (url: string) => void }) {
+function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfirm: (url: string) => void }) {
   const theme = useTheme();
   const { t } = useT();
-  const [value, setValue] = useState('');
+  const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
