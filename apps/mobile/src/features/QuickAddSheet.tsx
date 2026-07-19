@@ -1,7 +1,7 @@
 import { todayLocalISO } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { TokenPill } from '../components/TokenPill';
@@ -21,13 +21,18 @@ export function QuickAddSheet() {
   const context = useApp((s) => s.context);
   const snap = useSnapshot();
   const [text, setText] = useState('');
+  const [inputEpoch, setInputEpoch] = useState(0);
   const inputRef = useRef<TextInput>(null);
+  const lastSubmitAt = useRef(0);
   const today = todayLocalISO();
 
   // Refocus + clear each time the sheet opens (capture is sacred, DESIGN §1).
   useEffect(() => {
     if (open) {
       setText('');
+      // A backdrop-dismiss mid-composition can leave the IME holding stale
+      // text that a reopened composer would silently submit — remount too.
+      if (Platform.OS === 'android') setInputEpoch((e) => e + 1);
       const timer = setTimeout(() => inputRef.current?.focus(), 250);
       return () => clearTimeout(timer);
     }
@@ -41,6 +46,12 @@ export function QuickAddSheet() {
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    // A hardware enter (BT keyboard, adb) fires onSubmitEditing twice on
+    // Android — once via the key event, once via the editor action. Whether
+    // the second call still sees the old text is a render race, so debounce.
+    const now = Date.now();
+    if (now - lastSubmitAt.current < 400) return;
+    lastSubmitAt.current = now;
     const result = parseQuickAdd(trimmed, { locale, referenceDate: today });
     const args = composeTaskArgs(trimmed, result, {
       context,
@@ -50,6 +61,14 @@ export function QuickAddSheet() {
     });
     addTask(args);
     setText(''); // submit-and-add-another: stay open, keep focus
+    inputRef.current?.clear();
+    // Gboard's composing region survives a controlled clear and resurrects
+    // the stale text into the next submission — remount to reset the IME,
+    // then refocus so submit-and-add-another keeps the keyboard up.
+    if (Platform.OS === 'android') {
+      setInputEpoch((e) => e + 1);
+      setTimeout(() => inputRef.current?.focus(), 80);
+    }
   };
 
   return (
@@ -59,6 +78,7 @@ export function QuickAddSheet() {
           <Icon name="plus" size={18} color={theme.accent} strokeWidth={2.5} />
         </View>
         <TextInput
+          key={inputEpoch}
           ref={inputRef}
           autoFocus={open}
           value={text}
