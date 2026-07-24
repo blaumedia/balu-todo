@@ -156,6 +156,13 @@ npx expo export --platform ios              # full Metro bundle
 npx expo-doctor                             # project health
 ```
 
+## Store builds (EAS)
+
+`eas.json` is not in the repo — it holds App Store Connect / Play key ids and paths
+to local signing keys. Copy [`eas.example.json`](eas.example.json) to `eas.json` and
+fill in your own values; the build profiles work as-is, the `submit` block needs your
+credentials.
+
 ## Layout
 
 ```

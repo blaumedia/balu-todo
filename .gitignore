@@ -23,5 +23,13 @@ __pycache__/
 apps/mobile/ios/
 apps/mobile/android/
 
+# Store submission config: real key ids and local key paths live outside the
+# repo (see apps/mobile/eas.example.json for the shape).
+apps/mobile/eas.json
+
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Local agent scratch: skills and throwaway worktrees
+.claude/skills/
+.claude/worktrees/

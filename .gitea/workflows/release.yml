@@ -3,6 +3,9 @@ name: release
 # Tag vX.Y.Z → build the self-hosting image (web client baked in) and push it
 # to the Gitea packages registry as <owner>/balu:<version> and :latest.
 # Image tags are the version — rollback is a re-point, never a rebuild.
+#
+# The registry host comes from the `REGISTRY_HOST` Actions variable (org or
+# repo level) so this file carries no forge hostname.
 on:
   push:
     tags: ["v*"]
@@ -12,19 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Resolve version and image name
+        run: |
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "IMAGE=${{ vars.REGISTRY_HOST }}/${{ github.repository_owner }}/balu" >> "$GITHUB_ENV"
       - name: Login to registry
         # The built-in GITHUB_TOKEN cannot authenticate against the packages
-        # registry — use the blaumedia org Actions secret (Gitea PAT with
-        # write:package), same as the other repos on this forge.
-        run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login git.example.internal -u "${{ github.actor }}" --password-stdin
+        # registry — use the org Actions secret (a PAT with write:package),
+        # same as the other repos on this forge.
+        run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login "${{ vars.REGISTRY_HOST }}" -u "${{ github.actor }}" --password-stdin
       - name: Build
         run: >
           docker build -f server/Dockerfile --build-arg SKIP_WEB=0
-          -t git.example.internal/${{ github.repository_owner }}/balu:$VERSION
-          -t git.example.internal/${{ github.repository_owner }}/balu:latest .
+          -t $IMAGE:$VERSION
+          -t $IMAGE:latest .
       - name: Push
         run: |
-          docker push git.example.internal/${{ github.repository_owner }}/balu:$VERSION
-          docker push git.example.internal/${{ github.repository_owner }}/balu:latest
+          docker push $IMAGE:$VERSION
+          docker push $IMAGE:latest

@@ -1,0 +1,44 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "node": "22.14.0"
+    },
+    "development-simulator": {
+      "extends": "development",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "node": "22.14.0"
+    },
+    "production": {
+      "autoIncrement": true,
+      "node": "22.14.0"
+    }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "serviceAccountKeyPath": "/path/to/your/google-play-service-account.json",
+        "track": "production"
+      },
+      "ios": {
+        "ascApiKeyPath": "/path/to/your/AuthKey_XXXXXXXXXX.p8",
+        "ascApiKeyId": "XXXXXXXXXX",
+        "ascApiKeyIssuerId": "00000000-0000-0000-0000-000000000000",
+        "appleTeamId": "XXXXXXXXXX"
+      }
+    }
+  }
+}
