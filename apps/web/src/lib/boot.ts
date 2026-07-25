@@ -1,20 +1,6 @@
-import type { Membership } from "@balu/domain";
+import { pickMembership } from "@balu/domain";
 import { api, initSync } from "./clients.js";
 import { lastWorkspaceId, useApp } from "../store/app.js";
-
-/** Pick the membership to open: an explicit id, else the last-used, else first. */
-function pickMembership(memberships: Membership[], preferredId?: string): Membership | undefined {
-  if (preferredId) {
-    const explicit = memberships.find((m) => m.workspace.id === preferredId);
-    if (explicit) return explicit;
-  }
-  const last = lastWorkspaceId();
-  if (last) {
-    const remembered = memberships.find((m) => m.workspace.id === last);
-    if (remembered) return remembered;
-  }
-  return memberships[0];
-}
 
 /**
  * Boot the app into a workspace: fetch `/me`, choose a workspace (preferred →
@@ -25,7 +11,7 @@ export async function bootSession(preferredWorkspaceId?: string): Promise<boolea
   const st = useApp.getState();
   try {
     const me = await api.getMe();
-    const membership = pickMembership(me.memberships, preferredWorkspaceId);
+    const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
       st.setBoot("login");
       return false;

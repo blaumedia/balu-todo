@@ -9,21 +9,10 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_user
 from ..db import get_db
 from ..models import Membership, User, Workspace
-from ..schemas.user import MeUpdate, UserOut
+from ..schemas.user import MeUpdate, UserOut, user_out
 from ..schemas.workspace import MembershipOut, MeResponse, WorkspaceOut
 
 router = APIRouter(tags=["account"])
-
-
-def _user_out(user: User) -> UserOut:
-    return UserOut(
-        id=str(user.id),
-        email=user.email,
-        name=user.name,
-        locale=user.locale,
-        theme=user.theme,
-        created_at=user.created_at,
-    )
 
 
 @router.get("/me", response_model=MeResponse)
@@ -42,7 +31,7 @@ def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)
         )
         for m, ws in rows
     ]
-    return MeResponse(user=_user_out(user), memberships=memberships)
+    return MeResponse(user=user_out(user), memberships=memberships)
 
 
 @router.patch("/me", response_model=UserOut)
@@ -59,4 +48,4 @@ def patch_me(
         user.theme = body.theme
     db.commit()
     db.refresh(user)
-    return _user_out(user)
+    return user_out(user)

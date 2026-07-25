@@ -21,7 +21,9 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`.
+  Error messages are for humans and never carry internal detail (driver messages,
+  the submitted body, transport hostnames) — that goes to the server log.
 
 ## 1. Authentication
 
@@ -36,14 +38,20 @@ JWT bearer auth. `Authorization: Bearer <access_token>` on every authenticated r
 | `POST /auth/register` | `{email, password, name}` | `201 {user, access_token, refresh_token}` |
 | `POST /auth/login` | `{email, password}` | `200 {user, access_token, refresh_token}` |
 | `POST /auth/refresh` | `{refresh_token}` | `200 {access_token, refresh_token}` |
-| `POST /auth/logout` | `{refresh_token}` | `204` (invalidates that refresh token) |
+| `POST /auth/logout` | `{refresh_token}` | `204` (invalidates the whole session family) |
 
 Rules:
 
 - Registration is gated by env `BALU_ALLOW_REGISTRATION` (default `true`). When disabled
   → `403 registration_disabled`. (Invite flows come later.)
-- `POST /auth/register` auto-creates a personal workspace named after the user (e.g.
-  "Dennis") with the user as `owner`.
+- `POST /auth/register` auto-creates a personal workspace named after the user — the
+  full name, e.g. "Anna Maria Schmidt" — with the user as `owner`.
+- **Throttling (v1.2.1):** `/auth/login`, `/auth/register` and `/auth/refresh` are rate
+  limited per client IP, and `/auth/login` additionally per account. Exceeding a limit →
+  `429 rate_limited`. A login for an unknown address costs the same as one for a known
+  address (no enumeration oracle).
+- `POST /auth/logout` revokes the entire refresh-token family, not only the presented
+  token — otherwise earlier tokens of the same session stayed usable after logout.
 - Password: min 8 chars, hashed with argon2id (fallback bcrypt acceptable if argon2 is a
   packaging problem — pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
@@ -138,11 +146,32 @@ Field semantics (these ARE the product decisions — implement precisely):
 - `label_ids` order is not meaningful.
 - `assigned_to` must be a member of the workspace.
 
-**Completing a recurring task** (server-side, part of `task_complete`): instead of
-setting `completed_at`, advance the schedule — `start_date` moves to the next occurrence
-strictly after `max(start_date, today)`; if `deadline` was set, it moves by the same
-delta; the task stays open. (Completion history for recurring tasks is a v2 concern.)
-`task_complete` on a non-recurring task sets `completed_at`/`completed_by`.
+**Completing a recurring task** (part of `task_complete`): instead of setting
+`completed_at`, advance the schedule and leave the task open. (Completion history for
+recurring tasks is a v2 concern.) `task_complete` on a non-recurring task sets
+`completed_at`/`completed_by`.
+
+The next occurrence is **anchored**, not derived from the completion date — the series is
+`anchor, anchor + INTERVAL, anchor + 2·INTERVAL, …` (for `FREQ=WEEKLY` with `BYDAY`: the
+BYDAY days of every `INTERVAL`-th week starting from the anchor's own week), and the
+answer is its smallest member strictly greater than `after`. Each step is measured from
+the anchor, so a clamped month-end recovers: Jan 31 → Feb 28 → **Mar 31**.
+
+| Task has | anchor | after | effect |
+|---|---|---|---|
+| `start_date` | `start_date` | `max(start_date, today)` | `start_date` = next occurrence; `deadline` shifts by the same delta |
+| only `deadline` | `deadline` | `max(deadline, today)` | `deadline` = next occurrence |
+| neither | `today` | `today` | `start_date` = next occurrence |
+
+`today` comes from the **client**: `task_complete` carries `args.today` (`YYYY-MM-DD`),
+the device's local calendar day, because the optimistic apply runs against that day (§0).
+The server clamps it to ±1 day of UTC — the real span of world timezones — and falls back
+to its own UTC day when it is absent or outside that range. Deriving it from UTC alone
+made the server disagree with any client more than a few hours out, and the completed task
+visibly jumped once the response landed. Server
+and client run the same algorithm — `server/balu/sync/recurrence.py` and
+`packages/sync-client/src/recurrence.ts` share a test-vector table, because a mismatch
+makes a completed task visibly jump once the sync response lands.
 
 ### 3.4 `comment` — v1.2
 
@@ -221,8 +250,10 @@ effects of those commands) are returned.
   full sync (`full_sync: true`) rather than erroring.
 - `commands` (optional, max 100 per request): applied **in order, each in its own
   transaction**. One failing command does not abort the rest.
-- `uuid`: client-generated UUIDv4, the **idempotency key**. The server persists processed
-  uuids (per workspace); a replayed uuid is not re-applied and returns its stored status.
+- `uuid`: client-generated UUIDv4, the **idempotency key**, scoped to `(workspace, uuid)`.
+  The server persists processed uuids per workspace; a replayed uuid **in the same
+  workspace** is not re-applied and returns its stored status. The same uuid in another
+  workspace is a different command and is applied normally.
 
 ### 5.2 Response
 
@@ -261,16 +292,16 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 |---|---|
 | `project_add` | `temp_id`, `name`, `color?`, `sort_order?` |
 | `project_update` | `id`, then any of `name, color, sort_order, archived_at` |
-| `project_delete` | `id` — soft-deletes project + its sections + its tasks |
+| `project_delete` | `id` — soft-deletes project + its sections + its tasks + those tasks' comments |
 | `section_add` | `temp_id`, `project_id`, `name`, `sort_order?` |
 | `section_update` | `id`, any of `name, sort_order` |
 | `section_delete` | `id` — its tasks move to the project body (section_id → null) |
-| `task_add` | `temp_id`, `title`, plus any writable task field |
+| `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
-| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change |
-| `task_complete` | `id` — see §3.3 for recurring behavior |
+| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. |
+| `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) — see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
-| `task_delete` | `id` — soft-deletes task + its subtasks |
+| `task_delete` | `id` — soft-deletes task + its subtasks + all their comments |
 | `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` — bulk, single container expected |
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
@@ -282,6 +313,15 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
 (id/temp_id unknown or deleted), `forbidden` (viewer role; or comment edit/delete by
 a non-author non-admin), `name_taken` (labels).
+
+Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
+comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.
+
+**Clients must roll back a rejected command.** A non-`ok` `sync_status` means the
+optimistic mutation never happened server-side; leaving it in the local replica leaves
+the user looking at an object that does not exist (and it survives restarts, because the
+replica is persisted). `@balu/sync-client` discards the replica and forces a full sync
+whenever any command in a flush was rejected, then reports the failures to the app.
 
 ### 5.5 Conflict policy (documented behavior, tested)
 
@@ -317,12 +357,28 @@ Invites expire after 14 days.
 
 | Endpoint | Notes |
 |---|---|
-| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. `email` is informational in v1 (no mail is sent); the client shows/copies the link `/invite/<token>`. |
+| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. No mail is sent (the client shows/copies the link `/invite/<token>`), but when `email` is set the invite is **bound** to it — see accept. |
 | `GET /workspaces/{id}/invites` | `{invites: [...]}`, pending only; role ≥ admin |
 | `DELETE /workspaces/{id}/invites/{invite_id}` | revoke → `204`; role ≥ admin |
-| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token` |
-| `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin; demoting/removing the **last owner** → `400 last_owner` |
-| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. |
+| `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin, subject to the rank rules below; demoting the **last owner** → `400 last_owner` |
+| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+
+**Rank rules (v1.2.1).** Roles rank `viewer < member < admin < owner`.
+
+- You may not act on a member ranked **above** you → `403 forbidden`. (Without this an
+  admin could demote a sitting owner.) **Peers may act on each other**: an admin can
+  demote or remove another admin, and an owner another owner. Forbidding peer actions
+  made a co-owner unremovable through the API — only they could step down — which is a
+  worse failure than lateral admin conflict, and an owner can always undo one.
+- Granting or revoking the `owner` role requires role `owner`. An admin setting
+  `{"role": "owner"}` → `403 forbidden`.
+- Acting on **yourself** is always allowed — stepping down and handing over ownership
+  stay possible; the `last_owner` guard is what keeps a workspace governable.
+
+**Invites are multi-use until they expire or are revoked**: accepting does not consume
+the token, so one link can admit several people for its full 14-day TTL. Bind an invite
+to an `email` (or revoke it after use) when that is not what you want.
 
 ```json
 // invite
@@ -345,9 +401,22 @@ Per-user external channels — the self-hosted answer to app-store push relays.
 
 Channel shapes: `{"type": "ntfy", "url": "https://ntfy.sh/<topic>"}` ·
 `{"type": "email", "address": "…"}` · `{"type": "telegram", "chat_id": "…"}`.
-Email requires server SMTP config (`BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`), telegram
+ntfy URLs must resolve to a public address, checked when stored and again at send
+time; the request is then pinned to the address that was validated, so a rebinding
+DNS answer cannot redirect it. Email requires server SMTP config (`BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`), telegram
 requires `BALU_TELEGRAM_BOT_TOKEN`; configuring a channel whose transport is not set up
 server-side → `400 channel_unavailable`.
+
+Channel validation (v1.2.1):
+
+- `ntfy.url` must be `http(s)` and must resolve to a **public** address. Loopback,
+  private, link-local (incl. `169.254.169.254`), multicast and reserved ranges →
+  `422 validation_error`. The check runs again at delivery time (DNS can change), and
+  redirects are not followed.
+- `email.address` must be a valid address **and equal the authenticated user's own
+  account address** — there is no confirmation flow in v1, and an unverified destination
+  would make the deployment's SMTP identity an open relay. Anything else →
+  `422 validation_error`.
 
 **Reminder delivery (server-side):** a background loop (~every 30 s) finds open,
 non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the channels of
@@ -369,6 +438,9 @@ from the command handlers (failures logged, never fail the command):
 ## 9. Static hosting & CORS
 
 - The server serves the built web client: any non-`/api`, non-`/healthz` GET falls back
-  to the SPA `index.html` from `server/static/` when that directory exists.
-- CORS: allow all origins for `/api/*` (mobile apps + LAN dev; credentials are bearer
-  tokens, not cookies). `BALU_CORS_ORIGINS` env can restrict later.
+  to the SPA `index.html` from `server/static/` when that directory exists. A path that
+  resolves outside `server/static/` is never served — the fallback returns `index.html`
+  instead (percent-encoded `..` included).
+- CORS: **same-origin by default** (v1.2.1 — the server serves its own SPA). Set
+  `BALU_CORS_ORIGINS` to a comma-separated allow-list, or `*`, when the web client is
+  hosted on a different origin. Credentials are bearer tokens, not cookies.

@@ -1,5 +1,7 @@
 import { createApiClient, type ApiClient } from "@balu/api-client";
 import { createSyncClient, localStorageKV, type SyncClient } from "@balu/sync-client";
+import { makeT } from "../i18n/index.js";
+import { useApp } from "../store/app.js";
 
 // One localStorage KV shared by both clients (structurally identical interfaces).
 const kv = localStorageKV();
@@ -26,6 +28,12 @@ export function initSync(workspaceId: string, userId: string): SyncClient {
     storage: kv,
     onAuthFail: async () => {
       await api.refresh();
+    },
+    onCommandsRejected: (rejected) => {
+      // The replica has already been re-pulled; tell the user their optimistic
+      // change did not stick instead of letting it vanish silently.
+      const { locale, showToast } = useApp.getState();
+      showToast(makeT(locale)("sync.rejected").replace("{n}", String(rejected.length)));
     },
   });
   sync.start();

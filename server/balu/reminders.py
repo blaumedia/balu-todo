@@ -12,34 +12,23 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .db import get_sessionmaker
-from .models import Project, Task, UserChannel
+from .delivery import Sender, deliver_to_user, task_context
+from .models import Task
 from .notifications import send_to_channel
 
 logger = logging.getLogger("balu.reminders")
 
-Sender = Callable[[str, dict[str, Any], str, str], None]
-
 
 def build_message(session: Session, task: Task) -> tuple[str, str]:
     """(title, body) for a task reminder: title, then project name + deadline."""
-    title = task.title
-    lines: list[str] = []
-    if task.project_id is not None:
-        project = session.get(Project, task.project_id)
-        if project is not None and not project.is_deleted:
-            lines.append(f"Project: {project.name}")
-    if task.deadline is not None:
-        lines.append(f"Due: {task.deadline.isoformat()}")
-    return title, "\n".join(lines)
+    return task.title, task_context(session, task)
 
 
 def deliver_reminder(session: Session, task: Task, sender: Sender) -> None:
@@ -51,24 +40,8 @@ def deliver_reminder(session: Session, task: Task, sender: Sender) -> None:
     recipient_id = task.assigned_to or task.created_by
     if recipient_id is None:
         return
-    channels = (
-        session.execute(select(UserChannel).where(UserChannel.user_id == recipient_id))
-        .scalars()
-        .all()
-    )
-    if not channels:
-        return
     title, body = build_message(session, task)
-    for channel in channels:
-        try:
-            sender(channel.type, channel.config, title, body)
-        except Exception as exc:  # noqa: BLE001 - log and continue, mark sent anyway
-            logger.warning(
-                "reminder delivery failed for task=%s channel=%s: %s",
-                task.id,
-                channel.type,
-                exc,
-            )
+    deliver_to_user(session, sender, recipient_id, title, body)
 
 
 def reminder_tick(

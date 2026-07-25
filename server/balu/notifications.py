@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from .config import get_settings
+from .urlguard import UnsafeUrl, checked_outbound_target, pinned_resolution
 
 logger = logging.getLogger("balu.notifications")
 
@@ -49,12 +50,30 @@ def send_ntfy(config: dict[str, Any], title: str, body: str) -> None:
     url = config.get("url")
     if not url:
         raise ChannelUnavailable("ntfy channel is missing a url")
-    resp = httpx.post(
-        url,
-        content=body.encode("utf-8"),
-        headers={"Title": title, "Content-Type": "text/plain; charset=utf-8"},
-        timeout=_HTTP_TIMEOUT,
-    )
+    # Re-check at send time: DNS may have changed since the channel was stored.
+    try:
+        url, host, address = checked_outbound_target(url)
+    except UnsafeUrl as exc:
+        # Deliberately vague: `exc` names the resolved address, and this message
+        # reaches the client through POST /me/channels/test (S3/S6).
+        logger.warning("blocked ntfy delivery to an unsafe url", exc_info=exc)
+        raise ChannelUnavailable("ntfy url is not allowed") from exc
+
+    # Connect to the address we just validated, not to whatever the hostname
+    # resolves to a moment later: without this, a 0-TTL record can answer public
+    # for the check and private for the connection (DNS rebinding).
+    with pinned_resolution(host, address):
+        resp = httpx.post(
+            url,
+            content=body.encode("utf-8"),
+            headers={"Title": title, "Content-Type": "text/plain; charset=utf-8"},
+            timeout=_HTTP_TIMEOUT,
+            follow_redirects=False,  # a redirect would bypass the SSRF guard
+        )
+    # `raise_for_status` treats 3xx as success, so an un-followed redirect would
+    # be reported as a working channel that silently delivers nothing.
+    if resp.is_redirect:
+        raise ChannelUnavailable("ntfy url redirects; configure the final URL")
     resp.raise_for_status()
 
 
@@ -92,7 +111,10 @@ def send_telegram(config: dict[str, Any], title: str, body: str) -> None:
         f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
         json={"chat_id": chat_id, "text": text},
         timeout=_HTTP_TIMEOUT,
+        follow_redirects=False,
     )
+    if resp.is_redirect:
+        raise ChannelUnavailable("telegram API redirected unexpectedly")
     resp.raise_for_status()
 
 

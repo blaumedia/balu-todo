@@ -40,11 +40,38 @@ export const sqliteKV: AsyncKV = {
   },
 };
 
+/**
+ * Wipe every `balu:*` row that belongs to the signed-in account: the
+ * api-client's tokens, the sync-client's replica/queue/token for every
+ * workspace, and the cached session. Device-level preferences (server URL,
+ * theme, locale) survive — they are not the user's data.
+ *
+ * Without this the next person to open the app on this device still has the
+ * previous user's tasks, notes and comments in SQLite, and any queued command
+ * would be flushed under whichever account signs in next.
+ */
+export async function purgeUserData(): Promise<void> {
+  const db = await getDb();
+  // Device preferences survive; anything tied to the account goes. Note that
+  // `remindersEnabled` is a device setting ('1'/'0', no user data) — wiping it
+  // silently turned local reminders off again after every re-login.
+  // `lastWorkspaceId` is deliberately NOT kept: it names the previous user's
+  // workspace.
+  await db.runAsync(
+    "DELETE FROM kv WHERE k LIKE 'balu:%' AND k NOT IN (?, ?, ?, ?)",
+    'balu:settings:serverUrl',
+    'balu:settings:theme',
+    'balu:settings:locale',
+    'balu:settings:remindersEnabled',
+  );
+}
+
 // Settings keys (app-owned; @balu/* packages own their own `balu:*` keys).
 export const SETTINGS = {
   serverUrl: 'balu:settings:serverUrl',
   theme: 'balu:settings:theme',
   locale: 'balu:settings:locale',
   session: 'balu:settings:session', // cached {user, workspace} for offline boot
+  lastWorkspaceId: 'balu:settings:lastWorkspaceId', // boot preference (§7)
   remindersEnabled: 'balu:settings:remindersEnabled', // '1' | '0' — local reminders
 } as const;

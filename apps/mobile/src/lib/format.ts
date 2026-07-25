@@ -1,10 +1,20 @@
-// Calm relative date labels (DESIGN §6). Manual name tables per locale instead
-// of Intl.DateTimeFormat — Hermes' Intl timezone support is uneven across
-// platforms, and we only need de/en.
-import { addDaysISO, compareISO, diffDaysISO, dowISO, type IsoDate, type IsoDateTime, type Locale } from '@balu/domain';
+// Manual calendar-name tables per locale instead of Intl.DateTimeFormat —
+// Hermes' Intl timezone support is uneven across platforms, and we only need
+// de/en. The relative-label *logic* is shared with the web app through
+// @balu/domain (D3), so only the names differ between platforms.
+import {
+  dowISO,
+  relativeDate as domainRelativeDate,
+  relativeTime as domainRelativeTime,
+  type DateNames,
+  type DateTone,
+  type IsoDate,
+  type IsoDateTime,
+  type Locale,
+} from '@balu/domain';
 import type { TranslationKey } from '../i18n';
 
-export type DateTone = 'today' | 'overdue' | 'future';
+export type { DateTone };
 
 const WEEKDAY_SHORT: Record<Locale, string[]> = {
   // index 0 = Sunday … 6 = Saturday (matches dowISO)
@@ -50,6 +60,8 @@ export function monthLong(iso: IsoDate, locale: Locale): string {
   return `${MONTH_LONG[locale][m - 1]} ${y}`;
 }
 
+const NAMES: DateNames = { weekdayShort, dayMonth };
+
 /**
  * Compact relative label for a past timestamp (comment meta). Under a minute
  * → "just now"; then Xm / Xh / Xd; beyond a week falls back to the date.
@@ -60,17 +72,7 @@ export function relativeTime(
   locale: Locale,
   t: (k: TranslationKey) => string,
 ): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return '';
-  const sec = Math.max(0, Math.floor((nowMs - then) / 1000));
-  if (sec < 60) return t('comment.justNow');
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d`;
-  return dayMonth(iso.slice(0, 10), locale);
+  return domainRelativeTime(iso, nowMs, locale, NAMES, t('time.justNow'));
 }
 
 /** Human, calm relative label for a date (DESIGN §6). */
@@ -80,14 +82,9 @@ export function relativeDate(
   locale: Locale,
   t: (k: TranslationKey) => string,
 ): { text: string; tone: DateTone } {
-  const cmp = compareISO(iso, today);
-  if (cmp === 0) return { text: t('date.today'), tone: 'today' };
-  if (iso === addDaysISO(today, 1)) return { text: t('date.tomorrow'), tone: 'future' };
-  if (cmp < 0) {
-    if (iso === addDaysISO(today, -1)) return { text: t('date.yesterday'), tone: 'overdue' };
-    return { text: dayMonth(iso, locale), tone: 'overdue' };
-  }
-  const ahead = diffDaysISO(today, iso);
-  if (ahead < 7) return { text: weekdayShort(iso, locale), tone: 'future' };
-  return { text: dayMonth(iso, locale), tone: 'future' };
+  return domainRelativeDate(iso, today, locale, NAMES, {
+    today: t('date.today'),
+    tomorrow: t('date.tomorrow'),
+    yesterday: t('date.yesterday'),
+  });
 }

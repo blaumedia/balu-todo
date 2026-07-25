@@ -34,6 +34,7 @@ export const de: Record<TranslationKey, string> = {
   'sync.syncing': 'Synchronisiere…',
   'sync.offline': 'Offline — lokal gespeichert',
   'sync.error': 'Sync fehlgeschlagen',
+  'sync.rejected': '{n} Änderung(en) wurden vom Server abgelehnt und zurückgenommen.',
 
   'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',
@@ -70,7 +71,7 @@ export const de: Record<TranslationKey, string> = {
   'comment.delete': 'Löschen',
   'comment.save': 'Speichern',
   'comment.edited': 'bearbeitet',
-  'comment.justNow': 'gerade eben',
+  'time.justNow': 'gerade eben',
   'comment.readOnly': 'Du hast nur Lesezugriff.',
 
   'priority.none': 'Keine',
@@ -116,11 +117,19 @@ export const de: Record<TranslationKey, string> = {
   'onboarding.serverTitle': 'Mit deinem Server verbinden',
   'onboarding.serverHint': 'Gib die Adresse deines Balu-Servers im Netzwerk ein.',
   'onboarding.serverUrl': 'Server-URL',
-  'onboarding.serverPlaceholder': 'http://192.168.1.10:8080',
+  'onboarding.serverPlaceholder': 'balu.example.com',
+  'onboarding.insecureTitle': 'Unverschlüsselte Verbindung',
+  'onboarding.insecureWarning':
+    'http:// überträgt Passwort und Session-Token im Klartext. Nur in einem Netzwerk fortfahren, dem du voll vertraust.',
+  'onboarding.continueInsecure': 'Ohne Verschlüsselung fortfahren',
+  'onboarding.insecureBadge': 'unverschlüsselt',
   'onboarding.continue': 'Weiter',
   'onboarding.changeServer': 'Server ändern',
   'onboarding.badUrl': 'Das sieht nicht nach einer gültigen URL aus.',
   'onboarding.unreachable': 'Server nicht erreichbar. Adresse prüfen und erneut versuchen.',
+  'onboarding.unreachableHttps':
+    '{url} nicht erreichbar. Adressen ohne Schema werden über https versucht — läuft dein Server über einfaches http, stell es voran.',
+  'onboarding.tryHttp': 'Stattdessen {url} versuchen',
 
   'auth.loginTitle': 'Willkommen zurück',
   'auth.registerTitle': 'Konto erstellen',
@@ -131,6 +140,7 @@ export const de: Record<TranslationKey, string> = {
   'auth.register': 'Registrieren',
   'auth.toRegister': 'Noch kein Konto? Registrieren',
   'auth.toLogin': 'Schon ein Konto? Anmelden',
+  'auth.rate_limited': 'Zu viele Versuche. Bitte kurz warten und erneut versuchen.',
   'auth.errorGeneric': 'Etwas ist schiefgelaufen. Bitte erneut versuchen.',
   'auth.invalid_credentials': 'E-Mail oder Passwort ist falsch.',
   'auth.email_taken': 'Diese E-Mail ist bereits registriert.',

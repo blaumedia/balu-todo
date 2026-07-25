@@ -31,6 +31,7 @@ export const en = {
   'sync.syncing': 'Syncing…',
   'sync.offline': 'Offline — saved locally',
   'sync.error': 'Sync failed',
+  'sync.rejected': '{n} change(s) were rejected by the server and have been undone.',
 
   'quickadd.placeholder': 'Add a task — try dates, #project, @label, !p1',
   'quickadd.hint': 'Return to add · another stays open',
@@ -67,7 +68,7 @@ export const en = {
   'comment.delete': 'Delete',
   'comment.save': 'Save',
   'comment.edited': 'edited',
-  'comment.justNow': 'just now',
+  'time.justNow': 'just now',
   'comment.readOnly': 'You have read-only access.',
 
   'priority.none': 'None',
@@ -112,11 +113,19 @@ export const en = {
   'onboarding.serverTitle': 'Connect to your server',
   'onboarding.serverHint': 'Enter the address of your Balu server on your network.',
   'onboarding.serverUrl': 'Server URL',
-  'onboarding.serverPlaceholder': 'http://192.168.1.10:8080',
+  'onboarding.serverPlaceholder': 'balu.example.com',
+  'onboarding.insecureTitle': 'Unencrypted connection',
+  'onboarding.insecureWarning':
+    'http:// sends your password and session token in the clear. Only continue on a network you fully trust.',
+  'onboarding.continueInsecure': 'Continue without encryption',
+  'onboarding.insecureBadge': 'not encrypted',
   'onboarding.continue': 'Continue',
   'onboarding.changeServer': 'Change server',
   'onboarding.badUrl': "That doesn't look like a valid URL.",
   'onboarding.unreachable': "Couldn't reach that server. Check the address and try again.",
+  'onboarding.unreachableHttps':
+    "Couldn't reach {url}. Addresses without a scheme are tried over https — if your server runs on plain http, add it in front.",
+  'onboarding.tryHttp': 'Try {url} instead',
 
   'auth.loginTitle': 'Welcome back',
   'auth.registerTitle': 'Create your account',
@@ -127,6 +136,7 @@ export const en = {
   'auth.register': 'Sign up',
   'auth.toRegister': 'Need an account? Sign up',
   'auth.toLogin': 'Have an account? Log in',
+  'auth.rate_limited': 'Too many attempts. Please wait a moment and try again.',
   'auth.errorGeneric': 'Something went wrong. Please try again.',
   'auth.invalid_credentials': 'Wrong email or password.',
   'auth.email_taken': 'That email is already registered.',

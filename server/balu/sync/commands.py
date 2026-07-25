@@ -7,13 +7,15 @@ persisted for idempotent replay; temp_id -> object_id mappings persist across re
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..events import (
@@ -38,6 +40,8 @@ from ..notifications import send_to_channel
 from .engine import ROLE_RANK, bump_version
 from .recurrence import next_occurrence, parse_recurrence
 
+logger = logging.getLogger("balu.sync.commands")
+
 VALID_COLORS = {
     "slate", "red", "orange", "amber", "green", "teal",
     "cyan", "blue", "indigo", "violet", "pink", "rose",
@@ -45,6 +49,13 @@ VALID_COLORS = {
 
 # Keys within command args that may carry an id or temp_id reference.
 _REF_KEYS = ("id", "project_id", "section_id", "parent_task_id", "task_id")
+
+# Text limits (S15). `title` matches its String(1000) column; `notes` is a Text
+# column, so without a cap any member could write arbitrarily large rows.
+MAX_TITLE = 1000
+MAX_NAME = 200
+MAX_NOTES = 20_000
+MAX_BODY = 5000
 
 
 class CommandError(Exception):
@@ -79,20 +90,32 @@ def _as_uuid(value: Any) -> uuid.UUID:
         raise CommandError("not_found", f"unknown reference: {value!r}") from exc
 
 
-def _require_str(args: dict, key: str) -> str:
+def _require_str(args: dict, key: str, max_length: int = MAX_NAME) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value.strip():
         raise CommandError("invalid_args", f"{key} is required")
+    if len(value) > max_length:
+        raise CommandError(
+            "invalid_args", f"{key} must be at most {max_length} characters"
+        )
+    return value
+
+
+def _optional_text(args: dict, key: str, max_length: int) -> str:
+    value = args.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise CommandError("invalid_args", f"{key} must be a string or null")
+    if len(value) > max_length:
+        raise CommandError(
+            "invalid_args", f"{key} must be at most {max_length} characters"
+        )
     return value
 
 
 def _require_body(args: dict) -> str:
-    value = args.get("body")
-    if not isinstance(value, str) or not value.strip():
-        raise CommandError("invalid_args", "body is required")
-    if len(value) > 5000:
-        raise CommandError("invalid_args", "body must be at most 5000 characters")
-    return value
+    return _require_str(args, "body", MAX_BODY)
 
 
 def _parse_date(value: Any, key: str) -> date | None:
@@ -138,6 +161,8 @@ def _validate_recurrence(value: Any) -> str | None:
         return None
     if not isinstance(value, str):
         raise CommandError("invalid_args", "recurrence must be a string or null")
+    if len(value) > 200:  # matches tasks.recurrence String(200)
+        raise CommandError("invalid_args", "recurrence must be at most 200 characters")
     try:
         parse_recurrence(value)
     except ValueError as exc:
@@ -146,13 +171,15 @@ def _validate_recurrence(value: Any) -> str | None:
 
 
 def _max_sort_order(ctx: Ctx, model, **filters) -> int:
-    stmt = select(model.sort_order).where(model.workspace_id == ctx.workspace_id)
+    # MAX in the database (I14): this used to pull every sibling's sort_order
+    # into Python just to take the maximum.
+    stmt = select(func.max(model.sort_order)).where(model.workspace_id == ctx.workspace_id)
     for key, value in filters.items():
         col = getattr(model, key)
         stmt = stmt.where(col.is_(None) if value is None else col == value)
     stmt = stmt.where(model.is_deleted.is_(False))
-    values = ctx.session.execute(stmt).scalars().all()
-    return (max(values) if values else 0) + 1000
+    highest = ctx.session.execute(stmt).scalar()
+    return (highest or 0) + 1000
 
 
 # ---------------------------------------------------------------------------
@@ -210,11 +237,19 @@ def _resolve_labels(ctx: Ctx, label_ids: Any) -> list[Label]:
 # ---------------------------------------------------------------------------
 # Task field application (shared by task_add / task_update)
 # ---------------------------------------------------------------------------
-def _apply_task_fields(ctx: Ctx, task: Task, args: dict, *, creating: bool) -> None:
+def _check_section_in_project(section: Section, project_id: uuid.UUID | None) -> None:
+    """A task's section must live in the task's own project (I4)."""
+    if section.project_id != project_id:
+        raise CommandError(
+            "invalid_args", "section_id must belong to the task's project"
+        )
+
+
+def _apply_task_fields(ctx: Ctx, task: Task, args: dict) -> None:
     if "title" in args:
-        task.title = _require_str(args, "title")
+        task.title = _require_str(args, "title", MAX_TITLE)
     if "notes" in args:
-        task.notes = args.get("notes") or ""
+        task.notes = _optional_text(args, "notes", MAX_NOTES)
     if "start_date" in args:
         task.start_date = _parse_date(args.get("start_date"), "start_date")
     if "evening" in args:
@@ -319,7 +354,38 @@ def h_project_delete(ctx: Ctx, args: dict) -> dict:
     for t in tasks:
         t.is_deleted = True
         t.version = version
+
+    # Subtasks inherit their parent's project in the UI but carry their own
+    # `project_id`, which may be null — those would survive the query above and
+    # be left pointing at a deleted parent.
+    parent_ids = [t.id for t in tasks]
+    orphans = ctx.session.execute(
+        select(Task).where(
+            Task.parent_task_id.in_(parent_ids), Task.is_deleted.is_(False)
+        )
+    ).scalars().all() if parent_ids else []
+    for st in orphans:
+        st.is_deleted = True
+        st.version = version
+
+    # Deleting a task cascades to its comments (§3.4) — deleting the project that
+    # holds those tasks has to do the same, or the comments stay live and keep
+    # syncing against tasks that no longer exist.
+    _delete_comments_of(ctx, parent_ids + [st.id for st in orphans], version)
     return {}
+
+
+def _delete_comments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) -> None:
+    if not task_ids:
+        return
+    comments = ctx.session.execute(
+        select(Comment).where(
+            Comment.task_id.in_(task_ids), Comment.is_deleted.is_(False)
+        )
+    ).scalars().all()
+    for c in comments:
+        c.is_deleted = True
+        c.version = version
 
 
 def h_section_add(ctx: Ctx, args: dict) -> dict:
@@ -366,13 +432,15 @@ def h_section_delete(ctx: Ctx, args: dict) -> dict:
 
 
 def h_task_add(ctx: Ctx, args: dict) -> dict:
-    title = _require_str(args, "title")
+    title = _require_str(args, "title", MAX_TITLE)
     project_id = None
     if args.get("project_id") is not None:
         project_id = _get_project(ctx, args["project_id"]).id
     section_id = None
     if args.get("section_id") is not None:
-        section_id = _get_section(ctx, args["section_id"]).id
+        section = _get_section(ctx, args["section_id"])
+        _check_section_in_project(section, project_id)
+        section_id = section.id
     parent_task_id = _check_parent(ctx, args.get("parent_task_id"))
 
     version = ctx.bump()
@@ -387,7 +455,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
         created_by=ctx.user_id,
         version=version,
     )
-    _apply_task_fields(ctx, task, args, creating=True)
+    _apply_task_fields(ctx, task, args)
     _record_assignment(ctx, task, previous=None)
     sort_order = args.get("sort_order")
     if sort_order is None:
@@ -405,7 +473,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
 def h_task_update(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     previous_assignee = task.assigned_to
-    _apply_task_fields(ctx, task, args, creating=False)
+    _apply_task_fields(ctx, task, args)
     _record_assignment(ctx, task, previous=previous_assignee)
     task.version = ctx.bump()
     return {}
@@ -419,33 +487,72 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
         task.project_id = (
             _get_project(ctx, args["project_id"]).id if args.get("project_id") else None
         )
+        # Moving to another project drops a section that no longer applies,
+        # unless this same command sets a matching one.
+        if "section_id" not in args:
+            task.section_id = None
     if "section_id" in args:
-        task.section_id = (
-            _get_section(ctx, args["section_id"]).id if args.get("section_id") else None
-        )
+        if args.get("section_id"):
+            section = _get_section(ctx, args["section_id"])
+            _check_section_in_project(section, task.project_id)
+            task.section_id = section.id
+        else:
+            task.section_id = None
     if "sort_order" in args:
         task.sort_order = int(args["sort_order"])
     task.version = ctx.bump()
     return {}
 
 
+def _completion_today(args: dict) -> date:
+    """The calendar day to roll a recurring task forward from.
+
+    The client applies `task_complete` optimistically against its *local* day
+    (contract §0), so deriving this from UTC alone made the two disagree for
+    anyone far enough from UTC: at 09:00 on the 24th in UTC+13 the server still
+    sees the 23rd, picks a different next occurrence, and the task visibly jumps
+    when the response lands — the same symptom the anchoring fix removed, from a
+    different cause.
+
+    The client therefore sends its own day. It is clamped to ±1 day of UTC (the
+    real range of world timezones) so a wrong or hostile value cannot push a
+    series somewhere arbitrary.
+    """
+    utc_today = datetime.now(UTC).date()
+    claimed = args.get("today")
+    if claimed is None:
+        return utc_today
+    try:
+        parsed = _parse_date(claimed, "today")
+    except CommandError:
+        # A hint, not an instruction: garbage falls back rather than failing the
+        # completion (which on a current client would trigger a full resync).
+        return utc_today
+    if parsed is None or abs((parsed - utc_today).days) > 1:
+        return utc_today
+    return parsed
+
+
 def h_task_complete(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     version = ctx.bump()
     if task.recurrence:
-        today = date.today()
+        today = _completion_today(args)
         if task.start_date is not None:
-            reference = max(task.start_date, today)
-            new_start = next_occurrence(task.recurrence, reference)
+            # Anchor on the task's own start date so the rule keeps its phase.
+            new_start = next_occurrence(
+                task.recurrence, task.start_date, max(task.start_date, today)
+            )
             delta = new_start - task.start_date
             task.start_date = new_start
             if task.deadline is not None:
                 task.deadline = task.deadline + delta
         elif task.deadline is not None:
-            reference = max(task.deadline, today)
-            task.deadline = next_occurrence(task.recurrence, reference)
+            task.deadline = next_occurrence(
+                task.recurrence, task.deadline, max(task.deadline, today)
+            )
         else:
-            task.start_date = next_occurrence(task.recurrence, today)
+            task.start_date = next_occurrence(task.recurrence, today, today)
         # recurring task stays open: completed_at intentionally left null
     else:
         task.completed_at = datetime.now(UTC)
@@ -474,15 +581,7 @@ def h_task_delete(ctx: Ctx, args: dict) -> dict:
         st.is_deleted = True
         st.version = version
     # Cascade to comments of the task and its subtasks (§3.4).
-    task_ids = [task.id, *(st.id for st in subtasks)]
-    comments = ctx.session.execute(
-        select(Comment).where(
-            Comment.task_id.in_(task_ids), Comment.is_deleted.is_(False)
-        )
-    ).scalars().all()
-    for c in comments:
-        c.is_deleted = True
-        c.version = version
+    _delete_comments_of(ctx, [task.id, *(st.id for st in subtasks)], version)
     return {}
 
 
@@ -697,9 +796,12 @@ def process_commands(
             }
             continue
 
-        # Idempotent replay: return stored status without re-applying.
+        # Idempotent replay: return stored status without re-applying. The key is
+        # workspace-scoped — the same uuid in another workspace is a new command.
         with sm() as check_session:
-            existing = check_session.get(SyncedCommand, cmd_uuid_obj)
+            existing = check_session.get(
+                SyncedCommand, {"workspace_id": workspace_id, "uuid": cmd_uuid_obj}
+            )
             if existing is not None:
                 sync_status[str(cmd_uuid)] = existing.status_json.get("status")
                 stored_temp = existing.status_json.get("temp_id")
@@ -772,9 +874,15 @@ def process_commands(
             status = {"error_code": exc.code, "error": exc.message}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
-        except Exception as exc:  # unexpected -> treat as invalid_args, keep going
+        except Exception:  # unexpected -> treat as invalid_args, keep going
             session.rollback()
-            status = {"error_code": "invalid_args", "error": str(exc)}
+            # Never leak the driver/ORM message to the client: it carries table
+            # names, constraint names and sometimes parameter values (S6).
+            logger.exception(
+                "command %s (%s) failed unexpectedly in workspace %s",
+                cmd_uuid, command.type, workspace_id,
+            )
+            status = {"error_code": "invalid_args", "error": "command could not be applied"}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
         finally:
@@ -784,13 +892,18 @@ def process_commands(
 
 
 def _record_failure(sm, cmd_uuid_obj, workspace_id, status) -> None:
+    # ON CONFLICT rather than check-then-insert: two concurrent replays of the
+    # same failing command both passed the check, and the loser's commit raised
+    # — from inside an exception handler, so it escaped `process_commands`
+    # entirely and failed the whole request.
     with sm() as session:
-        if session.get(SyncedCommand, cmd_uuid_obj) is None:
-            session.add(
-                SyncedCommand(
-                    uuid=cmd_uuid_obj,
-                    workspace_id=workspace_id,
-                    status_json={"status": status},
-                )
+        session.execute(
+            pg_insert(SyncedCommand)
+            .values(
+                uuid=cmd_uuid_obj,
+                workspace_id=workspace_id,
+                status_json={"status": status},
             )
-            session.commit()
+            .on_conflict_do_nothing(index_elements=["workspace_id", "uuid"])
+        )
+        session.commit()

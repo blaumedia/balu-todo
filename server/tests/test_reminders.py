@@ -22,7 +22,7 @@ def _configure_ntfy(client, user):
     resp = client.put(
         "/api/v1/me/channels",
         headers=user["headers"],
-        json={"channels": [{"type": "ntfy", "url": "https://ntfy.sh/topic"}]},
+        json={"channels": [{"type": "ntfy", "url": "https://93.184.216.34/topic"}]},
     )
     assert resp.status_code == 200
 

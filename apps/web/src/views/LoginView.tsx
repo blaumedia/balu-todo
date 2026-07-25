@@ -33,7 +33,9 @@ export function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<
       }
       await onAuthenticated();
     } catch (err) {
-      const known = ["invalid_credentials", "email_taken", "registration_disabled"];
+      // `rate_limited` must be here: without it a throttled user is told
+      // "something went wrong" and retries, when they just need to wait.
+      const known = ["invalid_credentials", "email_taken", "registration_disabled", "rate_limited"];
       if (err instanceof ApiError && known.includes(err.code)) {
         setError(t(`auth.${err.code}` as TranslationKey));
       } else {

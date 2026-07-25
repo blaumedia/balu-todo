@@ -1,7 +1,8 @@
 import { useState } from "react";
 import type { Locale, Theme } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
-import { api, teardownSync } from "../lib/clients.js";
+import { api } from "../lib/clients.js";
+import { logout } from "../lib/logout.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { Button } from "../components/Button.js";
@@ -38,7 +39,6 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
   const setUser = useApp((s) => s.setUser);
   const setLocale = useApp((s) => s.setLocale);
   const setTheme = useApp((s) => s.setTheme);
-  const reset = useApp((s) => s.reset);
   const [name, setName] = useState(user?.name ?? "");
 
   function saveName() {
@@ -57,10 +57,8 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
     void api.patchMe({ theme: next }).catch(() => {});
   }
 
-  async function logout() {
-    await api.logout();
-    teardownSync();
-    reset();
+  async function signOut() {
+    await logout();
   }
 
   return (
@@ -100,7 +98,7 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
         </Section>
 
         <div>
-          <Button variant="secondary" icon="log-out" onClick={logout}>
+          <Button variant="secondary" icon="log-out" onClick={signOut}>
             {t("settings.logout")}
           </Button>
         </div>

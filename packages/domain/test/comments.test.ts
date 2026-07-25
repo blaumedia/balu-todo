@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commentsForTask } from "../src/index.js";
+import { commentCountsByTask, commentsForTask } from "../src/index.js";
 import type { Comment } from "../src/index.js";
 
 let seq = 0;
@@ -39,5 +39,28 @@ describe("commentsForTask", () => {
     const live = comment({ id: "c1" });
     const gone = comment({ id: "c2", is_deleted: true });
     expect(commentsForTask([live, gone], "t1").map((c) => c.id)).toEqual(["c1"]);
+  });
+});
+
+describe("stable ordering (I9)", () => {
+  it("tie-breaks same-timestamp comments by id", () => {
+    const b = comment({ id: "c2", created_at: "2026-07-02T10:00:00Z" });
+    const a = comment({ id: "c1", created_at: "2026-07-02T10:00:00Z" });
+    expect(commentsForTask([b, a], "t1").map((c) => c.id)).toEqual(["c1", "c2"]);
+    expect(commentsForTask([a, b], "t1").map((c) => c.id)).toEqual(["c1", "c2"]);
+  });
+});
+
+describe("commentCountsByTask", () => {
+  it("counts live comments per task", () => {
+    const counts = commentCountsByTask([
+      comment({ id: "c1", task_id: "t1" }),
+      comment({ id: "c2", task_id: "t1" }),
+      comment({ id: "c3", task_id: "t2" }),
+      comment({ id: "c4", task_id: "t1", is_deleted: true }),
+    ]);
+    expect(counts.get("t1")).toBe(2);
+    expect(counts.get("t2")).toBe(1);
+    expect(counts.get("t3")).toBeUndefined();
   });
 });

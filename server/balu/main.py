@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import OperationalError
 
 from .config import get_settings
 from .routers import auth as auth_router
@@ -24,13 +26,44 @@ from .routers import workspaces as workspaces_router
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
+logger = logging.getLogger("balu.main")
+
+# Never echo the submitted body back to the caller (it can contain credentials
+# and it leaks internal field names); log the detail server-side instead.
+_VALIDATION_MESSAGE = "Request body failed validation"
+
+
+def _error_shape(exc: RequestValidationError) -> list[tuple]:
+    """Field + error type only — never the submitted value.
+
+    pydantic's ``errors()`` carries the offending input under ``input``, so
+    logging it whole wrote plaintext passwords to the application log whenever
+    registration failed the 8-character minimum.
+    """
+    return [(e.get("loc"), e.get("type")) for e in exc.errors()]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.environ.get("BALU_AUTO_MIGRATE", "1") != "0":
         from .migrate import run_migrations
 
-        run_migrations()
+        try:
+            run_migrations()
+        except OperationalError as exc:
+            # Without this the process died during startup with nothing in the
+            # logs but "Waiting for application startup", which is a miserable
+            # way to discover a wrong password. The usual cause is a database
+            # volume that outlived a BALU_DB_PASSWORD change: Postgres only
+            # applies POSTGRES_PASSWORD when initialising an empty volume.
+            logger.error(
+                "Cannot reach the database with DATABASE_URL. If this volume was "
+                "initialised with a different password, changing BALU_DB_PASSWORD "
+                "does not re-key it — rotate the role (ALTER USER balu WITH "
+                "PASSWORD '…') or start from a fresh volume. Original error: %s",
+                exc,
+            )
+            raise
 
     settings = get_settings()
     stop_event: asyncio.Event | None = None
@@ -67,9 +100,14 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request: Request, exc: RequestValidationError):
+        logger.info(
+            "validation error on %s: %s",
+            request.url.path,
+            _error_shape(exc),
+        )
         return JSONResponse(
             status_code=422,
-            content={"detail": {"code": "validation_error", "message": str(exc.errors())}},
+            content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
     api = FastAPI(title="Balu API", version="0.1.0")
@@ -83,9 +121,14 @@ def create_app() -> FastAPI:
 
     @api.exception_handler(RequestValidationError)
     async def _api_validation_handler(request: Request, exc: RequestValidationError):
+        logger.info(
+            "validation error on %s: %s",
+            request.url.path,
+            _error_shape(exc),
+        )
         return JSONResponse(
             status_code=422,
-            content={"detail": {"code": "validation_error", "message": str(exc.errors())}},
+            content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
     api.include_router(auth_router.router)
@@ -117,11 +160,17 @@ def _mount_static(app: FastAPI) -> None:
     if assets.exists():
         app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
 
+    root = _STATIC_DIR.resolve()
+
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):
-        candidate = _STATIC_DIR / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(str(candidate))
+        # Starlette percent-decodes `full_path`, so `..` survives encoded forms
+        # (`%2e%2e%2f`, `..%2f`, …). Resolve and require containment under the
+        # static root before serving anything off disk.
+        if full_path:
+            candidate = (root / full_path).resolve()
+            if candidate.is_relative_to(root) and candidate.is_file():
+                return FileResponse(str(candidate))
         return FileResponse(str(index))
 
 

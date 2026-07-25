@@ -4,8 +4,6 @@ and the current-user dependency.
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -20,6 +18,7 @@ from .config import get_settings
 from .db import get_db
 from .errors import invalid_credentials, invalid_token, token_expired
 from .models import RefreshToken, User
+from .tokens import hash_token, new_token
 
 _ph = PasswordHasher()
 ALGORITHM = "HS256"
@@ -39,6 +38,25 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
     except Exception:
         return False
+
+
+# Precomputed at import: hashing on first use made the very first
+# unknown-email login measurably slower than a verify, which is the exact
+# signal this path exists to remove.
+_DUMMY_HASH = _ph.hash("balu-unregistered-account-placeholder")
+
+
+def _dummy_hash() -> str:
+    return _DUMMY_HASH
+
+
+def spend_verify_cost(password: str) -> None:
+    """Burn one argon2 verification against a throwaway hash.
+
+    Called on the "no such user" login path so an unregistered address costs the
+    same wall-clock time as a registered one (no enumeration oracle).
+    """
+    verify_password(password, _dummy_hash())
 
 
 # ---------------------------------------------------------------------------
@@ -75,20 +93,16 @@ def decode_access_token(token: str) -> uuid.UUID:
 # ---------------------------------------------------------------------------
 # Refresh tokens (opaque, hashed, rotated, family-scoped)
 # ---------------------------------------------------------------------------
-def _hash_refresh(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
-
-
 def issue_refresh_token(
     db: Session, user_id: uuid.UUID, family_id: uuid.UUID | None = None
 ) -> str:
     settings = get_settings()
-    raw = secrets.token_urlsafe(32)
+    raw = new_token()
     row = RefreshToken(
         id=uuid.uuid4(),
         user_id=user_id,
         family_id=family_id or uuid.uuid4(),
-        token_hash=_hash_refresh(raw),
+        token_hash=hash_token(raw),
         revoked=False,
         expires_at=datetime.now(UTC)
         + timedelta(days=settings.refresh_token_expire_days),
@@ -103,7 +117,7 @@ def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
     Replay of an already-rotated token invalidates the whole session family.
     """
     row = db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == _hash_refresh(raw))
+        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
     ).scalar_one_or_none()
     if row is None:
         raise invalid_token()
@@ -131,11 +145,18 @@ def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
 
 
 def revoke_refresh_token(db: Session, raw: str) -> None:
+    """Log out: revoke the whole session family, not just the presented token.
+
+    Revoking only the presented token would leave every earlier token of the same
+    family usable, so a logout would not actually end the session.
+    """
     row = db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == _hash_refresh(raw))
+        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
     ).scalar_one_or_none()
     if row is not None:
-        row.revoked = True
+        db.query(RefreshToken).filter(RefreshToken.family_id == row.family_id).update(
+            {RefreshToken.revoked: True}
+        )
 
 
 # ---------------------------------------------------------------------------

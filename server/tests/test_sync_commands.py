@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from tests.conftest import cmd, sync
 
@@ -305,3 +306,223 @@ def test_temp_id_reuse_rejected_cleanly(client, user):
     assert status["error_code"] == "invalid_args"
     assert "temp_id" in status["error"]
     assert "psycopg" not in status["error"]
+
+
+# ── S9: the idempotency key is workspace-scoped ────────────────────────────
+def _second_workspace(client, user) -> str:
+    resp = client.post(
+        "/api/v1/workspaces", headers=user["headers"], json={"name": "Second"}
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+def test_same_command_uuid_applies_in_each_workspace(client, user):
+    """A uuid recorded in workspace A must not suppress it in workspace B."""
+    ws_b = _second_workspace(client, user)
+    shared_uuid = str(uuid.uuid4())
+
+    a = sync(client, user, "*", [cmd("project_add", shared_uuid, temp_id="t1", name="In A")])
+    assert a["sync_status"][shared_uuid] == "ok"
+    id_in_a = a["temp_id_mapping"]["t1"]
+
+    resp = client.post(
+        f"/api/v1/workspaces/{ws_b}/sync",
+        headers=user["headers"],
+        json={
+            "sync_token": "*",
+            "commands": [
+                {
+                    "type": "project_add",
+                    "uuid": shared_uuid,
+                    "temp_id": "t1",
+                    "args": {"name": "In B"},
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["sync_status"][shared_uuid] == "ok"
+    id_in_b = body["temp_id_mapping"]["t1"]
+
+    # Two distinct objects, not workspace A's id replayed into B.
+    assert id_in_b != id_in_a
+    assert [p["name"] for p in body["projects"]] == ["In B"]
+
+
+def test_replay_within_the_same_workspace_is_still_idempotent(client, user):
+    shared_uuid = str(uuid.uuid4())
+    first = sync(client, user, "*", [cmd("project_add", shared_uuid, temp_id="t1", name="Once")])
+    again = sync(client, user, "*", [cmd("project_add", shared_uuid, temp_id="t1", name="Once")])
+    assert again["sync_status"][shared_uuid] == "ok"
+    assert again["temp_id_mapping"]["t1"] == first["temp_id_mapping"]["t1"]
+    live = [p for p in again["projects"] if not p["is_deleted"]]
+    assert len(live) == 1
+
+
+# ── S15: task text is bounded ──────────────────────────────────────────────
+def test_title_length_is_capped(client, user):
+    body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="x" * 1001)])
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_notes_length_is_capped(client, user):
+    body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="ok", notes="n" * 20_001)])
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_project_name_length_is_capped(client, user):
+    body = sync(client, user, "*", [cmd("project_add", temp_id="t1", name="p" * 201)])
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_reasonable_notes_still_accepted(client, user):
+    body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="ok", notes="n" * 5000)])
+    assert next(iter(body["sync_status"].values())) == "ok"
+
+
+# ── I2: project_delete cascades to the comments of its tasks (§3.4) ────────
+def test_project_delete_cascades_to_comments(client, user):
+    body = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="p", name="Proj"),
+            cmd("task_add", temp_id="t", title="In project", project_id="p"),
+            cmd("task_add", temp_id="other", title="Elsewhere"),
+            cmd("comment_add", temp_id="c1", task_id="t", body="on deleted task"),
+            cmd("comment_add", temp_id="c2", task_id="other", body="untouched"),
+        ],
+    )
+    assert all(s == "ok" for s in body["sync_status"].values()), body["sync_status"]
+    project_id = body["temp_id_mapping"]["p"]
+    doomed = body["temp_id_mapping"]["c1"]
+    survivor = body["temp_id_mapping"]["c2"]
+    token = body["sync_token"]
+
+    delta = sync(client, user, token, [cmd("project_delete", id=project_id)])
+    by_id = {c["id"]: c for c in delta["comments"]}
+    assert by_id[doomed]["is_deleted"] is True
+    assert survivor not in by_id  # unchanged, so not in the delta
+
+    # A full sync no longer carries the cascaded comment at all.
+    full = sync(client, user, "*")
+    assert [c["id"] for c in full["comments"]] == [survivor]
+
+
+# ── I4: a task's section must belong to the task's project ─────────────────
+def _two_projects_with_a_section(client, user):
+    body = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="a", name="A"),
+            cmd("project_add", temp_id="b", name="B"),
+            cmd("section_add", temp_id="sa", project_id="a", name="Section of A"),
+        ],
+    )
+    m = body["temp_id_mapping"]
+    return m["a"], m["b"], m["sa"], body["sync_token"]
+
+
+def test_task_add_rejects_section_from_another_project(client, user):
+    _a, b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token,
+        [cmd("task_add", temp_id="t", title="T", project_id=b, section_id=section_a)],
+    )
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_task_add_rejects_section_when_task_has_no_project(client, user):
+    _a, _b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token, [cmd("task_add", temp_id="t", title="T", section_id=section_a)]
+    )
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_task_add_accepts_section_of_its_own_project(client, user):
+    a, _b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token,
+        [cmd("task_add", temp_id="t", title="T", project_id=a, section_id=section_a)],
+    )
+    assert next(iter(body["sync_status"].values())) == "ok"
+
+
+def test_task_move_rejects_section_from_another_project(client, user):
+    a, b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token, [cmd("task_add", temp_id="t", title="T", project_id=a)]
+    )
+    task_id = body["temp_id_mapping"]["t"]
+    body = sync(
+        client, user, body["sync_token"],
+        [cmd("task_move", id=task_id, project_id=b, section_id=section_a)],
+    )
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_task_move_to_another_project_clears_a_stale_section(client, user):
+    a, b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token,
+        [cmd("task_add", temp_id="t", title="T", project_id=a, section_id=section_a)],
+    )
+    task_id = body["temp_id_mapping"]["t"]
+    body = sync(client, user, body["sync_token"], [cmd("task_move", id=task_id, project_id=b)])
+    assert next(iter(body["sync_status"].values())) == "ok"
+    task = next(t for t in body["tasks"] if t["id"] == task_id)
+    assert task["project_id"] == b
+    assert task["section_id"] is None
+
+
+# ── M6: the client's calendar day drives recurrence rollover ───────────────
+def test_task_complete_uses_the_clients_local_day(client, user):
+    """A client ahead of UTC must not see the date jump after sync.
+
+    The optimistic apply runs against the *device's* local day (contract §0), so
+    deriving "today" from UTC alone made the two disagree for anyone far enough
+    out: at 09:00 on the 24th in UTC+13 the server still sees the 23rd.
+    """
+    utc_today = datetime.now(UTC).date()
+    tomorrow = utc_today + timedelta(days=1)
+
+    r = sync(client, user, "*", [
+        cmd("task_add", temp_id="t1", title="Daily",
+            start_date=utc_today.isoformat(), recurrence="FREQ=DAILY"),
+    ])
+    tid = r["temp_id_mapping"]["t1"]
+
+    r2 = sync(client, user, r["sync_token"], [
+        cmd("task_complete", id=tid, today=tomorrow.isoformat()),
+    ])
+    task = next(t for t in r2["tasks"] if t["id"] == tid)
+    assert task["start_date"] == (tomorrow + timedelta(days=1)).isoformat()
+
+
+def test_task_complete_ignores_an_implausible_client_day(client, user):
+    """A wrong or hostile `today` cannot push the series somewhere arbitrary."""
+    utc_today = datetime.now(UTC).date()
+    r = sync(client, user, "*", [
+        cmd("task_add", temp_id="t1", title="Daily",
+            start_date=utc_today.isoformat(), recurrence="FREQ=DAILY"),
+    ])
+    tid = r["temp_id_mapping"]["t1"]
+
+    r2 = sync(client, user, r["sync_token"], [
+        cmd("task_complete", id=tid, today="2035-01-01"),
+    ])
+    task = next(t for t in r2["tasks"] if t["id"] == tid)
+    # Clamped back to UTC today, so the next occurrence is simply tomorrow.
+    assert task["start_date"] == (utc_today + timedelta(days=1)).isoformat()

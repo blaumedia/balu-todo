@@ -18,22 +18,10 @@ import { Icon } from '../components/Icon';
 import { useT, type TranslationKey } from '../i18n';
 import { establishSession } from '../lib/boot';
 import { apiBase, getApi, initApi } from '../lib/clients';
+import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '../lib/serverUrl';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
-
-function normalizeUrl(raw: string): string | null {
-  let v = raw.trim();
-  if (!v) return null;
-  if (!/^https?:\/\//i.test(v)) v = `http://${v}`;
-  try {
-    const u = new URL(v);
-    if (!u.hostname) return null;
-    return `${u.protocol}//${u.host}`;
-  } catch {
-    return null;
-  }
-}
 
 export default function Onboarding() {
   const theme = useTheme();
@@ -73,13 +61,24 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Plain http is only used after the user acknowledges it explicitly.
+  const [insecureUrl, setInsecureUrl] = useState<string | null>(null);
+  // Set when an assumed https:// couldn't connect — offers the http:// retry.
+  const [httpFallback, setHttpFallback] = useState<string | null>(null);
 
-  const submit = async () => {
+  const submit = async (confirmedInsecure = false) => {
+    setHttpFallback(null);
     const url = normalizeUrl(value);
     if (!url) {
       setError(t('onboarding.badUrl'));
       return;
     }
+    if (isInsecureUrl(url) && !confirmedInsecure) {
+      setError(null);
+      setInsecureUrl(url);
+      return;
+    }
+    setInsecureUrl(null);
     setBusy(true);
     setError(null);
     try {
@@ -90,7 +89,16 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
       if (!res.ok) throw new Error('bad status');
       onConfirm(url); // persists + advances to auth
     } catch {
-      setError(t('onboarding.unreachable'));
+      // A bare hostname was silently upgraded to https. Reporting only "couldn't
+      // reach that server" hides that we changed what they typed — most
+      // self-hosted Balu instances on a LAN are plain http, so name the URL we
+      // actually tried and offer the http:// alternative in one tap.
+      if (!hasExplicitScheme(value) && !isInsecureUrl(url)) {
+        setHttpFallback(toInsecureUrl(url));
+        setError(t('onboarding.unreachableHttps').replace('{url}', url));
+      } else {
+        setError(t('onboarding.unreachable'));
+      }
     } finally {
       setBusy(false);
     }
@@ -104,13 +112,50 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
         icon="server"
         placeholder={t('onboarding.serverPlaceholder')}
         value={value}
-        onChangeText={setValue}
+        onChangeText={(next) => {
+          setValue(next);
+          setInsecureUrl(null); // editing the URL re-arms the confirmation
+          setHttpFallback(null);
+          setError(null); // a stale failure shouldn't sit under the new address
+        }}
         autoCapitalize="none"
         keyboardType="url"
         theme={theme}
       />
       {error ? <Text style={[styles.error, { color: theme.danger }]}>{error}</Text> : null}
-      <Button title={t('onboarding.continue')} variant="gradient" onPress={submit} loading={busy} style={{ marginTop: space.s4 }} />
+      {httpFallback ? (
+        <Pressable
+          onPress={() => {
+            // Put the http:// form in the field and jump straight to the
+            // existing "unencrypted connection" confirmation.
+            setValue(httpFallback);
+            setError(null);
+            setHttpFallback(null);
+            setInsecureUrl(httpFallback);
+          }}
+        >
+          <Text style={[styles.retryLink, { color: theme.accent }]}>
+            {t('onboarding.tryHttp').replace('{url}', httpFallback)}
+          </Text>
+        </Pressable>
+      ) : null}
+      {insecureUrl ? (
+        <View style={[styles.warning, { borderColor: theme.danger }]}>
+          <Text style={[styles.warningTitle, { color: theme.danger }]}>
+            {t('onboarding.insecureTitle')}
+          </Text>
+          <Text style={[styles.hint, { color: theme.textSecondary }]}>
+            {t('onboarding.insecureWarning')}
+          </Text>
+        </View>
+      ) : null}
+      <Button
+        title={insecureUrl ? t('onboarding.continueInsecure') : t('onboarding.continue')}
+        variant="gradient"
+        onPress={() => void submit(insecureUrl != null)}
+        loading={busy}
+        style={{ marginTop: space.s4 }}
+      />
     </View>
   );
 }
@@ -140,7 +185,9 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
       router.replace('/today');
     } catch (e) {
       const code = e instanceof ApiError ? (`auth.${e.code}` as TranslationKey) : 'auth.errorGeneric';
-      const known = ['auth.invalid_credentials', 'auth.email_taken', 'auth.registration_disabled'];
+      // `rate_limited` included so a throttled user is told to wait rather than
+      // being sent back to re-check a password that was fine.
+      const known = ['auth.invalid_credentials', 'auth.email_taken', 'auth.registration_disabled', 'auth.rate_limited'];
       setError(t(known.includes(code) ? code : 'auth.errorGeneric'));
     } finally {
       setBusy(false);
@@ -157,6 +204,11 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         <Text style={[styles.serverText, { color: theme.textTertiary }]} numberOfLines={1}>
           {apiBase(serverUrl).replace('/api/v1', '')}
         </Text>
+        {isInsecureUrl(serverUrl) ? (
+          <Text style={[styles.insecureBadge, { color: theme.danger }]}>
+            {t('onboarding.insecureBadge')}
+          </Text>
+        ) : null}
         <Text style={[styles.changeLink, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
       </Pressable>
 
@@ -214,6 +266,10 @@ const styles = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: space.s3, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.s4, minHeight: 50 },
   input: { flex: 1, fontSize: font.body },
   error: { fontSize: font.secondary },
+  retryLink: { fontSize: font.secondary, fontWeight: font.weightMedium, marginTop: -space.s1 },
+  warning: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, gap: space.s2 },
+  warningTitle: { fontSize: font.secondary, fontWeight: font.weightSemibold },
+  insecureBadge: { fontSize: font.caption, fontWeight: font.weightMedium },
   serverChip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space.s2 },
   serverText: { fontSize: font.caption, flexShrink: 1 },
   changeLink: { fontSize: font.caption, fontWeight: font.weightMedium, marginLeft: 'auto' },

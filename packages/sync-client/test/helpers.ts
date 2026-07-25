@@ -112,3 +112,65 @@ export function makeServer() {
 
   return { calls, fetch: fetchImpl as unknown as typeof fetch };
 }
+
+/**
+ * A fake server that can refuse commands, and that answers a `"*"` sync token
+ * with a real full sync of everything it has stored. Used to exercise the
+ * rollback of rejected commands (contract §5.2).
+ */
+export function makeRejectingServer(shouldReject: (cmd: any) => string | null) {
+  const calls: Array<{ sync_token: string; commands: any[] }> = [];
+  const store: any = {
+    projects: [], sections: [], tasks: [], labels: [], comments: [], members: [],
+  };
+  let counter = 0;
+  let version = 0;
+
+  const fetchImpl = async (_url: any, init: any): Promise<Response> => {
+    const req = JSON.parse(init.body);
+    calls.push(req);
+    const sync_status: Record<string, unknown> = {};
+    const mapping: Record<string, string> = {};
+    const created: any = {
+      projects: [], sections: [], tasks: [], labels: [], comments: [], members: [],
+    };
+
+    for (const cmd of req.commands ?? []) {
+      const code = shouldReject(cmd);
+      if (code) {
+        sync_status[cmd.uuid] = { error_code: code, error: `rejected (${code})` };
+        continue;
+      }
+      sync_status[cmd.uuid] = "ok";
+      if (cmd.type === "task_add") {
+        const real = `T${++counter}`;
+        mapping[cmd.temp_id] = real;
+        const task = makeTask({ id: real, title: cmd.args?.title });
+        store.tasks.push(task);
+        created.tasks.push(task);
+      } else if (cmd.type === "project_add") {
+        const real = `P${++counter}`;
+        mapping[cmd.temp_id] = real;
+        const project = makeProject({ id: real, name: cmd.args?.name });
+        store.projects.push(project);
+        created.projects.push(project);
+      }
+    }
+
+    const full = req.sync_token === "*";
+    version += 1;
+    const resp = {
+      sync_token: `v${version}`,
+      full_sync: full,
+      sync_status,
+      temp_id_mapping: mapping,
+      ...(full ? store : created),
+    };
+    return new Response(JSON.stringify(resp), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  return { calls, store, fetch: fetchImpl as unknown as typeof fetch };
+}

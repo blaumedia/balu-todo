@@ -81,30 +81,71 @@ def _add_years(d: date, years: int) -> date:
     return date(year, d.month, min(d.day, last_day))
 
 
-def next_occurrence(rrule: str, after: date) -> date:
-    """Return the next occurrence strictly after `after`."""
-    rec = parse_recurrence(rrule)
+def _nth(anchor: date, rec: Recurrence, k: int) -> date:
+    """The k-th member of the series, always measured from `anchor`.
 
+    Measuring from the anchor (rather than from the previous occurrence) is what
+    keeps month-end rules stable: Jan 31 → Feb 28 → Mar 31, not Mar 28.
+    """
     if rec.freq == "DAILY":
-        return after + timedelta(days=rec.interval)
-
+        return anchor + timedelta(days=rec.interval * k)
     if rec.freq == "WEEKLY":
-        if not rec.byday:
-            return after + timedelta(days=7 * rec.interval)
-        monday = after - timedelta(days=after.weekday())
-        # Candidates in the same (anchor) week, strictly after `after`.
-        for wd in rec.byday:
-            cand = monday + timedelta(days=wd)
-            if cand > after:
-                return cand
-        # Jump `interval` weeks and take the earliest BYDAY of that week.
-        next_monday = monday + timedelta(weeks=rec.interval)
-        return next_monday + timedelta(days=rec.byday[0])
-
+        return anchor + timedelta(weeks=rec.interval * k)
     if rec.freq == "MONTHLY":
-        return _add_months(after, rec.interval)
-
+        return _add_months(anchor, rec.interval * k)
     if rec.freq == "YEARLY":
-        return _add_years(after, rec.interval)
-
+        return _add_years(anchor, rec.interval * k)
     raise ValueError(f"unhandled FREQ: {rec.freq}")  # pragma: no cover
+
+
+def _start_k(anchor: date, rec: Recurrence, after: date) -> int:
+    """A lower bound for the answer's index — never overshoots it."""
+    if after <= anchor:
+        return 0
+    if rec.freq == "DAILY":
+        return max(0, (after - anchor).days // rec.interval)
+    if rec.freq == "WEEKLY":
+        return max(0, (after - anchor).days // (7 * rec.interval))
+    if rec.freq == "MONTHLY":
+        months = (after.year - anchor.year) * 12 + (after.month - anchor.month)
+        return max(0, months // rec.interval)
+    return max(0, (after.year - anchor.year) // rec.interval)
+
+
+_SCAN_LIMIT = 64
+
+
+def next_occurrence(rrule: str, anchor: date, after: date | None = None) -> date:
+    """The next occurrence of the series anchored at `anchor`, strictly after `after`.
+
+    The series is `anchor, anchor+interval, anchor+2·interval, …` — for
+    `FREQ=WEEKLY` with `BYDAY`, the BYDAY days of every `interval`-th week
+    starting from the anchor's own week.
+
+    Deriving everything from `after` instead (the pre-v1.2.1 behaviour) lost the
+    rule's phase: every `INTERVAL > 1` rule then disagreed with the clients, and
+    MONTHLY/YEARLY lost the original day-of-month. `after` defaults to `anchor`.
+    Mirrored byte-for-byte by `packages/sync-client/src/recurrence.ts`.
+    """
+    rec = parse_recurrence(rrule)
+    if after is None:
+        after = anchor
+
+    if rec.freq == "WEEKLY" and rec.byday:
+        monday = anchor - timedelta(days=anchor.weekday())
+        span = (after - monday).days
+        first = max(0, span // (7 * rec.interval)) if span > 0 else 0
+        for k in range(first, first + _SCAN_LIMIT):
+            week = monday + timedelta(weeks=rec.interval * k)
+            for weekday in rec.byday:  # sorted by parse_recurrence
+                candidate = week + timedelta(days=weekday)
+                if candidate > after:
+                    return candidate
+        raise ValueError("could not find the next occurrence")  # pragma: no cover
+
+    first = _start_k(anchor, rec, after)
+    for k in range(first, first + _SCAN_LIMIT):
+        candidate = _nth(anchor, rec, k)
+        if candidate > after:
+            return candidate
+    raise ValueError("could not find the next occurrence")  # pragma: no cover

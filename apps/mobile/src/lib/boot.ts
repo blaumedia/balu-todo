@@ -1,8 +1,8 @@
-import type { Locale, Theme, User, Workspace } from '@balu/domain';
+import { pickMembership, type Locale, type Theme, type User, type Workspace } from '@balu/domain';
 import type { ApiClient } from '@balu/api-client';
 import { useApp } from '../store/app';
 import { getApi, initApi, initSync } from './clients';
-import { SETTINGS, sqliteKV } from './kv';
+import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
 
 /**
@@ -17,9 +17,17 @@ async function resumeReminders(): Promise<void> {
 }
 
 /** Fetch /me, pick the boot workspace, wire up the sync client. */
-export async function establishSession(serverUrl: string, api: ApiClient): Promise<boolean> {
+export async function establishSession(
+  serverUrl: string,
+  api: ApiClient,
+  preferredWorkspaceId?: string | null,
+): Promise<boolean> {
   const me = await api.getMe();
-  const membership = me.memberships[0];
+  // Same rule as the web app (I8): explicit → last used → first. Taking
+  // memberships[0] unconditionally threw a multi-workspace user back into the
+  // same workspace on every launch.
+  const lastUsed = await sqliteKV.getItem(SETTINGS.lastWorkspaceId);
+  const membership = pickMembership(me.memberships, preferredWorkspaceId, lastUsed);
   if (!membership) return false;
   useApp.getState().setSession(me.user, me.memberships, membership.workspace);
   initSync(serverUrl, membership.workspace.id, me.user.id);
@@ -84,17 +92,19 @@ export async function bootApp(): Promise<void> {
   }
 }
 
-/** Log out everywhere: clear tokens + cached session, tear down, back to login. */
+/** Log out everywhere: stop syncing, revoke server-side, wipe local user data. */
 export async function logout(): Promise<void> {
+  // Tear down first so nothing re-persists after the purge.
+  stopReminderScheduler();
+  const { teardownSync } = await import('./clients');
+  teardownSync();
+
   const api = getApi();
   try {
     await api?.logout();
   } catch {
     /* best-effort */
   }
-  await sqliteKV.removeItem(SETTINGS.session);
-  stopReminderScheduler();
-  const { teardownSync } = await import('./clients');
-  teardownSync();
+  await purgeUserData();
   useApp.getState().reset();
 }

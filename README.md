@@ -19,22 +19,43 @@ A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 
 ## Run it
 
+Requires Docker Compose **2.24+** (the `env_file` long syntax).
+
 ```sh
+cp .env.example .env
+printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" >> .env
 docker compose up --build
 ```
 
 Open http://localhost:8080, register, done. One app container + Postgres — that's the
 whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
-`BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`.
+`BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`, `BALU_CORS_ORIGINS`.
+
+`BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** — compose refuses to
+start without them, and the server refuses to boot on a weak (<32 char) or
+placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to
+bypass the key check.
 
 ### Production notes
 
 - Set a real `BALU_SECRET_KEY` (e.g. `openssl rand -hex 32`) and `BALU_DB_PASSWORD`.
+- CORS is same-origin by default. Only set `BALU_CORS_ORIGINS` if you serve the web
+  client from a different origin than the API.
 - Put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front and set
   `BALU_ALLOW_REGISTRATION=false` after creating your accounts — invites still work.
 - Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`
   enable email, `BALU_TELEGRAM_BOT_TOKEN` enables Telegram; ntfy needs nothing.
 - Back up the `balu-db` volume; the app container is stateless.
+- Behind a reverse proxy, set `BALU_TRUSTED_PROXY_HOPS` to the number of proxies
+  in front of Balu (usually `1`) so rate limiting keys on the real client address
+  from `X-Forwarded-For`. Leave it at `0` when Balu is exposed directly —
+  otherwise anyone can spoof that header and sidestep the limiter. The value is
+  counted from the right, because proxies *append*, so it has to match your
+  actual chain depth.
+- Changing `BALU_DB_PASSWORD` after the first run does **not** re-key the database:
+  Postgres only applies it when initialising an empty volume. Rotate the role
+  instead — `docker compose exec db psql -U balu -d balu -c "ALTER USER balu WITH
+  PASSWORD '…';"` — or start from a fresh volume.
 
 ## Repo layout
 

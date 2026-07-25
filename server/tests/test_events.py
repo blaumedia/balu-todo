@@ -67,7 +67,7 @@ def _config_channel(client, ctx, url):
 # ---------------------------------------------------------------------------
 def test_assignment_by_other_notifies_assignee(client, user, rec):
     member = _join(client, user, role="member")
-    _config_channel(client, member, "https://ntfy.sh/member")
+    _config_channel(client, member, "https://93.184.216.34/member")
 
     sync(
         client,
@@ -79,13 +79,13 @@ def test_assignment_by_other_notifies_assignee(client, user, rec):
     assert len(rec.calls) == 1
     ctype, config, title, _body = rec.calls[0]
     assert ctype == "ntfy"
-    assert config["url"] == "https://ntfy.sh/member"
+    assert config["url"] == "https://93.184.216.34/member"
     assert user["user"]["name"] in title  # actor name
     assert "Wichtig" in title  # task title
 
 
 def test_self_assignment_not_notified(client, user, rec):
-    _config_channel(client, user, "https://ntfy.sh/self")
+    _config_channel(client, user, "https://93.184.216.34/self")
     sync(
         client,
         user,
@@ -109,7 +109,7 @@ def test_assignee_without_channel_skipped_silently(client, user, rec):
 
 def test_assignment_via_update_notifies(client, user, rec):
     member = _join(client, user, role="member")
-    _config_channel(client, member, "https://ntfy.sh/member")
+    _config_channel(client, member, "https://93.184.216.34/member")
     r = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="Later")])
     tid = r["temp_id_mapping"]["t1"]
     rec.calls.clear()
@@ -121,13 +121,13 @@ def test_assignment_via_update_notifies(client, user, rec):
         [cmd("task_update", id=tid, assigned_to=member["user"]["id"])],
     )
     assert len(rec.calls) == 1
-    assert rec.calls[0][1]["url"] == "https://ntfy.sh/member"
+    assert rec.calls[0][1]["url"] == "https://93.184.216.34/member"
 
 
 def test_assignment_notification_never_fails_command(client, user, rec):
     """A raising sender must not affect sync_status."""
     member = _join(client, user, role="member")
-    _config_channel(client, member, "https://ntfy.sh/member")
+    _config_channel(client, member, "https://93.184.216.34/member")
 
     def boom(ctype, config, title, body):
         raise RuntimeError("transport down")
@@ -149,9 +149,9 @@ def test_comment_notifies_participants_minus_actor(client, user, rec):
     # owner = creator, member = assignee, third = prior comment author.
     member = _join(client, user, role="member")
     third = _join(client, user, role="member")
-    _config_channel(client, user, "https://ntfy.sh/owner")
-    _config_channel(client, member, "https://ntfy.sh/member")
-    _config_channel(client, third, "https://ntfy.sh/third")
+    _config_channel(client, user, "https://93.184.216.34/owner")
+    _config_channel(client, member, "https://93.184.216.34/member")
+    _config_channel(client, third, "https://93.184.216.34/third")
     third_ctx = {"headers": third["headers"], "workspace_id": third["workspace_id"]}
 
     r = sync(
@@ -169,8 +169,8 @@ def test_comment_notifies_participants_minus_actor(client, user, rec):
     # NOT the actor(owner).
     sync(client, user, "*", [cmd("comment_add", temp_id="c2", task_id=tid, body="antwort")])
 
-    assert rec.urls == {"https://ntfy.sh/member", "https://ntfy.sh/third"}
-    assert "https://ntfy.sh/owner" not in rec.urls
+    assert rec.urls == {"https://93.184.216.34/member", "https://93.184.216.34/third"}
+    assert "https://93.184.216.34/owner" not in rec.urls
     # Body carries the comment text; title carries actor + task title.
     for _ctype, _config, title, body in rec.calls:
         assert body == "antwort"
@@ -179,7 +179,7 @@ def test_comment_notifies_participants_minus_actor(client, user, rec):
 
 
 def test_comment_author_alone_notifies_nobody(client, user, rec):
-    _config_channel(client, user, "https://ntfy.sh/owner")
+    _config_channel(client, user, "https://93.184.216.34/owner")
     r = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="Alone")])
     tid = r["temp_id_mapping"]["t1"]
     rec.calls.clear()

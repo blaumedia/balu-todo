@@ -1,11 +1,10 @@
-// A tiny async key-value interface. The web app passes a localStorage adapter;
-// mobile will pass a SQLite/AsyncStorage-backed one.
+// Storage adapters for the durable replica + command queue. The `AsyncKV`
+// interface itself lives in @balu/domain (D6) and is re-exported here so
+// existing imports keep working.
 
-export interface AsyncKV {
-  getItem(key: string): Promise<string | null>;
-  setItem(key: string, value: string): Promise<void>;
-  removeItem(key: string): Promise<void>;
-}
+import type { AsyncKV } from "@balu/domain";
+
+export type { AsyncKV };
 
 /** localStorage adapter (browser). */
 export function localStorageKV(): AsyncKV {
