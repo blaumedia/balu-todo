@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..events import (
@@ -353,10 +354,24 @@ def h_project_delete(ctx: Ctx, args: dict) -> dict:
     for t in tasks:
         t.is_deleted = True
         t.version = version
+
+    # Subtasks inherit their parent's project in the UI but carry their own
+    # `project_id`, which may be null — those would survive the query above and
+    # be left pointing at a deleted parent.
+    parent_ids = [t.id for t in tasks]
+    orphans = ctx.session.execute(
+        select(Task).where(
+            Task.parent_task_id.in_(parent_ids), Task.is_deleted.is_(False)
+        )
+    ).scalars().all() if parent_ids else []
+    for st in orphans:
+        st.is_deleted = True
+        st.version = version
+
     # Deleting a task cascades to its comments (§3.4) — deleting the project that
     # holds those tasks has to do the same, or the comments stay live and keep
     # syncing against tasks that no longer exist.
-    _delete_comments_of(ctx, [t.id for t in tasks], version)
+    _delete_comments_of(ctx, parent_ids + [st.id for st in orphans], version)
     return {}
 
 
@@ -489,13 +504,40 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
     return {}
 
 
+def _completion_today(args: dict) -> date:
+    """The calendar day to roll a recurring task forward from.
+
+    The client applies `task_complete` optimistically against its *local* day
+    (contract §0), so deriving this from UTC alone made the two disagree for
+    anyone far enough from UTC: at 09:00 on the 24th in UTC+13 the server still
+    sees the 23rd, picks a different next occurrence, and the task visibly jumps
+    when the response lands — the same symptom the anchoring fix removed, from a
+    different cause.
+
+    The client therefore sends its own day. It is clamped to ±1 day of UTC (the
+    real range of world timezones) so a wrong or hostile value cannot push a
+    series somewhere arbitrary.
+    """
+    utc_today = datetime.now(UTC).date()
+    claimed = args.get("today")
+    if claimed is None:
+        return utc_today
+    try:
+        parsed = _parse_date(claimed, "today")
+    except CommandError:
+        # A hint, not an instruction: garbage falls back rather than failing the
+        # completion (which on a current client would trigger a full resync).
+        return utc_today
+    if parsed is None or abs((parsed - utc_today).days) > 1:
+        return utc_today
+    return parsed
+
+
 def h_task_complete(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     version = ctx.bump()
     if task.recurrence:
-        # UTC, not the server's local timezone (I11): rollover must not depend on
-        # how the host happens to be configured.
-        today = datetime.now(UTC).date()
+        today = _completion_today(args)
         if task.start_date is not None:
             # Anchor on the task's own start date so the rule keeps its phase.
             new_start = next_occurrence(
@@ -850,14 +892,18 @@ def process_commands(
 
 
 def _record_failure(sm, cmd_uuid_obj, workspace_id, status) -> None:
+    # ON CONFLICT rather than check-then-insert: two concurrent replays of the
+    # same failing command both passed the check, and the loser's commit raised
+    # — from inside an exception handler, so it escaped `process_commands`
+    # entirely and failed the whole request.
     with sm() as session:
-        key = {"workspace_id": workspace_id, "uuid": cmd_uuid_obj}
-        if session.get(SyncedCommand, key) is None:
-            session.add(
-                SyncedCommand(
-                    uuid=cmd_uuid_obj,
-                    workspace_id=workspace_id,
-                    status_json={"status": status},
-                )
+        session.execute(
+            pg_insert(SyncedCommand)
+            .values(
+                uuid=cmd_uuid_obj,
+                workspace_id=workspace_id,
+                status_json={"status": status},
             )
-            session.commit()
+            .on_conflict_do_nothing(index_elements=["workspace_id", "uuid"])
+        )
+        session.commit()

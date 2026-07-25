@@ -54,7 +54,10 @@ def send_ntfy(config: dict[str, Any], title: str, body: str) -> None:
     try:
         url = check_outbound_url(url)
     except UnsafeUrl as exc:
-        raise ChannelUnavailable(f"ntfy url is not allowed: {exc}") from exc
+        # Deliberately vague: `exc` names the resolved address, and this message
+        # reaches the client through POST /me/channels/test (S3/S6).
+        logger.warning("blocked ntfy delivery to an unsafe url", exc_info=exc)
+        raise ChannelUnavailable("ntfy url is not allowed") from exc
     resp = httpx.post(
         url,
         content=body.encode("utf-8"),
@@ -62,6 +65,10 @@ def send_ntfy(config: dict[str, Any], title: str, body: str) -> None:
         timeout=_HTTP_TIMEOUT,
         follow_redirects=False,  # a redirect would bypass the SSRF guard
     )
+    # `raise_for_status` treats 3xx as success, so an un-followed redirect would
+    # be reported as a working channel that silently delivers nothing.
+    if resp.is_redirect:
+        raise ChannelUnavailable("ntfy url redirects; configure the final URL")
     resp.raise_for_status()
 
 
@@ -101,6 +108,8 @@ def send_telegram(config: dict[str, Any], title: str, body: str) -> None:
         timeout=_HTTP_TIMEOUT,
         follow_redirects=False,
     )
+    if resp.is_redirect:
+        raise ChannelUnavailable("telegram API redirected unexpectedly")
     resp.raise_for_status()
 
 

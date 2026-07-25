@@ -52,11 +52,17 @@ export const sqliteKV: AsyncKV = {
  */
 export async function purgeUserData(): Promise<void> {
   const db = await getDb();
+  // Device preferences survive; anything tied to the account goes. Note that
+  // `remindersEnabled` is a device setting ('1'/'0', no user data) — wiping it
+  // silently turned local reminders off again after every re-login.
+  // `lastWorkspaceId` is deliberately NOT kept: it names the previous user's
+  // workspace.
   await db.runAsync(
-    "DELETE FROM kv WHERE k LIKE 'balu:%' AND k NOT IN (?, ?, ?)",
+    "DELETE FROM kv WHERE k LIKE 'balu:%' AND k NOT IN (?, ?, ?, ?)",
     'balu:settings:serverUrl',
     'balu:settings:theme',
     'balu:settings:locale',
+    'balu:settings:remindersEnabled',
   );
 }
 

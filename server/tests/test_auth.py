@@ -133,12 +133,18 @@ def test_login_is_rate_limited_per_account(client, user):
         codes.append(resp.status_code)
     assert 429 in codes
     assert codes[-1] == 429
-    # And a correct password no longer gets through while throttled.
-    resp = client.post(
-        "/api/v1/auth/login", json={"email": email, "password": "password123"}
-    )
-    assert resp.status_code == 429
     assert resp.json()["detail"]["code"] == "rate_limited"
+
+    # ...but the account's real owner is never locked out by someone else's
+    # failures. Charging the bucket before verification made an 8-guess denial
+    # of service out of a brute-force defence; the streak is consulted only after
+    # the password is checked, and a correct one clears it.
+    ok = client.post("/api/v1/auth/login", json={"email": email, "password": "password123"})
+    assert ok.status_code == 200
+    again = client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "wrong-password"}
+    )
+    assert again.status_code == 401, "a successful login should reset the streak"
 
 
 def test_register_is_rate_limited(client):

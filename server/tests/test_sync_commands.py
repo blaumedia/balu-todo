@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from tests.conftest import cmd, sync
 
@@ -484,3 +485,44 @@ def test_task_move_to_another_project_clears_a_stale_section(client, user):
     task = next(t for t in body["tasks"] if t["id"] == task_id)
     assert task["project_id"] == b
     assert task["section_id"] is None
+
+
+# ── M6: the client's calendar day drives recurrence rollover ───────────────
+def test_task_complete_uses_the_clients_local_day(client, user):
+    """A client ahead of UTC must not see the date jump after sync.
+
+    The optimistic apply runs against the *device's* local day (contract §0), so
+    deriving "today" from UTC alone made the two disagree for anyone far enough
+    out: at 09:00 on the 24th in UTC+13 the server still sees the 23rd.
+    """
+    utc_today = datetime.now(UTC).date()
+    tomorrow = utc_today + timedelta(days=1)
+
+    r = sync(client, user, "*", [
+        cmd("task_add", temp_id="t1", title="Daily",
+            start_date=utc_today.isoformat(), recurrence="FREQ=DAILY"),
+    ])
+    tid = r["temp_id_mapping"]["t1"]
+
+    r2 = sync(client, user, r["sync_token"], [
+        cmd("task_complete", id=tid, today=tomorrow.isoformat()),
+    ])
+    task = next(t for t in r2["tasks"] if t["id"] == tid)
+    assert task["start_date"] == (tomorrow + timedelta(days=1)).isoformat()
+
+
+def test_task_complete_ignores_an_implausible_client_day(client, user):
+    """A wrong or hostile `today` cannot push the series somewhere arbitrary."""
+    utc_today = datetime.now(UTC).date()
+    r = sync(client, user, "*", [
+        cmd("task_add", temp_id="t1", title="Daily",
+            start_date=utc_today.isoformat(), recurrence="FREQ=DAILY"),
+    ])
+    tid = r["temp_id_mapping"]["t1"]
+
+    r2 = sync(client, user, r["sync_token"], [
+        cmd("task_complete", id=tid, today="2035-01-01"),
+    ])
+    task = next(t for t in r2["tasks"] if t["id"] == tid)
+    # Clamped back to UTC today, so the next occurrence is simply tomorrow.
+    assert task["start_date"] == (utc_today + timedelta(days=1)).isoformat()

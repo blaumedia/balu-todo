@@ -35,9 +35,12 @@ export interface SyncClientOptions {
   /** Called on a 401 so the app can refresh the token; the request retries once. */
   onAuthFail?: () => void | Promise<void>;
   /**
-   * Called with the commands the server rejected. Their optimistic effect has
-   * already been rolled back (the replica is refetched from the server), so this
-   * is purely for telling the user what did not stick.
+   * Called with the commands the server rejected.
+   *
+   * Their optimistic effect has been rolled back, or will be by the next
+   * successful sync — if the recovery pull could not reach the server the change
+   * is still on screen for now. Word any UI accordingly ("could not be saved"
+   * rather than "has been undone").
    */
   onCommandsRejected?: (rejected: RejectedCommand[]) => void;
   /** Current user id, stamped on optimistic `created_by`/`completed_by`. */
@@ -97,6 +100,12 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   const qKey = `balu:queue:${opts.workspaceId}`;
   const tKey = `balu:token:${opts.workspaceId}`;
   const rKey = `balu:replica:${opts.workspaceId}`;
+  // Sticky "the replica contains a mutation the server rejected" marker. It must
+  // outlive both a failing flush and a process restart: the phantom is only in
+  // the local replica, so no incremental sync can ever delete it — only a full
+  // sync replaces it. Holding this in memory meant an offline batch (or a crash)
+  // after a rejection stranded the phantom permanently.
+  const nKey = `balu:needsFullSync:${opts.workspaceId}`;
 
   let replica: Replica = emptyReplica();
   let queue: SyncCommand[] = [];
@@ -104,6 +113,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   let status: SyncStatus = "offline";
   let flushing = false;
   let hydrated = false;
+  let needsFullSync = false;
 
   const subscribers = new Set<() => void>();
   let snapshot: Snapshot | null = null;
@@ -153,14 +163,36 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     await opts.storage.setItem(rKey, JSON.stringify(serializeReplica(replica)));
   }
 
+  /**
+   * Mark the replica as untrustworthy and force the next sync to be a full one.
+   *
+   * Persisted before anything else can fail, so a rejection survives a dropped
+   * connection mid-flush and a restart.
+   */
+  async function markNeedsFullSync(): Promise<void> {
+    // Deliberately does NOT touch `syncToken`: `applyResponse` overwrites it
+    // with the response's delta token on the very next statement, which is how
+    // the first version of this fix ended up asking for a delta and never
+    // recovering. `doSync` reads the flag instead, so it cannot be clobbered.
+    needsFullSync = true;
+    await opts.storage.setItem(nKey, "1");
+  }
+
+  async function clearNeedsFullSync(): Promise<void> {
+    needsFullSync = false;
+    await opts.storage.removeItem(nKey);
+  }
+
   async function hydrate(): Promise<void> {
     if (hydrated) return;
     hydrated = true;
-    const [q, t, r] = await Promise.all([
+    const [q, t, r, n] = await Promise.all([
       opts.storage.getItem(qKey),
       opts.storage.getItem(tKey),
       opts.storage.getItem(rKey),
+      opts.storage.getItem(nKey),
     ]);
+    needsFullSync = n === "1";
     if (q) {
       try {
         queue = JSON.parse(q) as SyncCommand[];
@@ -168,7 +200,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
         queue = [];
       }
     }
-    if (t) syncToken = t;
+    if (t) syncToken = t; // `doSync` applies the needsFullSync override
     if (r) {
       try {
         replica = hydrateReplica(JSON.parse(r));
@@ -227,7 +259,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
   async function doSync(commands: SyncCommand[]): Promise<SyncResponse> {
     const url = `${opts.baseUrl}/workspaces/${opts.workspaceId}/sync`;
-    const body = JSON.stringify({ sync_token: syncToken, commands });
+    // While a rejection is outstanding, every request asks for a full sync —
+    // only a full response replaces the replica, and the phantom exists
+    // nowhere but locally, so no delta can ever delete it.
+    const body = JSON.stringify({ sync_token: needsFullSync ? "*" : syncToken, commands });
 
     const send = async (): Promise<Response> => {
       const token = await opts.getAccessToken();
@@ -254,32 +289,32 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     if (flushing || queue.length === 0) return;
     flushing = true;
     setStatus("syncing");
+    const rejected: RejectedCommand[] = [];
     try {
-      const rejected: RejectedCommand[] = [];
       while (queue.length > 0) {
         const batch = queue.slice(0, maxBatch);
         const resp = await doSync(batch);
-        rejected.push(...rejectedIn(batch, resp));
+        const batchRejected = rejectedIn(batch, resp);
+        if (batchRejected.length > 0) {
+          rejected.push(...batchRejected);
+          // Record it durably *now*, not after the loop: a rejection in batch 1
+          // followed by a network error in batch 2 used to skip the recovery
+          // entirely, stranding the phantom for good.
+          await markNeedsFullSync();
+        }
         applyResponse(resp); // may rewrite the rest of `queue` in place
         const sent = new Set(batch.map((c) => c.uuid));
         queue = queue.filter((c) => !sent.has(c.uuid));
         await persistQueue();
         await persistToken();
         await persistReplica();
+        // Only now: a full response replaced the replica, and that replacement is
+        // on disk. Clearing before the persist left a window where a crash lost
+        // the clean replica but kept the cleared flag — phantom back, and nothing
+        // left to force another full sync. Clearing late only ever costs one
+        // redundant full sync.
+        if (resp.full_sync) await clearNeedsFullSync();
         invalidate();
-      }
-
-      if (rejected.length > 0) {
-        // A rejected command's optimistic mutation is still sitting in the
-        // replica and there is no per-command inverse, so throw the replica away
-        // and pull it fresh. Without this the user keeps seeing a task or label
-        // that does not exist on the server — and it survives restarts, because
-        // the replica is persisted.
-        replica = emptyReplica();
-        syncToken = "*";
-        await pull();
-        opts.onCommandsRejected?.(rejected);
-        return;
       }
       setStatus("synced");
     } catch (e) {
@@ -287,6 +322,21 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     } finally {
       flushing = false;
     }
+
+    // Outside the try/finally so it runs whether the flush completed or threw.
+    // A rejected command's optimistic mutation is still in the replica and there
+    // is no per-command inverse, so the only cure is a full sync — which the
+    // persisted flag guarantees will happen, retrying on every later sync until
+    // one succeeds.
+    //
+    // Known cost: if the flush threw with commands still queued and the network
+    // recovers in time for this pull, the full response replaces the replica and
+    // those queued commands' optimistic effects disappear until the next flush
+    // re-sends them. The commands themselves are durable and nothing is lost —
+    // the user just sees unsent edits blink out and come back. Re-applying the
+    // queue over a full sync would avoid it and is the obvious v2 refinement.
+    if (needsFullSync) await pull();
+    if (rejected.length > 0) opts.onCommandsRejected?.(rejected);
   }
 
   async function pull(): Promise<void> {
@@ -296,6 +346,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       applyResponse(resp);
       await persistToken();
       await persistReplica();
+      // Only a *full* response actually replaced the replica (a delta would have
+      // left the phantom in place), and only once that replacement is persisted —
+      // clearing first meant a crash in between re-stranded the phantom for good.
+      if (resp.full_sync) await clearNeedsFullSync();
       setStatus("synced");
       invalidate();
     } catch (e) {
@@ -307,6 +361,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     await hydrate();
     if (queue.length > 0) await flush();
     else await pull();
+    // A rejection recorded in an earlier session (or an earlier failed attempt)
+    // keeps forcing a full sync until one lands.
+    if (needsFullSync && queue.length === 0) await pull();
   }
 
   function scheduleFlush(): void {
@@ -320,10 +377,18 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   function mutate(input: CommandInput): { uuid: string; temp_id?: string } {
     const isAdd = input.type.endsWith("_add");
     const tempId = isAdd ? input.temp_id ?? `tmp-${uuid()}` : input.temp_id;
+    const args: Record<string, unknown> = { ...input.args };
+    // Recurrence rolls forward from "today", and the optimistic apply uses the
+    // *device's* calendar day. Stamping it here — rather than at each call site —
+    // keeps the server on the same day: without it a user far from UTC saw the
+    // completed task jump to a different date once the response landed.
+    if (input.type === "task_complete" && args["today"] === undefined) {
+      args["today"] = ctx.today();
+    }
     const cmd: SyncCommand = {
       type: input.type,
       uuid: uuid(),
-      args: { ...input.args },
+      args,
       ...(tempId ? { temp_id: tempId } : {}),
     };
     applyCommand(replica, cmd, ctx);

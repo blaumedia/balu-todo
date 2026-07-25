@@ -123,6 +123,9 @@ export const en = {
   'onboarding.changeServer': 'Change server',
   'onboarding.badUrl': "That doesn't look like a valid URL.",
   'onboarding.unreachable': "Couldn't reach that server. Check the address and try again.",
+  'onboarding.unreachableHttps':
+    "Couldn't reach {url}. Addresses without a scheme are tried over https — if your server runs on plain http, add it in front.",
+  'onboarding.tryHttp': 'Try {url} instead',
 
   'auth.loginTitle': 'Welcome back',
   'auth.registerTitle': 'Create your account',
@@ -133,6 +136,7 @@ export const en = {
   'auth.register': 'Sign up',
   'auth.toRegister': 'Need an account? Sign up',
   'auth.toLogin': 'Have an account? Log in',
+  'auth.rate_limited': 'Too many attempts. Please wait a moment and try again.',
   'auth.errorGeneric': 'Something went wrong. Please try again.',
   'auth.invalid_credentials': 'Wrong email or password.',
   'auth.email_taken': 'That email is already registered.',

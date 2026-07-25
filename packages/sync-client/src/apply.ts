@@ -90,6 +90,17 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
           deletedTaskIds.add(t.id);
         }
       }
+      // Subtasks carry their own project_id, which may be null — those survive
+      // the loop above and would be left parentless until a sync response
+      // happened to correct it, i.e. indefinitely while offline. The server does
+      // the same pass (`h_project_delete`), and the two must agree.
+      for (const st of replica.tasks.values()) {
+        if (st.parent_task_id != null && deletedTaskIds.has(st.parent_task_id) && !st.is_deleted) {
+          st.is_deleted = true;
+          st.updated_at = now;
+          deletedTaskIds.add(st.id);
+        }
+      }
       // Deleting a task cascades to its comments (§3.4) — deleting the project
       // that holds those tasks has to do the same.
       for (const c of replica.comments.values()) {
@@ -212,7 +223,10 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
         // Mirrors the server's h_task_complete exactly (contract §3.3): anchor on
         // the task's own date so the rule keeps its phase, and advance the
         // deadline directly when there is no start date.
-        const today = ctx.today();
+        // Read the stamp the command carries — `mutate` set it and the server
+        // uses that same value. Recomputing could straddle midnight and disagree
+        // with our own command, and a replayed command would use the wrong day.
+        const today = str(a["today"]) ?? ctx.today();
         if (t.start_date != null) {
           const from = t.start_date;
           const next = nextOccurrence(t.recurrence, from, from > today ? from : today);

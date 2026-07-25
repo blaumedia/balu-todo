@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 import balu.routers.channels as channels_router
@@ -188,3 +190,52 @@ def test_test_channel_none_configured(client, user):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["code"] == "channel_unavailable"
+
+
+# ── S3/S6: the rejection message must not describe the internal network ─────
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1/topic", "http://10.0.0.5/topic", "http://[::1]/topic"],
+)
+def test_ssrf_rejection_does_not_leak_the_resolved_address(client, user, url):
+    """The guard names the resolved IP; that must stay in the log, not the body.
+
+    Echoing it back turned every rejection into a DNS→address oracle for the
+    internal network — most of what the SSRF fix was meant to prevent.
+    """
+    resp = client.put(
+        "/api/v1/me/channels",
+        headers=user["headers"],
+        json={"channels": [{"type": "ntfy", "url": url}]},
+    )
+    assert resp.status_code == 422
+    message = resp.json()["detail"]["message"]
+    assert "127.0.0.1" not in message
+    assert "10.0.0.5" not in message
+    assert "::1" not in message
+    assert "resolves to" not in message
+    assert message == "ntfy channel requires a valid public http(s) url"
+
+
+def test_send_time_rejection_does_not_leak_the_resolved_address(client, user):
+    """Same for the send-time re-check, which reaches the client via /test."""
+    from balu.db import get_sessionmaker
+    from balu.models import UserChannel
+
+    with get_sessionmaker()() as session:
+        session.add(
+            UserChannel(
+                user_id=uuid.UUID(user["user"]["id"]),
+                type="ntfy",
+                config={"url": "http://127.0.0.1:8000/topic"},
+            )
+        )
+        session.commit()
+
+    resp = client.post(
+        "/api/v1/me/channels/test", headers=user["headers"], json={"type": "ntfy"}
+    )
+    assert resp.status_code == 400
+    message = resp.json()["detail"]["message"]
+    assert "127.0.0.1" not in message
+    assert "resolves to" not in message

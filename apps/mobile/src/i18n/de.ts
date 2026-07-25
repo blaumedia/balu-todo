@@ -127,6 +127,9 @@ export const de: Record<TranslationKey, string> = {
   'onboarding.changeServer': 'Server ändern',
   'onboarding.badUrl': 'Das sieht nicht nach einer gültigen URL aus.',
   'onboarding.unreachable': 'Server nicht erreichbar. Adresse prüfen und erneut versuchen.',
+  'onboarding.unreachableHttps':
+    '{url} nicht erreichbar. Adressen ohne Schema werden über https versucht — läuft dein Server über einfaches http, stell es voran.',
+  'onboarding.tryHttp': 'Stattdessen {url} versuchen',
 
   'auth.loginTitle': 'Willkommen zurück',
   'auth.registerTitle': 'Konto erstellen',
@@ -137,6 +140,7 @@ export const de: Record<TranslationKey, string> = {
   'auth.register': 'Registrieren',
   'auth.toRegister': 'Noch kein Konto? Registrieren',
   'auth.toLogin': 'Schon ein Konto? Anmelden',
+  'auth.rate_limited': 'Zu viele Versuche. Bitte kurz warten und erneut versuchen.',
   'auth.errorGeneric': 'Etwas ist schiefgelaufen. Bitte erneut versuchen.',
   'auth.invalid_credentials': 'E-Mail oder Passwort ist falsch.',
   'auth.email_taken': 'Diese E-Mail ist bereits registriert.',

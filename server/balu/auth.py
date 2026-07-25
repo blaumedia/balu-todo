@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from functools import lru_cache
 
 import jwt
 from argon2 import PasswordHasher
@@ -41,9 +40,14 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-@lru_cache(maxsize=1)
+# Precomputed at import: hashing on first use made the very first
+# unknown-email login measurably slower than a verify, which is the exact
+# signal this path exists to remove.
+_DUMMY_HASH = _ph.hash("balu-unregistered-account-placeholder")
+
+
 def _dummy_hash() -> str:
-    return _ph.hash("balu-unregistered-account-placeholder")
+    return _DUMMY_HASH
 
 
 def spend_verify_cost(password: str) -> None:

@@ -36,7 +36,13 @@ def _channel_config(channel: ChannelIn, user: User) -> dict:
         try:
             url = check_outbound_url(channel.url or "")
         except UnsafeUrl as exc:
-            raise validation_error(f"ntfy channel requires a valid public url: {exc}") from exc
+            # The guard's message names the resolved IP — echoing it back would
+            # hand any authenticated user a DNS→address oracle for the internal
+            # network, which is most of what the SSRF fix was for (S3/S6).
+            logger.warning("rejected ntfy url for user=%s", user.id, exc_info=exc)
+            raise validation_error(
+                "ntfy channel requires a valid public http(s) url"
+            ) from exc
         return {"url": url}
     if channel.type == "email":
         if not channel.address:

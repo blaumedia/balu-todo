@@ -21,7 +21,18 @@ services:
       dockerfile: server/Dockerfile
       args:
         SKIP_WEB: "0"
+    # Everything else documented in .env.example (BALU_TRUSTED_PROXY_HOPS,
+    # BALU_SMTP_*, BALU_TELEGRAM_BOT_TOKEN, BALU_REMINDER*, BALU_DEV) reaches the
+    # container through env_file. Without it those were read from .env by compose
+    # itself but never passed in, so setting them appeared to do nothing.
+    env_file:
+      # `required: false` so a checkout without a .env still parses — the `:?`
+      # guards below are what actually enforce the mandatory settings, and they
+      # produce a far clearer message than "env file not found".
+      - path: .env
+        required: false
     environment:
+      # Explicit so the `:?` guards still fail fast when these are missing.
       DATABASE_URL: postgresql+psycopg://balu:${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env — see .env.example}@db:5432/balu
       SECRET_KEY: ${BALU_SECRET_KEY:?set BALU_SECRET_KEY in .env — see .env.example}
       BALU_ALLOW_REGISTRATION: ${BALU_ALLOW_REGISTRATION:-true}

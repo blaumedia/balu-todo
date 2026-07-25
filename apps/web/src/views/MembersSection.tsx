@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { assignableRoles, canChangeMemberRole, canRemoveMember } from "@balu/domain";
 import type { Invite, InviteRole, Member, Role } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { ApiError } from "@balu/api-client";
@@ -82,7 +83,8 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
   }, [loadInvites]);
 
   function handleApiError(e: unknown) {
-    if (e instanceof ApiError && e.code === "last_owner") showToast(t("members.leaveConfirm"));
+    if (e instanceof ApiError && e.code === "last_owner") showToast(t("members.lastOwner"));
+    else if (e instanceof ApiError && e.code === "forbidden") showToast(t("members.forbidden"));
     else showToast(t("auth.errorGeneric"));
   }
 
@@ -152,7 +154,15 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
       )}
       {members.map((m) => {
         const isSelf = m.id === user?.id;
-        const editable = canManage && m.role !== "owner" && !isSelf;
+        // Mirror the server's rank rules (§7) so we never render a control that
+        // is guaranteed to come back 403: peers may act on each other, nobody
+        // may act on a higher rank, and only owners can hand out `owner`.
+        const canRemove = canRemoveMember(role, m.role, isSelf);
+        const roleOptions = assignableRoles(role);
+        // Role change is a *different* rule from removal: leaving needs no rank,
+        // but changing a role needs admin even on yourself. Self is included so
+        // an admin can step down after handing ownership over.
+        const editable = canChangeMemberRole(role, m.role, isSelf) && roleOptions.length > 0;
         return (
           <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span
@@ -180,14 +190,16 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
             </div>
             {editable ? (
               <select style={controlStyle} value={m.role} onChange={(e) => void changeRole(m, e.target.value as Role)}>
-                <option value="admin">{t("members.role.admin")}</option>
-                <option value="member">{t("members.role.member")}</option>
-                <option value="viewer">{t("members.role.viewer")}</option>
+                {roleOptions.map((r) => (
+                  <option key={r} value={r}>
+                    {t(ROLE_KEY[r])}
+                  </option>
+                ))}
               </select>
             ) : (
               <RoleBadge role={m.role} t={t} />
             )}
-            {(isSelf || (canManage && m.role !== "owner")) && (
+            {canRemove && (
               <button
                 type="button"
                 onClick={() => void removeMember(m)}

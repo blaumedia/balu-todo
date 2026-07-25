@@ -6,6 +6,13 @@ network (other services, cloud metadata endpoints, localhost admin ports).
 
 :func:`check_outbound_url` is applied twice: when the channel is stored and
 again at send time, because DNS can change in between.
+
+Residual risk: this validates a *resolution*, then hands the hostname to httpx,
+which resolves again. A 0-TTL DNS record can therefore answer public here and
+private at connect time (rebinding). Re-checking at send time narrows the window
+from days to milliseconds but does not close it — closing it means connecting to
+the validated address directly, via a transport that re-checks `getpeername()`
+before writing the request.
 """
 
 from __future__ import annotations
@@ -22,9 +29,11 @@ class UnsafeUrl(ValueError):
 
 
 def _address_is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast:
-        return False
-    if ip.is_reserved or ip.is_unspecified:
+    # `is_global` catches the ranges an explicit list keeps missing — notably
+    # CGNAT 100.64.0.0/10, which is neither `is_private` nor `is_reserved` but
+    # reaches carrier infrastructure from a host behind it. It does NOT subsume
+    # multicast (224.0.0.1 reports is_global=True), so that check has to stay.
+    if ip.is_multicast or not ip.is_global:
         return False
     # IPv4-mapped / 6to4 / Teredo v6 addresses can smuggle a private v4 target.
     if isinstance(ip, ipaddress.IPv6Address):

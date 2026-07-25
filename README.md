@@ -19,6 +19,8 @@ A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 
 ## Run it
 
+Requires Docker Compose **2.24+** (the `env_file` long syntax).
+
 ```sh
 cp .env.example .env
 printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" >> .env
@@ -44,6 +46,16 @@ bypass the key check.
 - Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`
   enable email, `BALU_TELEGRAM_BOT_TOKEN` enables Telegram; ntfy needs nothing.
 - Back up the `balu-db` volume; the app container is stateless.
+- Behind a reverse proxy, set `BALU_TRUSTED_PROXY_HOPS` to the number of proxies
+  in front of Balu (usually `1`) so rate limiting keys on the real client address
+  from `X-Forwarded-For`. Leave it at `0` when Balu is exposed directly —
+  otherwise anyone can spoof that header and sidestep the limiter. The value is
+  counted from the right, because proxies *append*, so it has to match your
+  actual chain depth.
+- Changing `BALU_DB_PASSWORD` after the first run does **not** re-key the database:
+  Postgres only applies it when initialising an empty volume. Rotate the role
+  instead — `docker compose exec db psql -U balu -d balu -c "ALTER USER balu WITH
+  PASSWORD '…';"` — or start from a fresh volume.
 
 ## Repo layout
 

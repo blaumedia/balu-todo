@@ -8,8 +8,18 @@ from fastapi import HTTPException
 class ApiError(HTTPException):
     """HTTPException whose detail matches {code, message} per the contract."""
 
-    def __init__(self, status_code: int, code: str, message: str) -> None:
-        super().__init__(status_code=status_code, detail={"code": code, "message": message})
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(
+            status_code=status_code,
+            detail={"code": code, "message": message},
+            headers=headers,
+        )
 
 
 def invalid_credentials() -> ApiError:
@@ -57,5 +67,9 @@ def channel_unavailable(message: str = "Channel transport is not configured") ->
     return ApiError(400, "channel_unavailable", message)
 
 
-def rate_limited(message: str = "Too many attempts, try again later") -> ApiError:
-    return ApiError(429, "rate_limited", message)
+def rate_limited(
+    message: str = "Too many attempts, try again later", retry_after: int = 300
+) -> ApiError:
+    # Retry-After is what HTTP clients actually look at; without it a caller can
+    # only guess, and tends to guess "immediately".
+    return ApiError(429, "rate_limited", message, headers={"Retry-After": str(retry_after)})

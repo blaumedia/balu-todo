@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import OperationalError
 
 from .config import get_settings
 from .routers import auth as auth_router
@@ -32,12 +33,37 @@ logger = logging.getLogger("balu.main")
 _VALIDATION_MESSAGE = "Request body failed validation"
 
 
+def _error_shape(exc: RequestValidationError) -> list[tuple]:
+    """Field + error type only — never the submitted value.
+
+    pydantic's ``errors()`` carries the offending input under ``input``, so
+    logging it whole wrote plaintext passwords to the application log whenever
+    registration failed the 8-character minimum.
+    """
+    return [(e.get("loc"), e.get("type")) for e in exc.errors()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if os.environ.get("BALU_AUTO_MIGRATE", "1") != "0":
         from .migrate import run_migrations
 
-        run_migrations()
+        try:
+            run_migrations()
+        except OperationalError as exc:
+            # Without this the process died during startup with nothing in the
+            # logs but "Waiting for application startup", which is a miserable
+            # way to discover a wrong password. The usual cause is a database
+            # volume that outlived a BALU_DB_PASSWORD change: Postgres only
+            # applies POSTGRES_PASSWORD when initialising an empty volume.
+            logger.error(
+                "Cannot reach the database with DATABASE_URL. If this volume was "
+                "initialised with a different password, changing BALU_DB_PASSWORD "
+                "does not re-key it — rotate the role (ALTER USER balu WITH "
+                "PASSWORD '…') or start from a fresh volume. Original error: %s",
+                exc,
+            )
+            raise
 
     settings = get_settings()
     stop_event: asyncio.Event | None = None
@@ -74,7 +100,11 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request: Request, exc: RequestValidationError):
-        logger.info("validation error on %s: %s", request.url.path, exc.errors())
+        logger.info(
+            "validation error on %s: %s",
+            request.url.path,
+            _error_shape(exc),
+        )
         return JSONResponse(
             status_code=422,
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
@@ -91,7 +121,11 @@ def create_app() -> FastAPI:
 
     @api.exception_handler(RequestValidationError)
     async def _api_validation_handler(request: Request, exc: RequestValidationError):
-        logger.info("validation error on %s: %s", request.url.path, exc.errors())
+        logger.info(
+            "validation error on %s: %s",
+            request.url.path,
+            _error_shape(exc),
+        )
         return JSONResponse(
             status_code=422,
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},

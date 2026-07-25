@@ -39,6 +39,16 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("BALU_DEV", "dev_mode"),
     )
+    #: How many trusted proxies sit in front of Balu. 0 (the default, i.e.
+    #: directly exposed) ignores `X-Forwarded-For` entirely — the header is
+    #: attacker-controlled and must not key the rate limiter. Set it to the real
+    #: chain depth: proxies *append*, so the value is counted from the right, and
+    #: a wrong number is worse than none.
+    trusted_proxy_hops: int = Field(
+        default=0,
+        ge=0,
+        validation_alias=AliasChoices("BALU_TRUSTED_PROXY_HOPS", "trusted_proxy_hops"),
+    )
     allow_registration: bool = Field(
         default=True,
         validation_alias=AliasChoices("BALU_ALLOW_REGISTRATION", "allow_registration"),

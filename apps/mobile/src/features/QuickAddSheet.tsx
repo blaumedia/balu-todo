@@ -1,11 +1,12 @@
 import { todayLocalISO } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { TokenPill } from '../components/TokenPill';
 import { addTask } from '../lib/actions';
+import { interpretChange } from '../lib/quickAddInput';
 import { composeTaskArgs } from '../lib/quickadd';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -43,8 +44,10 @@ export function QuickAddSheet() {
     [text, locale, today],
   );
 
-  const submit = () => {
-    const trimmed = text.trim();
+  const submit = (raw?: string) => {
+    // `raw` lets a caller submit text that state hasn't caught up with yet —
+    // the hardware-Return path below has the value before `setText` lands.
+    const trimmed = (raw ?? text).trim();
     if (!trimmed) return;
     // A hardware enter (BT keyboard, adb) fires onSubmitEditing twice on
     // Android — once via the key event, once via the editor action. Whether
@@ -74,16 +77,35 @@ export function QuickAddSheet() {
   return (
     <BottomSheet visible={open} onClose={close}>
       <View style={styles.inputRow}>
-        <View style={[styles.plus, { backgroundColor: theme.accentWash }]}>
+        {/* Tappable, not decorative: when the return key does not submit (a
+            hardware keyboard on iOS did exactly that), this is the only way to
+            add a task, and the sheet's hint says "Return to add". */}
+        <Pressable
+          onPress={() => submit()}
+          disabled={!text.trim()}
+          accessibilityRole="button"
+          accessibilityLabel={t('quickadd.add')}
+          style={[styles.plus, { backgroundColor: theme.accentWash, opacity: text.trim() ? 1 : 0.5 }]}
+        >
           <Icon name="plus" size={18} color={theme.accent} strokeWidth={2.5} />
-        </View>
+        </Pressable>
         <TextInput
           key={inputEpoch}
           ref={inputRef}
           autoFocus={open}
           value={text}
-          onChangeText={(v) => setText(v.replace(/\n/g, ' '))}
-          onSubmitEditing={submit}
+          onChangeText={(v) => {
+            // A hardware Return arrives here as a newline, not as an editor
+            // action — see `interpretChange`.
+            const intent = interpretChange(v);
+            // Always sync state, including on the submit path: if the debounce
+            // rejects the submit, neither branch ran and the native field kept
+            // the newline while state did not — the next keystroke could then
+            // resubmit the leftover text.
+            setText(intent.text);
+            if (intent.submit) submit(intent.submit);
+          }}
+          onSubmitEditing={() => submit()}
           // On the new architecture, blurOnSubmit is ignored for multiline
           // inputs — submitBehavior is what makes the return key submit
           // (and keep focus) instead of inserting a newline.

@@ -163,7 +163,12 @@ the anchor, so a clamped month-end recovers: Jan 31 → Feb 28 → **Mar 31**.
 | only `deadline` | `deadline` | `max(deadline, today)` | `deadline` = next occurrence |
 | neither | `today` | `today` | `start_date` = next occurrence |
 
-`today` is the server's **UTC** calendar day; clients use the device's local day. Server
+`today` comes from the **client**: `task_complete` carries `args.today` (`YYYY-MM-DD`),
+the device's local calendar day, because the optimistic apply runs against that day (§0).
+The server clamps it to ±1 day of UTC — the real span of world timezones — and falls back
+to its own UTC day when it is absent or outside that range. Deriving it from UTC alone
+made the server disagree with any client more than a few hours out, and the completed task
+visibly jumped once the response landed. Server
 and client run the same algorithm — `server/balu/sync/recurrence.py` and
 `packages/sync-client/src/recurrence.ts` share a test-vector table, because a mismatch
 makes a completed task visibly jump once the sync response lands.
@@ -294,7 +299,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
 | `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. |
-| `task_complete` | `id` — see §3.3 for recurring behavior |
+| `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) — see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
 | `task_delete` | `id` — soft-deletes task + its subtasks + all their comments |
 | `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` — bulk, single container expected |
@@ -361,9 +366,11 @@ Invites expire after 14 days.
 
 **Rank rules (v1.2.1).** Roles rank `viewer < member < admin < owner`.
 
-- You may only act on a member of **strictly lower** rank than your own. Acting on an
-  equal-or-higher-ranked member → `403 forbidden`. (Without this an admin could promote
-  themselves to owner and then hard-delete the workspace, or demote a sitting owner.)
+- You may not act on a member ranked **above** you → `403 forbidden`. (Without this an
+  admin could demote a sitting owner.) **Peers may act on each other**: an admin can
+  demote or remove another admin, and an owner another owner. Forbidding peer actions
+  made a co-owner unremovable through the API — only they could step down — which is a
+  worse failure than lateral admin conflict, and an owner can always undo one.
 - Granting or revoking the `owner` role requires role `owner`. An admin setting
   `{"role": "owner"}` → `403 forbidden`.
 - Acting on **yourself** is always allowed — stepping down and handing over ownership

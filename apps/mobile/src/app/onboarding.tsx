@@ -18,33 +18,10 @@ import { Icon } from '../components/Icon';
 import { useT, type TranslationKey } from '../i18n';
 import { establishSession } from '../lib/boot';
 import { apiBase, getApi, initApi } from '../lib/clients';
+import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '../lib/serverUrl';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
-
-/**
- * Normalize what the user typed into a base URL. A bare host defaults to
- * **https** — defaulting to http sent every password and bearer token over the
- * wire in the clear. Plain http is still reachable, but only if the user types
- * the scheme explicitly, and the UI then says so.
- */
-export function normalizeUrl(raw: string): string | null {
-  let v = raw.trim();
-  if (!v) return null;
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = `https://${v}`;
-  try {
-    const u = new URL(v);
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-    if (!u.hostname) return null;
-    return `${u.protocol}//${u.host}`;
-  } catch {
-    return null;
-  }
-}
-
-export function isInsecureUrl(url: string): boolean {
-  return url.toLowerCase().startsWith('http://');
-}
 
 export default function Onboarding() {
   const theme = useTheme();
@@ -86,8 +63,11 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   const [busy, setBusy] = useState(false);
   // Plain http is only used after the user acknowledges it explicitly.
   const [insecureUrl, setInsecureUrl] = useState<string | null>(null);
+  // Set when an assumed https:// couldn't connect — offers the http:// retry.
+  const [httpFallback, setHttpFallback] = useState<string | null>(null);
 
   const submit = async (confirmedInsecure = false) => {
+    setHttpFallback(null);
     const url = normalizeUrl(value);
     if (!url) {
       setError(t('onboarding.badUrl'));
@@ -109,7 +89,16 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
       if (!res.ok) throw new Error('bad status');
       onConfirm(url); // persists + advances to auth
     } catch {
-      setError(t('onboarding.unreachable'));
+      // A bare hostname was silently upgraded to https. Reporting only "couldn't
+      // reach that server" hides that we changed what they typed — most
+      // self-hosted Balu instances on a LAN are plain http, so name the URL we
+      // actually tried and offer the http:// alternative in one tap.
+      if (!hasExplicitScheme(value) && !isInsecureUrl(url)) {
+        setHttpFallback(toInsecureUrl(url));
+        setError(t('onboarding.unreachableHttps').replace('{url}', url));
+      } else {
+        setError(t('onboarding.unreachable'));
+      }
     } finally {
       setBusy(false);
     }
@@ -126,12 +115,30 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
         onChangeText={(next) => {
           setValue(next);
           setInsecureUrl(null); // editing the URL re-arms the confirmation
+          setHttpFallback(null);
+          setError(null); // a stale failure shouldn't sit under the new address
         }}
         autoCapitalize="none"
         keyboardType="url"
         theme={theme}
       />
       {error ? <Text style={[styles.error, { color: theme.danger }]}>{error}</Text> : null}
+      {httpFallback ? (
+        <Pressable
+          onPress={() => {
+            // Put the http:// form in the field and jump straight to the
+            // existing "unencrypted connection" confirmation.
+            setValue(httpFallback);
+            setError(null);
+            setHttpFallback(null);
+            setInsecureUrl(httpFallback);
+          }}
+        >
+          <Text style={[styles.retryLink, { color: theme.accent }]}>
+            {t('onboarding.tryHttp').replace('{url}', httpFallback)}
+          </Text>
+        </Pressable>
+      ) : null}
       {insecureUrl ? (
         <View style={[styles.warning, { borderColor: theme.danger }]}>
           <Text style={[styles.warningTitle, { color: theme.danger }]}>
@@ -178,7 +185,9 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
       router.replace('/today');
     } catch (e) {
       const code = e instanceof ApiError ? (`auth.${e.code}` as TranslationKey) : 'auth.errorGeneric';
-      const known = ['auth.invalid_credentials', 'auth.email_taken', 'auth.registration_disabled'];
+      // `rate_limited` included so a throttled user is told to wait rather than
+      // being sent back to re-check a password that was fine.
+      const known = ['auth.invalid_credentials', 'auth.email_taken', 'auth.registration_disabled', 'auth.rate_limited'];
       setError(t(known.includes(code) ? code : 'auth.errorGeneric'));
     } finally {
       setBusy(false);
@@ -257,6 +266,7 @@ const styles = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: space.s3, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.s4, minHeight: 50 },
   input: { flex: 1, fontSize: font.body },
   error: { fontSize: font.secondary },
+  retryLink: { fontSize: font.secondary, fontWeight: font.weightMedium, marginTop: -space.s1 },
   warning: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, gap: space.s2 },
   warningTitle: { fontSize: font.secondary, fontWeight: font.weightSemibold },
   insecureBadge: { fontSize: font.caption, fontWeight: font.weightMedium },
