@@ -21,6 +21,10 @@ from balu.db import Base, get_engine, get_sessionmaker  # noqa: E402
 from balu.main import app  # noqa: E402
 from balu.migrate import run_migrations  # noqa: E402
 
+# NOTE: ntfy channel URLs in the suite use a literal public IP (93.184.216.34)
+# rather than a hostname — they pass through the SSRF guard (balu.urlguard),
+# and an IP literal keeps the tests independent of DNS.
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _schema():

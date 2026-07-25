@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from .config import get_settings
+from .urlguard import UnsafeUrl, check_outbound_url
 
 logger = logging.getLogger("balu.notifications")
 
@@ -49,11 +50,17 @@ def send_ntfy(config: dict[str, Any], title: str, body: str) -> None:
     url = config.get("url")
     if not url:
         raise ChannelUnavailable("ntfy channel is missing a url")
+    # Re-check at send time: DNS may have changed since the channel was stored.
+    try:
+        url = check_outbound_url(url)
+    except UnsafeUrl as exc:
+        raise ChannelUnavailable(f"ntfy url is not allowed: {exc}") from exc
     resp = httpx.post(
         url,
         content=body.encode("utf-8"),
         headers={"Title": title, "Content-Type": "text/plain; charset=utf-8"},
         timeout=_HTTP_TIMEOUT,
+        follow_redirects=False,  # a redirect would bypass the SSRF guard
     )
     resp.raise_for_status()
 
@@ -92,6 +99,7 @@ def send_telegram(config: dict[str, Any], title: str, body: str) -> None:
         f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
         json={"chat_id": chat_id, "text": text},
         timeout=_HTTP_TIMEOUT,
+        follow_redirects=False,
     )
     resp.raise_for_status()
 

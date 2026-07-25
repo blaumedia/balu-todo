@@ -20,16 +20,25 @@ A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 ## Run it
 
 ```sh
+cp .env.example .env
+printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" >> .env
 docker compose up --build
 ```
 
 Open http://localhost:8080, register, done. One app container + Postgres — that's the
 whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
-`BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`.
+`BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`, `BALU_CORS_ORIGINS`.
+
+`BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** — compose refuses to
+start without them, and the server refuses to boot on a weak (<32 char) or
+placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to
+bypass the key check.
 
 ### Production notes
 
 - Set a real `BALU_SECRET_KEY` (e.g. `openssl rand -hex 32`) and `BALU_DB_PASSWORD`.
+- CORS is same-origin by default. Only set `BALU_CORS_ORIGINS` if you serve the web
+  client from a different origin than the API.
 - Put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front and set
   `BALU_ALLOW_REGISTRATION=false` after creating your accounts — invites still work.
 - Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`

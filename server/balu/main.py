@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,6 +24,12 @@ from .routers import sync as sync_router
 from .routers import workspaces as workspaces_router
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+
+logger = logging.getLogger("balu.main")
+
+# Never echo the submitted body back to the caller (it can contain credentials
+# and it leaks internal field names); log the detail server-side instead.
+_VALIDATION_MESSAGE = "Request body failed validation"
 
 
 @asynccontextmanager
@@ -67,9 +74,10 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request: Request, exc: RequestValidationError):
+        logger.info("validation error on %s: %s", request.url.path, exc.errors())
         return JSONResponse(
             status_code=422,
-            content={"detail": {"code": "validation_error", "message": str(exc.errors())}},
+            content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
     api = FastAPI(title="Balu API", version="0.1.0")
@@ -83,9 +91,10 @@ def create_app() -> FastAPI:
 
     @api.exception_handler(RequestValidationError)
     async def _api_validation_handler(request: Request, exc: RequestValidationError):
+        logger.info("validation error on %s: %s", request.url.path, exc.errors())
         return JSONResponse(
             status_code=422,
-            content={"detail": {"code": "validation_error", "message": str(exc.errors())}},
+            content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
     api.include_router(auth_router.router)
@@ -117,11 +126,17 @@ def _mount_static(app: FastAPI) -> None:
     if assets.exists():
         app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
 
+    root = _STATIC_DIR.resolve()
+
     @app.get("/{full_path:path}")
     def spa_fallback(full_path: str):
-        candidate = _STATIC_DIR / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(str(candidate))
+        # Starlette percent-decodes `full_path`, so `..` survives encoded forms
+        # (`%2e%2e%2f`, `..%2f`, …). Resolve and require containment under the
+        # static root before serving anything off disk.
+        if full_path:
+            candidate = (root / full_path).resolve()
+            if candidate.is_relative_to(root) and candidate.is_file():
+                return FileResponse(str(candidate))
         return FileResponse(str(index))
 
 

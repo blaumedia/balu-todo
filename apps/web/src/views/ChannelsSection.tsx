@@ -28,9 +28,10 @@ const controlStyle: React.CSSProperties = {
   outline: "none",
 };
 
-function emptyChannel(type: ChannelType): Channel {
+function emptyChannel(type: ChannelType, ownEmail: string): Channel {
   if (type === "ntfy") return { type: "ntfy", url: "" };
-  if (type === "email") return { type: "email", address: "" };
+  // The server only accepts the account's own address (no confirmation flow).
+  if (type === "email") return { type: "email", address: ownEmail };
   return { type: "telegram", chat_id: "" };
 }
 
@@ -49,6 +50,7 @@ function placeholderKey(type: ChannelType): TranslationKey {
 export function ChannelsSection() {
   const { t } = useT();
   const showToast = useApp((s) => s.showToast);
+  const ownEmail = useApp((s) => s.user?.email ?? "");
   const [channels, setChannels] = useState<Channel[]>([]);
   const [addType, setAddType] = useState<ChannelType>("ntfy");
   const [dirty, setDirty] = useState(false);
@@ -71,7 +73,7 @@ export function ChannelsSection() {
     setDirty(true);
   }
   function add() {
-    setChannels((cs) => [...cs, emptyChannel(addType)]);
+    setChannels((cs) => [...cs, emptyChannel(addType, ownEmail)]);
     setDirty(true);
   }
 
