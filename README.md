@@ -44,7 +44,7 @@ whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
 | `apps/web/` | React web client (Vite + TS) |
 | `apps/mobile/` | Expo/React Native app (iOS + Android) |
 | `packages/` | shared TS: `@balu/domain`, `@balu/nl-parser` (de+en), `@balu/sync-client`, `@balu/api-client` |
-| `docs/` | plan, design language, API contract, research |
+| `docs/` | design language, API + sync contract, roadmap |
 
 ## Development
 
@@ -54,10 +54,10 @@ whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
 
 ## Docs
 
-- [docs/PLAN.md](docs/PLAN.md) — product plan: positioning, feature blueprint, roadmap
+- [docs/api/CONTRACT.md](docs/api/CONTRACT.md) — API + sync-protocol contract (source of
+  truth; start here to write your own client)
 - [docs/DESIGN.md](docs/DESIGN.md) — design language: color system, typography, motion, IA
-- [docs/api/CONTRACT.md](docs/api/CONTRACT.md) — API + sync-protocol contract (source of truth)
-- [docs/research/](docs/research/) — verified market research
+- [docs/ROADMAP.md](docs/ROADMAP.md) — what's next, and the explicit non-goals
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## License
