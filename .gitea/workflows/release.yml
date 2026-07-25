@@ -6,30 +6,73 @@ name: release
 #
 # The registry host comes from the `REGISTRY_HOST` Actions variable (org or
 # repo level) so this file carries no forge hostname.
+#
+# Can also be dispatched manually. A dispatch is a **dry run by default**: it
+# authenticates and builds, then pushes nothing — the way to prove credentials
+# and variables still resolve without burning a version number. Note that a run
+# always executes the workflow file *as of its ref*, so dispatch from `main`
+# (or a tag created after this commit) to exercise the current one.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Verify login and build only — push nothing"
+        type: boolean
+        default: true
 
 jobs:
   image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve version and image name
+      - name: Resolve version, image name and publish mode
+        # A tag push always publishes. A dispatch publishes only when dry_run is
+        # explicitly false *and* it was dispatched from a v* tag — dispatching
+        # from a branch would otherwise version the image after the branch and
+        # move :latest onto untagged code.
         run: |
-          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           echo "IMAGE=${{ vars.REGISTRY_HOST }}/${{ github.repository_owner }}/balu" >> "$GITHUB_ENV"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+            echo "PUBLISH=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "false" ]; then
+            case "$GITHUB_REF" in
+              refs/tags/v*)
+                echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+                echo "PUBLISH=1" >> "$GITHUB_ENV"
+                ;;
+              *)
+                echo "dry_run=false is only allowed from a v* tag (got $GITHUB_REF)" >&2
+                exit 1
+                ;;
+            esac
+          else
+            echo "VERSION=dryrun-$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_ENV"
+            echo "PUBLISH=0" >> "$GITHUB_ENV"
+          fi
       - name: Login to registry
         # The built-in GITHUB_TOKEN cannot authenticate against the packages
         # registry — use the org Actions secret (a PAT with write:package),
-        # same as the other repos on this forge.
+        # same as the other repos on this forge. This step runs on dry runs too;
+        # verifying it is the point of them.
         run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login "${{ vars.REGISTRY_HOST }}" -u "${{ github.actor }}" --password-stdin
       - name: Build
-        run: >
-          docker build -f server/Dockerfile --build-arg SKIP_WEB=0
-          -t $IMAGE:$VERSION
-          -t $IMAGE:latest .
-      - name: Push
         run: |
+          TAGS="-t $IMAGE:$VERSION"
+          if [ "$PUBLISH" = "1" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
+          docker build -f server/Dockerfile --build-arg SKIP_WEB=0 $TAGS .
+      - name: Push
+        # Guarded in shell rather than with `if:` on purpose — an expression that
+        # evaluates unexpectedly would publish from a dry run, which is the one
+        # outcome this must never have.
+        run: |
+          if [ "$PUBLISH" != "1" ]; then
+            echo "Dry run: authenticated to ${{ vars.REGISTRY_HOST }} and built $IMAGE:$VERSION. Pushing nothing."
+            exit 0
+          fi
           docker push $IMAGE:$VERSION
           docker push $IMAGE:latest
