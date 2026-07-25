@@ -40,6 +40,26 @@ export const sqliteKV: AsyncKV = {
   },
 };
 
+/**
+ * Wipe every `balu:*` row that belongs to the signed-in account: the
+ * api-client's tokens, the sync-client's replica/queue/token for every
+ * workspace, and the cached session. Device-level preferences (server URL,
+ * theme, locale) survive — they are not the user's data.
+ *
+ * Without this the next person to open the app on this device still has the
+ * previous user's tasks, notes and comments in SQLite, and any queued command
+ * would be flushed under whichever account signs in next.
+ */
+export async function purgeUserData(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    "DELETE FROM kv WHERE k LIKE 'balu:%' AND k NOT IN (?, ?, ?)",
+    'balu:settings:serverUrl',
+    'balu:settings:theme',
+    'balu:settings:locale',
+  );
+}
+
 // Settings keys (app-owned; @balu/* packages own their own `balu:*` keys).
 export const SETTINGS = {
   serverUrl: 'balu:settings:serverUrl',

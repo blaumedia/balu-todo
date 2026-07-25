@@ -7,6 +7,7 @@ persisted for idempotent replay; temp_id -> object_id mappings persist across re
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -38,6 +39,8 @@ from ..notifications import send_to_channel
 from .engine import ROLE_RANK, bump_version
 from .recurrence import next_occurrence, parse_recurrence
 
+logger = logging.getLogger("balu.sync.commands")
+
 VALID_COLORS = {
     "slate", "red", "orange", "amber", "green", "teal",
     "cyan", "blue", "indigo", "violet", "pink", "rose",
@@ -45,6 +48,13 @@ VALID_COLORS = {
 
 # Keys within command args that may carry an id or temp_id reference.
 _REF_KEYS = ("id", "project_id", "section_id", "parent_task_id", "task_id")
+
+# Text limits (S15). `title` matches its String(1000) column; `notes` is a Text
+# column, so without a cap any member could write arbitrarily large rows.
+MAX_TITLE = 1000
+MAX_NAME = 200
+MAX_NOTES = 20_000
+MAX_BODY = 5000
 
 
 class CommandError(Exception):
@@ -79,20 +89,32 @@ def _as_uuid(value: Any) -> uuid.UUID:
         raise CommandError("not_found", f"unknown reference: {value!r}") from exc
 
 
-def _require_str(args: dict, key: str) -> str:
+def _require_str(args: dict, key: str, max_length: int = MAX_NAME) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value.strip():
         raise CommandError("invalid_args", f"{key} is required")
+    if len(value) > max_length:
+        raise CommandError(
+            "invalid_args", f"{key} must be at most {max_length} characters"
+        )
+    return value
+
+
+def _optional_text(args: dict, key: str, max_length: int) -> str:
+    value = args.get(key)
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise CommandError("invalid_args", f"{key} must be a string or null")
+    if len(value) > max_length:
+        raise CommandError(
+            "invalid_args", f"{key} must be at most {max_length} characters"
+        )
     return value
 
 
 def _require_body(args: dict) -> str:
-    value = args.get("body")
-    if not isinstance(value, str) or not value.strip():
-        raise CommandError("invalid_args", "body is required")
-    if len(value) > 5000:
-        raise CommandError("invalid_args", "body must be at most 5000 characters")
-    return value
+    return _require_str(args, "body", MAX_BODY)
 
 
 def _parse_date(value: Any, key: str) -> date | None:
@@ -138,6 +160,8 @@ def _validate_recurrence(value: Any) -> str | None:
         return None
     if not isinstance(value, str):
         raise CommandError("invalid_args", "recurrence must be a string or null")
+    if len(value) > 200:  # matches tasks.recurrence String(200)
+        raise CommandError("invalid_args", "recurrence must be at most 200 characters")
     try:
         parse_recurrence(value)
     except ValueError as exc:
@@ -212,9 +236,9 @@ def _resolve_labels(ctx: Ctx, label_ids: Any) -> list[Label]:
 # ---------------------------------------------------------------------------
 def _apply_task_fields(ctx: Ctx, task: Task, args: dict, *, creating: bool) -> None:
     if "title" in args:
-        task.title = _require_str(args, "title")
+        task.title = _require_str(args, "title", MAX_TITLE)
     if "notes" in args:
-        task.notes = args.get("notes") or ""
+        task.notes = _optional_text(args, "notes", MAX_NOTES)
     if "start_date" in args:
         task.start_date = _parse_date(args.get("start_date"), "start_date")
     if "evening" in args:
@@ -366,7 +390,7 @@ def h_section_delete(ctx: Ctx, args: dict) -> dict:
 
 
 def h_task_add(ctx: Ctx, args: dict) -> dict:
-    title = _require_str(args, "title")
+    title = _require_str(args, "title", MAX_TITLE)
     project_id = None
     if args.get("project_id") is not None:
         project_id = _get_project(ctx, args["project_id"]).id
@@ -697,9 +721,12 @@ def process_commands(
             }
             continue
 
-        # Idempotent replay: return stored status without re-applying.
+        # Idempotent replay: return stored status without re-applying. The key is
+        # workspace-scoped — the same uuid in another workspace is a new command.
         with sm() as check_session:
-            existing = check_session.get(SyncedCommand, cmd_uuid_obj)
+            existing = check_session.get(
+                SyncedCommand, {"workspace_id": workspace_id, "uuid": cmd_uuid_obj}
+            )
             if existing is not None:
                 sync_status[str(cmd_uuid)] = existing.status_json.get("status")
                 stored_temp = existing.status_json.get("temp_id")
@@ -772,9 +799,15 @@ def process_commands(
             status = {"error_code": exc.code, "error": exc.message}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
-        except Exception as exc:  # unexpected -> treat as invalid_args, keep going
+        except Exception:  # unexpected -> treat as invalid_args, keep going
             session.rollback()
-            status = {"error_code": "invalid_args", "error": str(exc)}
+            # Never leak the driver/ORM message to the client: it carries table
+            # names, constraint names and sometimes parameter values (S6).
+            logger.exception(
+                "command %s (%s) failed unexpectedly in workspace %s",
+                cmd_uuid, command.type, workspace_id,
+            )
+            status = {"error_code": "invalid_args", "error": "command could not be applied"}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
         finally:
@@ -785,7 +818,8 @@ def process_commands(
 
 def _record_failure(sm, cmd_uuid_obj, workspace_id, status) -> None:
     with sm() as session:
-        if session.get(SyncedCommand, cmd_uuid_obj) is None:
+        key = {"workspace_id": workspace_id, "uuid": cmd_uuid_obj}
+        if session.get(SyncedCommand, key) is None:
             session.add(
                 SyncedCommand(
                     uuid=cmd_uuid_obj,

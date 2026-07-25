@@ -52,6 +52,20 @@ def _get_target(db: Session, ws_id: uuid.UUID, target_id: uuid.UUID) -> Membersh
     return target
 
 
+def _rank(role: str) -> int:
+    return ROLE_RANK.get(role, 0)
+
+
+def _check_can_act_on(actor: Membership, target: Membership) -> None:
+    """§7: you may only act on members strictly below your own rank.
+
+    Without this, an admin could promote themselves to owner (and then hard-delete
+    the workspace) or demote a sitting owner.
+    """
+    if _rank(actor.role) <= _rank(target.role):
+        raise forbidden("cannot act on a member of equal or higher rank")
+
+
 @router.patch("/{workspace_id}/members/{user_id}")
 def update_member_role(
     workspace_id: str,
@@ -63,10 +77,17 @@ def update_member_role(
     ws_id = _parse_ws_id(workspace_id)
     target_id = _parse_user_id(user_id)
     actor = get_membership(db, ws_id, user.id)
-    if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["admin"]:
+    if _rank(actor.role) < ROLE_RANK["admin"]:
         raise forbidden("admin role required")
+    # Only an owner may hand out (or take away) the owner role.
+    if body.role == "owner" and actor.role != "owner":
+        raise forbidden("owner role required to grant owner")
 
     target = _get_target(db, ws_id, target_id)
+    # Changing your own role is always allowed (handing over ownership, stepping
+    # down); the last-owner guard below is what keeps a workspace governable.
+    if target_id != user.id:
+        _check_can_act_on(actor, target)
     # Demoting the last owner is forbidden.
     if target.role == "owner" and body.role != "owner" and _owner_count(db, ws_id) <= 1:
         raise last_owner()
@@ -92,10 +113,12 @@ def remove_member(
     actor = get_membership(db, ws_id, user.id)
 
     is_self = target_id == user.id
-    if not is_self and ROLE_RANK.get(actor.role, 0) < ROLE_RANK["admin"]:
+    if not is_self and _rank(actor.role) < ROLE_RANK["admin"]:
         raise forbidden("admin role or self required")
 
     target = _get_target(db, ws_id, target_id)
+    if not is_self:
+        _check_can_act_on(actor, target)
     # Removing the last owner (incl. self-leave as last owner) is forbidden.
     if target.role == "owner" and _owner_count(db, ws_id) <= 1:
         raise last_owner()

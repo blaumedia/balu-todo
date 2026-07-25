@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 
 
 class Command(BaseModel):
-    type: str
-    uuid: str
-    temp_id: str | None = None
+    type: str = Field(max_length=64)
+    uuid: str = Field(max_length=64)
+    # Matches temp_id_map.temp_id's String(128) column.
+    temp_id: str | None = Field(default=None, max_length=128)
     args: dict[str, Any] = Field(default_factory=dict)
 
 

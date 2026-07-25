@@ -8,6 +8,7 @@ import hashlib
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 
 import jwt
 from argon2 import PasswordHasher
@@ -39,6 +40,20 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
     except Exception:
         return False
+
+
+@lru_cache(maxsize=1)
+def _dummy_hash() -> str:
+    return _ph.hash("balu-unregistered-account-placeholder")
+
+
+def spend_verify_cost(password: str) -> None:
+    """Burn one argon2 verification against a throwaway hash.
+
+    Called on the "no such user" login path so an unregistered address costs the
+    same wall-clock time as a registered one (no enumeration oracle).
+    """
+    verify_password(password, _dummy_hash())
 
 
 # ---------------------------------------------------------------------------
@@ -131,11 +146,18 @@ def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
 
 
 def revoke_refresh_token(db: Session, raw: str) -> None:
+    """Log out: revoke the whole session family, not just the presented token.
+
+    Revoking only the presented token would leave every earlier token of the same
+    family usable, so a logout would not actually end the session.
+    """
     row = db.execute(
         select(RefreshToken).where(RefreshToken.token_hash == _hash_refresh(raw))
     ).scalar_one_or_none()
     if row is not None:
-        row.revoked = True
+        db.query(RefreshToken).filter(RefreshToken.family_id == row.family_id).update(
+            {RefreshToken.revoked: True}
+        )
 
 
 # ---------------------------------------------------------------------------

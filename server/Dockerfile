@@ -23,20 +23,28 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 
-# uv from the official distroless image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# uv from the official distroless image, pinned: `:latest` made every rebuild a
+# different toolchain.
+COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Install dependencies first (cached layer)
-COPY server/pyproject.toml server/uv.lock* ./
-RUN uv sync --frozen --no-dev --no-install-project 2>/dev/null || uv sync --no-dev --no-install-project
+# Install dependencies first (cached layer). A failing `--frozen` sync must fail
+# the build — the old `|| uv sync` fallback silently discarded the lockfile and
+# produced non-reproducible images.
+COPY server/pyproject.toml server/uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Application code
 COPY server/ ./
 
 # Web dist -> static (present only when SKIP_WEB=0)
 COPY --from=webbuild /build/apps/web/dist/ ./static/
+
+# Drop root: the app never writes inside its own tree.
+RUN useradd --system --uid 10001 --user-group --no-create-home balu \
+    && chown -R balu:balu /app
+USER balu
 
 EXPOSE 8000
 CMD ["uvicorn", "balu.main:app", "--host", "0.0.0.0", "--port", "8000"]

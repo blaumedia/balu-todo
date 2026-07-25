@@ -17,8 +17,8 @@ def test_register_creates_personal_workspace_owner(client):
     assert len(body["memberships"]) == 1
     membership = body["memberships"][0]
     assert membership["role"] == "owner"
-    # workspace named after first name
-    assert membership["workspace"]["name"] == "Dennis"
+    # workspace named after the account, in full (I12: was split on the first space)
+    assert membership["workspace"]["name"] == "Dennis Paul"
 
 
 def test_register_duplicate_email(client):
@@ -118,3 +118,68 @@ def test_patch_me(client):
     assert body["name"] == "Neu"
     assert body["locale"] == "de"
     assert body["theme"] == "dark"
+
+
+# ── S5: auth throttling + no login timing oracle ───────────────────────────
+def test_login_is_rate_limited_per_account(client, user):
+    from balu.ratelimit import LOGIN_PER_ACCOUNT
+
+    email = user["user"]["email"]
+    codes = []
+    for _ in range(LOGIN_PER_ACCOUNT.limit + 2):
+        resp = client.post(
+            "/api/v1/auth/login", json={"email": email, "password": "wrong-password"}
+        )
+        codes.append(resp.status_code)
+    assert 429 in codes
+    assert codes[-1] == 429
+    # And a correct password no longer gets through while throttled.
+    resp = client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "password123"}
+    )
+    assert resp.status_code == 429
+    assert resp.json()["detail"]["code"] == "rate_limited"
+
+
+def test_register_is_rate_limited(client):
+    from balu.ratelimit import REGISTER_PER_IP
+
+    codes = []
+    for i in range(REGISTER_PER_IP.limit + 1):
+        resp = client.post(
+            "/api/v1/auth/register",
+            json={"email": f"burst-{i}@example.com", "password": "password123", "name": "B"},
+        )
+        codes.append(resp.status_code)
+    assert codes[-1] == 429
+
+
+def test_unknown_email_still_costs_a_verification(client, monkeypatch):
+    """No enumeration oracle: the not-found path must hash too (S5)."""
+    import balu.routers.auth as auth_router
+
+    calls = []
+    monkeypatch.setattr(
+        auth_router, "spend_verify_cost", lambda pw: calls.append(pw)
+    )
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody@example.com", "password": "password123"},
+    )
+    assert resp.status_code == 401
+    assert calls == ["password123"]
+
+
+# ── S12: logout burns the whole refresh-token family ───────────────────────
+def test_logout_invalidates_earlier_tokens_in_the_family(client, user):
+    first = user["refresh_token"]
+    rotated = client.post("/api/v1/auth/refresh", json={"refresh_token": first})
+    assert rotated.status_code == 200
+    second = rotated.json()["refresh_token"]
+
+    assert client.post("/api/v1/auth/logout", json={"refresh_token": second}).status_code == 204
+
+    # The rotated-away token belonged to the same family and must be dead too.
+    for token in (first, second):
+        resp = client.post("/api/v1/auth/refresh", json={"refresh_token": token})
+        assert resp.status_code == 401, token

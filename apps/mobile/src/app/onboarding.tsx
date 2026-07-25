@@ -22,17 +22,28 @@ import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
 
-function normalizeUrl(raw: string): string | null {
+/**
+ * Normalize what the user typed into a base URL. A bare host defaults to
+ * **https** — defaulting to http sent every password and bearer token over the
+ * wire in the clear. Plain http is still reachable, but only if the user types
+ * the scheme explicitly, and the UI then says so.
+ */
+export function normalizeUrl(raw: string): string | null {
   let v = raw.trim();
   if (!v) return null;
-  if (!/^https?:\/\//i.test(v)) v = `http://${v}`;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = `https://${v}`;
   try {
     const u = new URL(v);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     if (!u.hostname) return null;
     return `${u.protocol}//${u.host}`;
   } catch {
     return null;
   }
+}
+
+export function isInsecureUrl(url: string): boolean {
+  return url.toLowerCase().startsWith('http://');
 }
 
 export default function Onboarding() {
@@ -73,13 +84,21 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Plain http is only used after the user acknowledges it explicitly.
+  const [insecureUrl, setInsecureUrl] = useState<string | null>(null);
 
-  const submit = async () => {
+  const submit = async (confirmedInsecure = false) => {
     const url = normalizeUrl(value);
     if (!url) {
       setError(t('onboarding.badUrl'));
       return;
     }
+    if (isInsecureUrl(url) && !confirmedInsecure) {
+      setError(null);
+      setInsecureUrl(url);
+      return;
+    }
+    setInsecureUrl(null);
     setBusy(true);
     setError(null);
     try {
@@ -104,13 +123,32 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
         icon="server"
         placeholder={t('onboarding.serverPlaceholder')}
         value={value}
-        onChangeText={setValue}
+        onChangeText={(next) => {
+          setValue(next);
+          setInsecureUrl(null); // editing the URL re-arms the confirmation
+        }}
         autoCapitalize="none"
         keyboardType="url"
         theme={theme}
       />
       {error ? <Text style={[styles.error, { color: theme.danger }]}>{error}</Text> : null}
-      <Button title={t('onboarding.continue')} variant="gradient" onPress={submit} loading={busy} style={{ marginTop: space.s4 }} />
+      {insecureUrl ? (
+        <View style={[styles.warning, { borderColor: theme.danger }]}>
+          <Text style={[styles.warningTitle, { color: theme.danger }]}>
+            {t('onboarding.insecureTitle')}
+          </Text>
+          <Text style={[styles.hint, { color: theme.textSecondary }]}>
+            {t('onboarding.insecureWarning')}
+          </Text>
+        </View>
+      ) : null}
+      <Button
+        title={insecureUrl ? t('onboarding.continueInsecure') : t('onboarding.continue')}
+        variant="gradient"
+        onPress={() => void submit(insecureUrl != null)}
+        loading={busy}
+        style={{ marginTop: space.s4 }}
+      />
     </View>
   );
 }
@@ -157,6 +195,11 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         <Text style={[styles.serverText, { color: theme.textTertiary }]} numberOfLines={1}>
           {apiBase(serverUrl).replace('/api/v1', '')}
         </Text>
+        {isInsecureUrl(serverUrl) ? (
+          <Text style={[styles.insecureBadge, { color: theme.danger }]}>
+            {t('onboarding.insecureBadge')}
+          </Text>
+        ) : null}
         <Text style={[styles.changeLink, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
       </Pressable>
 
@@ -214,6 +257,9 @@ const styles = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: space.s3, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.s4, minHeight: 50 },
   input: { flex: 1, fontSize: font.body },
   error: { fontSize: font.secondary },
+  warning: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, gap: space.s2 },
+  warningTitle: { fontSize: font.secondary, fontWeight: font.weightSemibold },
+  insecureBadge: { fontSize: font.caption, fontWeight: font.weightMedium },
   serverChip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space.s2 },
   serverText: { fontSize: font.caption, flexShrink: 1 },
   changeLink: { fontSize: font.caption, fontWeight: font.weightMedium, marginLeft: 'auto' },

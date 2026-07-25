@@ -133,3 +133,93 @@ def test_non_admin_cannot_remove_other(client, user):
         headers=member["headers"],
     )
     assert resp.status_code == 403
+
+
+# ── S10: only an owner may grant/revoke `owner`, and nobody may act on a
+#         member of equal-or-higher rank (contract §7) ──────────────────────
+def test_admin_cannot_promote_to_owner(client, user):
+    admin = _join(client, user, role="admin")
+    other = _join(client, user, role="member")
+    resp = client.patch(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{other['user']['id']}",
+        headers=admin["headers"],
+        json={"role": "owner"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "forbidden"
+
+
+def test_admin_cannot_promote_self_to_owner(client, user):
+    admin = _join(client, user, role="admin")
+    resp = client.patch(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{admin['user']['id']}",
+        headers=admin["headers"],
+        json={"role": "owner"},
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_cannot_demote_owner(client, user):
+    admin = _join(client, user, role="admin")
+    resp = client.patch(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{user['user']['id']}",
+        headers=admin["headers"],
+        json={"role": "member"},
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_cannot_demote_another_admin(client, user):
+    admin = _join(client, user, role="admin")
+    peer = _join(client, user, role="admin")
+    resp = client.patch(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{peer['user']['id']}",
+        headers=admin["headers"],
+        json={"role": "member"},
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_cannot_remove_owner(client, user):
+    admin = _join(client, user, role="admin")
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{user['user']['id']}",
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_cannot_remove_another_admin(client, user):
+    admin = _join(client, user, role="admin")
+    peer = _join(client, user, role="admin")
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{peer['user']['id']}",
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_can_still_manage_members_below(client, user):
+    admin = _join(client, user, role="admin")
+    member = _join(client, user, role="member")
+    resp = client.patch(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{member['user']['id']}",
+        headers=admin["headers"],
+        json={"role": "viewer"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["role"] == "viewer"
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{member['user']['id']}",
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 204
+
+
+def test_admin_can_still_leave(client, user):
+    admin = _join(client, user, role="admin")
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{admin['user']['id']}",
+        headers=admin["headers"],
+    )
+    assert resp.status_code == 204

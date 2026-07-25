@@ -55,3 +55,7 @@ def last_owner() -> ApiError:
 
 def channel_unavailable(message: str = "Channel transport is not configured") -> ApiError:
     return ApiError(400, "channel_unavailable", message)
+
+
+def rate_limited(message: str = "Too many attempts, try again later") -> ApiError:
+    return ApiError(429, "rate_limited", message)

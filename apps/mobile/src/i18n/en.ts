@@ -112,7 +112,12 @@ export const en = {
   'onboarding.serverTitle': 'Connect to your server',
   'onboarding.serverHint': 'Enter the address of your Balu server on your network.',
   'onboarding.serverUrl': 'Server URL',
-  'onboarding.serverPlaceholder': 'http://192.168.1.10:8080',
+  'onboarding.serverPlaceholder': 'balu.example.com',
+  'onboarding.insecureTitle': 'Unencrypted connection',
+  'onboarding.insecureWarning':
+    'http:// sends your password and session token in the clear. Only continue on a network you fully trust.',
+  'onboarding.continueInsecure': 'Continue without encryption',
+  'onboarding.insecureBadge': 'not encrypted',
   'onboarding.continue': 'Continue',
   'onboarding.changeServer': 'Change server',
   'onboarding.badUrl': "That doesn't look like a valid URL.",

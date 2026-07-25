@@ -7,7 +7,8 @@ import {
   type Task,
   type Theme,
 } from "@balu/domain";
-import { api, getSync, teardownSync } from "../lib/clients.js";
+import { api, getSync } from "../lib/clients.js";
+import { logout } from "../lib/logout.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { useApp, type ViewSel } from "../store/app.js";
@@ -56,7 +57,6 @@ export function CommandPalette() {
   const selectTask = useApp((s) => s.selectTask);
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
-  const reset = useApp((s) => s.reset);
   const { t } = useT();
   const snapshot = useSnapshot();
   const writable = canWrite(useMyRole());
@@ -212,10 +212,7 @@ export function CommandPalette() {
       icon: "log-out",
       label: t("cmd.logout"),
       run: () => {
-        void api.logout().finally(() => {
-          teardownSync();
-          reset();
-        });
+        void logout();
         close();
       },
     });

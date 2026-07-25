@@ -116,7 +116,12 @@ export const de: Record<TranslationKey, string> = {
   'onboarding.serverTitle': 'Mit deinem Server verbinden',
   'onboarding.serverHint': 'Gib die Adresse deines Balu-Servers im Netzwerk ein.',
   'onboarding.serverUrl': 'Server-URL',
-  'onboarding.serverPlaceholder': 'http://192.168.1.10:8080',
+  'onboarding.serverPlaceholder': 'balu.example.com',
+  'onboarding.insecureTitle': 'Unverschlüsselte Verbindung',
+  'onboarding.insecureWarning':
+    'http:// überträgt Passwort und Session-Token im Klartext. Nur in einem Netzwerk fortfahren, dem du voll vertraust.',
+  'onboarding.continueInsecure': 'Ohne Verschlüsselung fortfahren',
+  'onboarding.insecureBadge': 'unverschlüsselt',
   'onboarding.continue': 'Weiter',
   'onboarding.changeServer': 'Server ändern',
   'onboarding.badUrl': 'Das sieht nicht nach einer gültigen URL aus.',

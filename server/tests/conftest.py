@@ -38,6 +38,15 @@ def _schema():
 
 
 @pytest.fixture(autouse=True)
+def _reset_rate_limits():
+    """Auth throttling is in-process; each test starts from a clean slate."""
+    from balu.ratelimit import limiter
+
+    limiter.reset()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _truncate():
     """Wipe all data between tests (the app commits on its own connections)."""
     yield

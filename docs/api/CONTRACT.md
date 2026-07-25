@@ -36,14 +36,20 @@ JWT bearer auth. `Authorization: Bearer <access_token>` on every authenticated r
 | `POST /auth/register` | `{email, password, name}` | `201 {user, access_token, refresh_token}` |
 | `POST /auth/login` | `{email, password}` | `200 {user, access_token, refresh_token}` |
 | `POST /auth/refresh` | `{refresh_token}` | `200 {access_token, refresh_token}` |
-| `POST /auth/logout` | `{refresh_token}` | `204` (invalidates that refresh token) |
+| `POST /auth/logout` | `{refresh_token}` | `204` (invalidates the whole session family) |
 
 Rules:
 
 - Registration is gated by env `BALU_ALLOW_REGISTRATION` (default `true`). When disabled
   → `403 registration_disabled`. (Invite flows come later.)
-- `POST /auth/register` auto-creates a personal workspace named after the user (e.g.
-  "Dennis") with the user as `owner`.
+- `POST /auth/register` auto-creates a personal workspace named after the user — the
+  full name, e.g. "Anna Maria Schmidt" — with the user as `owner`.
+- **Throttling (v1.2.1):** `/auth/login`, `/auth/register` and `/auth/refresh` are rate
+  limited per client IP, and `/auth/login` additionally per account. Exceeding a limit →
+  `429 rate_limited`. A login for an unknown address costs the same as one for a known
+  address (no enumeration oracle).
+- `POST /auth/logout` revokes the entire refresh-token family, not only the presented
+  token — otherwise earlier tokens of the same session stayed usable after logout.
 - Password: min 8 chars, hashed with argon2id (fallback bcrypt acceptable if argon2 is a
   packaging problem — pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
@@ -221,8 +227,10 @@ effects of those commands) are returned.
   full sync (`full_sync: true`) rather than erroring.
 - `commands` (optional, max 100 per request): applied **in order, each in its own
   transaction**. One failing command does not abort the rest.
-- `uuid`: client-generated UUIDv4, the **idempotency key**. The server persists processed
-  uuids (per workspace); a replayed uuid is not re-applied and returns its stored status.
+- `uuid`: client-generated UUIDv4, the **idempotency key**, scoped to `(workspace, uuid)`.
+  The server persists processed uuids per workspace; a replayed uuid **in the same
+  workspace** is not re-applied and returns its stored status. The same uuid in another
+  workspace is a different command and is applied normally.
 
 ### 5.2 Response
 
@@ -317,12 +325,26 @@ Invites expire after 14 days.
 
 | Endpoint | Notes |
 |---|---|
-| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. `email` is informational in v1 (no mail is sent); the client shows/copies the link `/invite/<token>`. |
+| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. No mail is sent (the client shows/copies the link `/invite/<token>`), but when `email` is set the invite is **bound** to it — see accept. |
 | `GET /workspaces/{id}/invites` | `{invites: [...]}`, pending only; role ≥ admin |
 | `DELETE /workspaces/{id}/invites/{invite_id}` | revoke → `204`; role ≥ admin |
-| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token` |
-| `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin; demoting/removing the **last owner** → `400 last_owner` |
-| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. |
+| `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin, subject to the rank rules below; demoting the **last owner** → `400 last_owner` |
+| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+
+**Rank rules (v1.2.1).** Roles rank `viewer < member < admin < owner`.
+
+- You may only act on a member of **strictly lower** rank than your own. Acting on an
+  equal-or-higher-ranked member → `403 forbidden`. (Without this an admin could promote
+  themselves to owner and then hard-delete the workspace, or demote a sitting owner.)
+- Granting or revoking the `owner` role requires role `owner`. An admin setting
+  `{"role": "owner"}` → `403 forbidden`.
+- Acting on **yourself** is always allowed — stepping down and handing over ownership
+  stay possible; the `last_owner` guard is what keeps a workspace governable.
+
+**Invites are multi-use until they expire or are revoked**: accepting does not consume
+the token, so one link can admit several people for its full 14-day TTL. Bind an invite
+to an `email` (or revoke it after use) when that is not what you want.
 
 ```json
 // invite
@@ -349,6 +371,17 @@ Email requires server SMTP config (`BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`), te
 requires `BALU_TELEGRAM_BOT_TOKEN`; configuring a channel whose transport is not set up
 server-side → `400 channel_unavailable`.
 
+Channel validation (v1.2.1):
+
+- `ntfy.url` must be `http(s)` and must resolve to a **public** address. Loopback,
+  private, link-local (incl. `169.254.169.254`), multicast and reserved ranges →
+  `422 validation_error`. The check runs again at delivery time (DNS can change), and
+  redirects are not followed.
+- `email.address` must be a valid address **and equal the authenticated user's own
+  account address** — there is no confirmation flow in v1, and an unverified destination
+  would make the deployment's SMTP identity an open relay. Anything else →
+  `422 validation_error`.
+
 **Reminder delivery (server-side):** a background loop (~every 30 s) finds open,
 non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the channels of
 the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal (not in
@@ -369,6 +402,9 @@ from the command handlers (failures logged, never fail the command):
 ## 9. Static hosting & CORS
 
 - The server serves the built web client: any non-`/api`, non-`/healthz` GET falls back
-  to the SPA `index.html` from `server/static/` when that directory exists.
-- CORS: allow all origins for `/api/*` (mobile apps + LAN dev; credentials are bearer
-  tokens, not cookies). `BALU_CORS_ORIGINS` env can restrict later.
+  to the SPA `index.html` from `server/static/` when that directory exists. A path that
+  resolves outside `server/static/` is never served — the fallback returns `index.html`
+  instead (percent-encoded `..` included).
+- CORS: **same-origin by default** (v1.2.1 — the server serves its own SPA). Set
+  `BALU_CORS_ORIGINS` to a comma-separated allow-list, or `*`, when the web client is
+  hosted on a different origin. Credentials are bearer tokens, not cookies.

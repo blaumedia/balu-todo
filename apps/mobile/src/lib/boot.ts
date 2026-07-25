@@ -2,7 +2,7 @@ import type { Locale, Theme, User, Workspace } from '@balu/domain';
 import type { ApiClient } from '@balu/api-client';
 import { useApp } from '../store/app';
 import { getApi, initApi, initSync } from './clients';
-import { SETTINGS, sqliteKV } from './kv';
+import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
 
 /**
@@ -84,17 +84,19 @@ export async function bootApp(): Promise<void> {
   }
 }
 
-/** Log out everywhere: clear tokens + cached session, tear down, back to login. */
+/** Log out everywhere: stop syncing, revoke server-side, wipe local user data. */
 export async function logout(): Promise<void> {
+  // Tear down first so nothing re-persists after the purge.
+  stopReminderScheduler();
+  const { teardownSync } = await import('./clients');
+  teardownSync();
+
   const api = getApi();
   try {
     await api?.logout();
   } catch {
     /* best-effort */
   }
-  await sqliteKV.removeItem(SETTINGS.session);
-  stopReminderScheduler();
-  const { teardownSync } = await import('./clients');
-  teardownSync();
+  await purgeUserData();
   useApp.getState().reset();
 }

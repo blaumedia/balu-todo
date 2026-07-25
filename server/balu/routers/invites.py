@@ -153,6 +153,11 @@ def accept_invite(
     if invite is None or invite.revoked or _aware(invite.expires_at) <= datetime.now(UTC):
         raise invalid_invite_token()
 
+    # An invite addressed to someone specific only admits that someone (§7).
+    # Untargeted invites (no email) stay open to anyone holding the link.
+    if invite.email and invite.email.lower() != user.email.lower():
+        raise invalid_invite_token()
+
     workspace = db.get(Workspace, invite.workspace_id)
     if workspace is None:
         raise invalid_invite_token()

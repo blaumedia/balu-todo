@@ -14,14 +14,19 @@ from .common import utcnow
 
 
 class SyncedCommand(Base):
-    """Idempotency log: one row per processed command uuid (per workspace)."""
+    """Idempotency log: one row per processed command uuid **per workspace**.
+
+    The primary key is composite. With ``uuid`` alone, a command uuid recorded in
+    one workspace suppressed the same uuid in every other workspace and replayed
+    the first workspace's stored status (including its ``object_id``).
+    """
 
     __tablename__ = "synced_commands"
 
-    uuid: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True, index=True
     )
+    uuid: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     status_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow

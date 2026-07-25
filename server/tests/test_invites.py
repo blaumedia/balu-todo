@@ -157,3 +157,36 @@ def test_accept_bumps_version_visible_via_sync(client, user):
     joined = next(m for m in delta["members"] if m["id"] == member["user"]["id"])
     assert joined["role"] == "member"
     assert joined["is_deleted"] is False
+
+
+# ── S11: an invite carrying an email only admits that address ──────────────
+def test_targeted_invite_rejects_other_user(client, user):
+    other = _second_user(client)
+    invite = _create_invite(client, user, email="someone-else@example.com")
+    resp = client.post(
+        "/api/v1/invites/accept", headers=other["headers"], json={"token": invite["token"]}
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["code"] == "invalid_token"
+    # And no membership was created.
+    me = client.get("/api/v1/me", headers=other["headers"]).json()
+    joined = {m["workspace"]["id"] for m in me["memberships"]}
+    assert user["workspace_id"] not in joined
+
+
+def test_targeted_invite_accepts_matching_user(client, user):
+    other = _second_user(client)
+    invite = _create_invite(client, user, email=other["user"]["email"].upper())
+    resp = client.post(
+        "/api/v1/invites/accept", headers=other["headers"], json={"token": invite["token"]}
+    )
+    assert resp.status_code == 200
+
+
+def test_untargeted_invite_still_open(client, user):
+    other = _second_user(client)
+    invite = _create_invite(client, user, email=None)
+    resp = client.post(
+        "/api/v1/invites/accept", headers=other["headers"], json={"token": invite["token"]}
+    )
+    assert resp.status_code == 200

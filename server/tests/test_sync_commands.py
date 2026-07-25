@@ -305,3 +305,80 @@ def test_temp_id_reuse_rejected_cleanly(client, user):
     assert status["error_code"] == "invalid_args"
     assert "temp_id" in status["error"]
     assert "psycopg" not in status["error"]
+
+
+# ── S9: the idempotency key is workspace-scoped ────────────────────────────
+def _second_workspace(client, user) -> str:
+    resp = client.post(
+        "/api/v1/workspaces", headers=user["headers"], json={"name": "Second"}
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+def test_same_command_uuid_applies_in_each_workspace(client, user):
+    """A uuid recorded in workspace A must not suppress it in workspace B."""
+    ws_b = _second_workspace(client, user)
+    shared_uuid = str(uuid.uuid4())
+
+    a = sync(client, user, "*", [cmd("project_add", shared_uuid, temp_id="t1", name="In A")])
+    assert a["sync_status"][shared_uuid] == "ok"
+    id_in_a = a["temp_id_mapping"]["t1"]
+
+    resp = client.post(
+        f"/api/v1/workspaces/{ws_b}/sync",
+        headers=user["headers"],
+        json={
+            "sync_token": "*",
+            "commands": [
+                {
+                    "type": "project_add",
+                    "uuid": shared_uuid,
+                    "temp_id": "t1",
+                    "args": {"name": "In B"},
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["sync_status"][shared_uuid] == "ok"
+    id_in_b = body["temp_id_mapping"]["t1"]
+
+    # Two distinct objects, not workspace A's id replayed into B.
+    assert id_in_b != id_in_a
+    assert [p["name"] for p in body["projects"]] == ["In B"]
+
+
+def test_replay_within_the_same_workspace_is_still_idempotent(client, user):
+    shared_uuid = str(uuid.uuid4())
+    first = sync(client, user, "*", [cmd("project_add", shared_uuid, temp_id="t1", name="Once")])
+    again = sync(client, user, "*", [cmd("project_add", shared_uuid, temp_id="t1", name="Once")])
+    assert again["sync_status"][shared_uuid] == "ok"
+    assert again["temp_id_mapping"]["t1"] == first["temp_id_mapping"]["t1"]
+    live = [p for p in again["projects"] if not p["is_deleted"]]
+    assert len(live) == 1
+
+
+# ── S15: task text is bounded ──────────────────────────────────────────────
+def test_title_length_is_capped(client, user):
+    body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="x" * 1001)])
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_notes_length_is_capped(client, user):
+    body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="ok", notes="n" * 20_001)])
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_project_name_length_is_capped(client, user):
+    body = sync(client, user, "*", [cmd("project_add", temp_id="t1", name="p" * 201)])
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_reasonable_notes_still_accepted(client, user):
+    body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="ok", notes="n" * 5000)])
+    assert next(iter(body["sync_status"].values())) == "ok"
