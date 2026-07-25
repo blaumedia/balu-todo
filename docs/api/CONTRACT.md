@@ -21,7 +21,9 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`.
+  Error messages are for humans and never carry internal detail (driver messages,
+  the submitted body, transport hostnames) — that goes to the server log.
 
 ## 1. Authentication
 
