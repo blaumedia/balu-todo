@@ -6,12 +6,12 @@ describe('normalizeUrl', () => {
     // The whole point of the fix: typing a hostname must not silently put the
     // password and bearer token on the wire in the clear.
     expect(normalizeUrl('balu.example.com')).toBe('https://balu.example.com');
-    expect(normalizeUrl('192.168.0.9:8080')).toBe('https://192.168.0.9:8080');
+    expect(normalizeUrl('192.168.1.10:8080')).toBe('https://192.168.1.10:8080');
     expect(normalizeUrl('  balu.example.com  ')).toBe('https://balu.example.com');
   });
 
   it('preserves an explicitly written scheme', () => {
-    expect(normalizeUrl('http://192.168.0.9:8080')).toBe('http://192.168.0.9:8080');
+    expect(normalizeUrl('http://192.168.1.10:8080')).toBe('http://192.168.1.10:8080');
     expect(normalizeUrl('https://balu.example.com')).toBe('https://balu.example.com');
     expect(normalizeUrl('HTTP://Balu.Example.com')).toBe('http://balu.example.com');
   });
@@ -55,7 +55,7 @@ describe('hasExplicitScheme', () => {
     // Drives the error copy: only an *assumed* https warrants explaining the
     // default and offering http://.
     expect(hasExplicitScheme('balu.example.com')).toBe(false);
-    expect(hasExplicitScheme('192.168.0.9:8080')).toBe(false);
+    expect(hasExplicitScheme('192.168.1.10:8080')).toBe(false);
     expect(hasExplicitScheme('  balu.example.com  ')).toBe(false);
     expect(hasExplicitScheme('http://balu.example.com')).toBe(true);
     expect(hasExplicitScheme('HTTPS://balu.example.com')).toBe(true);
@@ -64,12 +64,12 @@ describe('hasExplicitScheme', () => {
 
 describe('toInsecureUrl', () => {
   it('offers the cleartext twin of an https origin', () => {
-    expect(toInsecureUrl('https://192.168.0.9:8080')).toBe('http://192.168.0.9:8080');
+    expect(toInsecureUrl('https://192.168.1.10:8080')).toBe('http://192.168.1.10:8080');
     expect(toInsecureUrl('HTTPS://balu.example.com')).toBe('http://balu.example.com');
   });
 
   it('leaves an already-http origin alone', () => {
-    expect(toInsecureUrl('http://192.168.0.9:8080')).toBe('http://192.168.0.9:8080');
+    expect(toInsecureUrl('http://192.168.1.10:8080')).toBe('http://192.168.1.10:8080');
   });
 
   it('only rewrites the scheme, not an https elsewhere in the host', () => {
