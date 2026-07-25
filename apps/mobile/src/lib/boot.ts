@@ -1,4 +1,4 @@
-import type { Locale, Theme, User, Workspace } from '@balu/domain';
+import { pickMembership, type Locale, type Theme, type User, type Workspace } from '@balu/domain';
 import type { ApiClient } from '@balu/api-client';
 import { useApp } from '../store/app';
 import { getApi, initApi, initSync } from './clients';
@@ -17,9 +17,17 @@ async function resumeReminders(): Promise<void> {
 }
 
 /** Fetch /me, pick the boot workspace, wire up the sync client. */
-export async function establishSession(serverUrl: string, api: ApiClient): Promise<boolean> {
+export async function establishSession(
+  serverUrl: string,
+  api: ApiClient,
+  preferredWorkspaceId?: string | null,
+): Promise<boolean> {
   const me = await api.getMe();
-  const membership = me.memberships[0];
+  // Same rule as the web app (I8): explicit → last used → first. Taking
+  // memberships[0] unconditionally threw a multi-workspace user back into the
+  // same workspace on every launch.
+  const lastUsed = await sqliteKV.getItem(SETTINGS.lastWorkspaceId);
+  const membership = pickMembership(me.memberships, preferredWorkspaceId, lastUsed);
   if (!membership) return false;
   useApp.getState().setSession(me.user, me.memberships, membership.workspace);
   initSync(serverUrl, membership.workspace.id, me.user.id);

@@ -70,6 +70,8 @@ export const useApp = create<AppState>((set) => ({
   },
   setSession: (user, memberships, workspace) => {
     void sqliteKV.setItem(SETTINGS.session, JSON.stringify({ user, workspace }));
+    // Remember the workspace so the next launch reopens it (§7, I8).
+    void sqliteKV.setItem(SETTINGS.lastWorkspaceId, workspace.id);
     set({ user, memberships, workspace, locale: user.locale, boot: 'ready' });
   },
   setUser: (user) => set({ user, locale: user.locale }),

@@ -144,11 +144,27 @@ Field semantics (these ARE the product decisions — implement precisely):
 - `label_ids` order is not meaningful.
 - `assigned_to` must be a member of the workspace.
 
-**Completing a recurring task** (server-side, part of `task_complete`): instead of
-setting `completed_at`, advance the schedule — `start_date` moves to the next occurrence
-strictly after `max(start_date, today)`; if `deadline` was set, it moves by the same
-delta; the task stays open. (Completion history for recurring tasks is a v2 concern.)
-`task_complete` on a non-recurring task sets `completed_at`/`completed_by`.
+**Completing a recurring task** (part of `task_complete`): instead of setting
+`completed_at`, advance the schedule and leave the task open. (Completion history for
+recurring tasks is a v2 concern.) `task_complete` on a non-recurring task sets
+`completed_at`/`completed_by`.
+
+The next occurrence is **anchored**, not derived from the completion date — the series is
+`anchor, anchor + INTERVAL, anchor + 2·INTERVAL, …` (for `FREQ=WEEKLY` with `BYDAY`: the
+BYDAY days of every `INTERVAL`-th week starting from the anchor's own week), and the
+answer is its smallest member strictly greater than `after`. Each step is measured from
+the anchor, so a clamped month-end recovers: Jan 31 → Feb 28 → **Mar 31**.
+
+| Task has | anchor | after | effect |
+|---|---|---|---|
+| `start_date` | `start_date` | `max(start_date, today)` | `start_date` = next occurrence; `deadline` shifts by the same delta |
+| only `deadline` | `deadline` | `max(deadline, today)` | `deadline` = next occurrence |
+| neither | `today` | `today` | `start_date` = next occurrence |
+
+`today` is the server's **UTC** calendar day; clients use the device's local day. Server
+and client run the same algorithm — `server/balu/sync/recurrence.py` and
+`packages/sync-client/src/recurrence.ts` share a test-vector table, because a mismatch
+makes a completed task visibly jump once the sync response lands.
 
 ### 3.4 `comment` — v1.2
 
@@ -269,16 +285,16 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 |---|---|
 | `project_add` | `temp_id`, `name`, `color?`, `sort_order?` |
 | `project_update` | `id`, then any of `name, color, sort_order, archived_at` |
-| `project_delete` | `id` — soft-deletes project + its sections + its tasks |
+| `project_delete` | `id` — soft-deletes project + its sections + its tasks + those tasks' comments |
 | `section_add` | `temp_id`, `project_id`, `name`, `sort_order?` |
 | `section_update` | `id`, any of `name, sort_order` |
 | `section_delete` | `id` — its tasks move to the project body (section_id → null) |
-| `task_add` | `temp_id`, `title`, plus any writable task field |
+| `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
-| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change |
+| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. |
 | `task_complete` | `id` — see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
-| `task_delete` | `id` — soft-deletes task + its subtasks |
+| `task_delete` | `id` — soft-deletes task + its subtasks + all their comments |
 | `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` — bulk, single container expected |
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
@@ -290,6 +306,15 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
 (id/temp_id unknown or deleted), `forbidden` (viewer role; or comment edit/delete by
 a non-author non-admin), `name_taken` (labels).
+
+Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
+comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.
+
+**Clients must roll back a rejected command.** A non-`ok` `sync_status` means the
+optimistic mutation never happened server-side; leaving it in the local replica leaves
+the user looking at an object that does not exist (and it survives restarts, because the
+replica is persisted). `@balu/sync-client` discards the replica and forces a full sync
+whenever any command in a flush was rejected, then reports the failures to the app.
 
 ### 5.5 Conflict policy (documented behavior, tested)
 

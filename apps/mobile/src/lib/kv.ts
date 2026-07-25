@@ -66,5 +66,6 @@ export const SETTINGS = {
   theme: 'balu:settings:theme',
   locale: 'balu:settings:locale',
   session: 'balu:settings:session', // cached {user, workspace} for offline boot
+  lastWorkspaceId: 'balu:settings:lastWorkspaceId', // boot preference (§7)
   remindersEnabled: 'balu:settings:remindersEnabled', // '1' | '0' — local reminders
 } as const;

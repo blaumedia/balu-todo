@@ -382,3 +382,105 @@ def test_project_name_length_is_capped(client, user):
 def test_reasonable_notes_still_accepted(client, user):
     body = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="ok", notes="n" * 5000)])
     assert next(iter(body["sync_status"].values())) == "ok"
+
+
+# ── I2: project_delete cascades to the comments of its tasks (§3.4) ────────
+def test_project_delete_cascades_to_comments(client, user):
+    body = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="p", name="Proj"),
+            cmd("task_add", temp_id="t", title="In project", project_id="p"),
+            cmd("task_add", temp_id="other", title="Elsewhere"),
+            cmd("comment_add", temp_id="c1", task_id="t", body="on deleted task"),
+            cmd("comment_add", temp_id="c2", task_id="other", body="untouched"),
+        ],
+    )
+    assert all(s == "ok" for s in body["sync_status"].values()), body["sync_status"]
+    project_id = body["temp_id_mapping"]["p"]
+    doomed = body["temp_id_mapping"]["c1"]
+    survivor = body["temp_id_mapping"]["c2"]
+    token = body["sync_token"]
+
+    delta = sync(client, user, token, [cmd("project_delete", id=project_id)])
+    by_id = {c["id"]: c for c in delta["comments"]}
+    assert by_id[doomed]["is_deleted"] is True
+    assert survivor not in by_id  # unchanged, so not in the delta
+
+    # A full sync no longer carries the cascaded comment at all.
+    full = sync(client, user, "*")
+    assert [c["id"] for c in full["comments"]] == [survivor]
+
+
+# ── I4: a task's section must belong to the task's project ─────────────────
+def _two_projects_with_a_section(client, user):
+    body = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="a", name="A"),
+            cmd("project_add", temp_id="b", name="B"),
+            cmd("section_add", temp_id="sa", project_id="a", name="Section of A"),
+        ],
+    )
+    m = body["temp_id_mapping"]
+    return m["a"], m["b"], m["sa"], body["sync_token"]
+
+
+def test_task_add_rejects_section_from_another_project(client, user):
+    _a, b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token,
+        [cmd("task_add", temp_id="t", title="T", project_id=b, section_id=section_a)],
+    )
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_task_add_rejects_section_when_task_has_no_project(client, user):
+    _a, _b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token, [cmd("task_add", temp_id="t", title="T", section_id=section_a)]
+    )
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_task_add_accepts_section_of_its_own_project(client, user):
+    a, _b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token,
+        [cmd("task_add", temp_id="t", title="T", project_id=a, section_id=section_a)],
+    )
+    assert next(iter(body["sync_status"].values())) == "ok"
+
+
+def test_task_move_rejects_section_from_another_project(client, user):
+    a, b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token, [cmd("task_add", temp_id="t", title="T", project_id=a)]
+    )
+    task_id = body["temp_id_mapping"]["t"]
+    body = sync(
+        client, user, body["sync_token"],
+        [cmd("task_move", id=task_id, project_id=b, section_id=section_a)],
+    )
+    status = next(iter(body["sync_status"].values()))
+    assert status["error_code"] == "invalid_args"
+
+
+def test_task_move_to_another_project_clears_a_stale_section(client, user):
+    a, b, section_a, token = _two_projects_with_a_section(client, user)
+    body = sync(
+        client, user, token,
+        [cmd("task_add", temp_id="t", title="T", project_id=a, section_id=section_a)],
+    )
+    task_id = body["temp_id_mapping"]["t"]
+    body = sync(client, user, body["sync_token"], [cmd("task_move", id=task_id, project_id=b)])
+    assert next(iter(body["sync_status"].values())) == "ok"
+    task = next(t for t in body["tasks"] if t["id"] == task_id)
+    assert task["project_id"] == b
+    assert task["section_id"] is None

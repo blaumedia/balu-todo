@@ -34,6 +34,7 @@ export const de: Record<TranslationKey, string> = {
   'sync.syncing': 'Synchronisiere…',
   'sync.offline': 'Offline — lokal gespeichert',
   'sync.error': 'Sync fehlgeschlagen',
+  'sync.rejected': '{n} Änderung(en) wurden vom Server abgelehnt und zurückgenommen.',
 
   'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',

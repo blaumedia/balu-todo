@@ -1,5 +1,10 @@
 export { createSyncClient } from "./client.js";
-export type { SyncClient, SyncClientOptions, Snapshot } from "./client.js";
+export type {
+  RejectedCommand,
+  Snapshot,
+  SyncClient,
+  SyncClientOptions,
+} from "./client.js";
 export { applyCommand, type ApplyContext } from "./apply.js";
 export {
   emptyReplica,

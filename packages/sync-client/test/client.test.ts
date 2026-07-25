@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createSyncClient, memoryKV, type SyncClient } from "../src/index.js";
-import { makeServer } from "./helpers.js";
+import { makeRejectingServer, makeServer } from "./helpers.js";
 
 const BASE = "http://test/api/v1";
 const WS = "w1";
@@ -107,6 +107,23 @@ describe("comments (v1.2)", () => {
     c.mutate({ type: "comment_add", args: { task_id: t, body: "b" } });
     c.mutate({ type: "task_delete", args: { id: t } });
     expect(c.getSnapshot().comments.every((x) => x.is_deleted)).toBe(true);
+  });
+
+  it("project_delete cascades to the comments of its tasks (I2)", () => {
+    const c = track(createSyncClient(base()));
+    const { temp_id: p } = c.mutate({ type: "project_add", args: { name: "P" } });
+    const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "in project", project_id: p } });
+    c.mutate({ type: "comment_add", args: { task_id: t, body: "a" } });
+    const { temp_id: other } = c.mutate({ type: "task_add", args: { title: "elsewhere" } });
+    c.mutate({ type: "comment_add", args: { task_id: other, body: "untouched" } });
+
+    c.mutate({ type: "project_delete", args: { id: p } });
+
+    const snap = c.getSnapshot();
+    const onDeletedTask = snap.comments.find((x) => x.task_id === t)!;
+    const elsewhere = snap.comments.find((x) => x.task_id === other)!;
+    expect(onDeletedTask.is_deleted).toBe(true);
+    expect(elsewhere.is_deleted).toBe(false);
   });
 
   it("rewrites a comment's temp task_id to the real id after flush", async () => {
@@ -300,5 +317,111 @@ describe("401 handling", () => {
     expect(refreshed).toBe(true);
     expect(calls).toBe(2);
     expect(c.getStatus()).toBe("synced");
+  });
+});
+
+describe("rejected commands (contract §5.2)", () => {
+  const rejectByTitle = (title: string) => (cmd: any) =>
+    cmd.type === "task_add" && cmd.args?.title === title ? "forbidden" : null;
+
+  it("rolls back the optimistic effect of a rejected command", async () => {
+    const server = makeRejectingServer(rejectByTitle("nope"));
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    c.mutate({ type: "task_add", args: { title: "keep" } });
+    c.mutate({ type: "task_add", args: { title: "nope" } });
+    expect(c.getSnapshot().tasks).toHaveLength(2); // both applied optimistically
+
+    await c.flush();
+
+    // Only the accepted task survives; the rejected one is gone.
+    expect(c.getSnapshot().tasks.map((t) => t.title)).toEqual(["keep"]);
+    expect(c.getSnapshot().pending).toBe(0);
+  });
+
+  it("reports the rejected commands to the app", async () => {
+    const server = makeRejectingServer(rejectByTitle("nope"));
+    const seen: any[] = [];
+    const c = track(
+      createSyncClient(base({ fetch: server.fetch, onCommandsRejected: (r) => seen.push(...r) })),
+    );
+    c.mutate({ type: "task_add", args: { title: "nope" } });
+    await c.flush();
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].error_code).toBe("forbidden");
+    expect(seen[0].command.type).toBe("task_add");
+    expect(seen[0].command.args.title).toBe("nope");
+  });
+
+  it("does not let a rejected mutation survive a restart", async () => {
+    const storage = memoryKV();
+    const server = makeRejectingServer(rejectByTitle("nope"));
+    const c1 = track(createSyncClient(base({ storage, fetch: server.fetch })));
+    c1.mutate({ type: "task_add", args: { title: "nope" } });
+    await c1.flush();
+
+    const c2 = track(createSyncClient(base({ storage, fetch: server.fetch })));
+    await c2.hydrate();
+    expect(c2.getSnapshot().tasks).toEqual([]);
+  });
+
+  it("leaves the replica alone when every command is accepted", async () => {
+    const server = makeRejectingServer(() => null);
+    const seen: any[] = [];
+    const c = track(
+      createSyncClient(base({ fetch: server.fetch, onCommandsRejected: (r) => seen.push(...r) })),
+    );
+    c.mutate({ type: "task_add", args: { title: "fine" } });
+    await c.flush();
+    expect(seen).toEqual([]);
+    expect(c.getSnapshot().tasks.map((t) => t.title)).toEqual(["fine"]);
+    expect(c.getStatus()).toBe("synced");
+  });
+});
+
+describe("recurring task_complete mirrors the server (I1/I5)", () => {
+  const at = (iso: string) => ({ now: () => new Date(`${iso}T12:00:00Z`) });
+
+  it("advances the start_date on its own anchor phase and shifts the deadline", () => {
+    const c = track(createSyncClient(base(at("2026-08-05"))));
+    const { temp_id } = c.mutate({
+      type: "task_add",
+      args: {
+        title: "Standup",
+        start_date: "2026-07-06",
+        deadline: "2026-07-08",
+        recurrence: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+      },
+    });
+    c.mutate({ type: "task_complete", args: { id: temp_id } });
+    const t = c.getSnapshot().tasks[0]!;
+    // Anchor-aligned Monday, not "two weeks after today".
+    expect(t.start_date).toBe("2026-08-17");
+    expect(t.deadline).toBe("2026-08-19"); // shifted by the same 42 days
+    expect(t.completed_at).toBeNull();
+  });
+
+  it("advances the deadline directly when there is no start_date", () => {
+    const c = track(createSyncClient(base(at("2026-07-23"))));
+    const { temp_id } = c.mutate({
+      type: "task_add",
+      args: { title: "Rent", deadline: "2026-01-31", recurrence: "FREQ=MONTHLY" },
+    });
+    c.mutate({ type: "task_complete", args: { id: temp_id } });
+    const t = c.getSnapshot().tasks[0]!;
+    expect(t.start_date).toBeNull();
+    expect(t.deadline).toBe("2026-07-31"); // month-end kept, measured from the anchor
+  });
+
+  it("falls back to today when the task has neither date", () => {
+    const c = track(createSyncClient(base(at("2026-07-23"))));
+    const { temp_id } = c.mutate({
+      type: "task_add",
+      args: { title: "Water", recurrence: "FREQ=DAILY;INTERVAL=3" },
+    });
+    c.mutate({ type: "task_complete", args: { id: temp_id } });
+    const t = c.getSnapshot().tasks[0]!;
+    expect(t.start_date).toBe("2026-07-26");
+    expect(t.deadline).toBeNull();
   });
 });

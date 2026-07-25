@@ -34,12 +34,25 @@ export interface SyncClientOptions {
   fetch?: typeof fetch;
   /** Called on a 401 so the app can refresh the token; the request retries once. */
   onAuthFail?: () => void | Promise<void>;
+  /**
+   * Called with the commands the server rejected. Their optimistic effect has
+   * already been rolled back (the replica is refetched from the server), so this
+   * is purely for telling the user what did not stick.
+   */
+  onCommandsRejected?: (rejected: RejectedCommand[]) => void;
   /** Current user id, stamped on optimistic `created_by`/`completed_by`. */
   userId?: string;
   now?: () => Date;
   autoSyncMs?: number;
   flushDebounceMs?: number;
   maxBatch?: number;
+}
+
+/** A command the server refused, paired with its error status. */
+export interface RejectedCommand {
+  command: SyncCommand;
+  error_code: string;
+  error: string;
 }
 
 export interface Snapshot {
@@ -166,6 +179,22 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     invalidate();
   }
 
+  /**
+   * The commands in `batch` the server refused. Their optimistic effect is still
+   * sitting in the replica and has to be undone (contract §5.2).
+   */
+  function rejectedIn(batch: SyncCommand[], resp: SyncResponse): RejectedCommand[] {
+    const status = resp.sync_status ?? {};
+    const out: RejectedCommand[] = [];
+    for (const command of batch) {
+      const s = status[command.uuid];
+      if (s != null && s !== "ok") {
+        out.push({ command, error_code: s.error_code, error: s.error });
+      }
+    }
+    return out;
+  }
+
   function applyResponse(resp: SyncResponse): void {
     const mapping = resp.temp_id_mapping ?? {};
     const hasMapping = Object.keys(mapping).length > 0;
@@ -226,9 +255,11 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     flushing = true;
     setStatus("syncing");
     try {
+      const rejected: RejectedCommand[] = [];
       while (queue.length > 0) {
         const batch = queue.slice(0, maxBatch);
         const resp = await doSync(batch);
+        rejected.push(...rejectedIn(batch, resp));
         applyResponse(resp); // may rewrite the rest of `queue` in place
         const sent = new Set(batch.map((c) => c.uuid));
         queue = queue.filter((c) => !sent.has(c.uuid));
@@ -236,6 +267,19 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
         await persistToken();
         await persistReplica();
         invalidate();
+      }
+
+      if (rejected.length > 0) {
+        // A rejected command's optimistic mutation is still sitting in the
+        // replica and there is no per-command inverse, so throw the replica away
+        // and pull it fresh. Without this the user keeps seeing a task or label
+        // that does not exist on the server — and it survives restarts, because
+        // the replica is persisted.
+        replica = emptyReplica();
+        syncToken = "*";
+        await pull();
+        opts.onCommandsRejected?.(rejected);
+        return;
       }
       setStatus("synced");
     } catch (e) {

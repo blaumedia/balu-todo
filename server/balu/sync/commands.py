@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..events import (
@@ -170,13 +170,15 @@ def _validate_recurrence(value: Any) -> str | None:
 
 
 def _max_sort_order(ctx: Ctx, model, **filters) -> int:
-    stmt = select(model.sort_order).where(model.workspace_id == ctx.workspace_id)
+    # MAX in the database (I14): this used to pull every sibling's sort_order
+    # into Python just to take the maximum.
+    stmt = select(func.max(model.sort_order)).where(model.workspace_id == ctx.workspace_id)
     for key, value in filters.items():
         col = getattr(model, key)
         stmt = stmt.where(col.is_(None) if value is None else col == value)
     stmt = stmt.where(model.is_deleted.is_(False))
-    values = ctx.session.execute(stmt).scalars().all()
-    return (max(values) if values else 0) + 1000
+    highest = ctx.session.execute(stmt).scalar()
+    return (highest or 0) + 1000
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +236,15 @@ def _resolve_labels(ctx: Ctx, label_ids: Any) -> list[Label]:
 # ---------------------------------------------------------------------------
 # Task field application (shared by task_add / task_update)
 # ---------------------------------------------------------------------------
-def _apply_task_fields(ctx: Ctx, task: Task, args: dict, *, creating: bool) -> None:
+def _check_section_in_project(section: Section, project_id: uuid.UUID | None) -> None:
+    """A task's section must live in the task's own project (I4)."""
+    if section.project_id != project_id:
+        raise CommandError(
+            "invalid_args", "section_id must belong to the task's project"
+        )
+
+
+def _apply_task_fields(ctx: Ctx, task: Task, args: dict) -> None:
     if "title" in args:
         task.title = _require_str(args, "title", MAX_TITLE)
     if "notes" in args:
@@ -343,7 +353,24 @@ def h_project_delete(ctx: Ctx, args: dict) -> dict:
     for t in tasks:
         t.is_deleted = True
         t.version = version
+    # Deleting a task cascades to its comments (§3.4) — deleting the project that
+    # holds those tasks has to do the same, or the comments stay live and keep
+    # syncing against tasks that no longer exist.
+    _delete_comments_of(ctx, [t.id for t in tasks], version)
     return {}
+
+
+def _delete_comments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) -> None:
+    if not task_ids:
+        return
+    comments = ctx.session.execute(
+        select(Comment).where(
+            Comment.task_id.in_(task_ids), Comment.is_deleted.is_(False)
+        )
+    ).scalars().all()
+    for c in comments:
+        c.is_deleted = True
+        c.version = version
 
 
 def h_section_add(ctx: Ctx, args: dict) -> dict:
@@ -396,7 +423,9 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
         project_id = _get_project(ctx, args["project_id"]).id
     section_id = None
     if args.get("section_id") is not None:
-        section_id = _get_section(ctx, args["section_id"]).id
+        section = _get_section(ctx, args["section_id"])
+        _check_section_in_project(section, project_id)
+        section_id = section.id
     parent_task_id = _check_parent(ctx, args.get("parent_task_id"))
 
     version = ctx.bump()
@@ -411,7 +440,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
         created_by=ctx.user_id,
         version=version,
     )
-    _apply_task_fields(ctx, task, args, creating=True)
+    _apply_task_fields(ctx, task, args)
     _record_assignment(ctx, task, previous=None)
     sort_order = args.get("sort_order")
     if sort_order is None:
@@ -429,7 +458,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
 def h_task_update(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     previous_assignee = task.assigned_to
-    _apply_task_fields(ctx, task, args, creating=False)
+    _apply_task_fields(ctx, task, args)
     _record_assignment(ctx, task, previous=previous_assignee)
     task.version = ctx.bump()
     return {}
@@ -443,10 +472,17 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
         task.project_id = (
             _get_project(ctx, args["project_id"]).id if args.get("project_id") else None
         )
+        # Moving to another project drops a section that no longer applies,
+        # unless this same command sets a matching one.
+        if "section_id" not in args:
+            task.section_id = None
     if "section_id" in args:
-        task.section_id = (
-            _get_section(ctx, args["section_id"]).id if args.get("section_id") else None
-        )
+        if args.get("section_id"):
+            section = _get_section(ctx, args["section_id"])
+            _check_section_in_project(section, task.project_id)
+            task.section_id = section.id
+        else:
+            task.section_id = None
     if "sort_order" in args:
         task.sort_order = int(args["sort_order"])
     task.version = ctx.bump()
@@ -457,19 +493,24 @@ def h_task_complete(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     version = ctx.bump()
     if task.recurrence:
-        today = date.today()
+        # UTC, not the server's local timezone (I11): rollover must not depend on
+        # how the host happens to be configured.
+        today = datetime.now(UTC).date()
         if task.start_date is not None:
-            reference = max(task.start_date, today)
-            new_start = next_occurrence(task.recurrence, reference)
+            # Anchor on the task's own start date so the rule keeps its phase.
+            new_start = next_occurrence(
+                task.recurrence, task.start_date, max(task.start_date, today)
+            )
             delta = new_start - task.start_date
             task.start_date = new_start
             if task.deadline is not None:
                 task.deadline = task.deadline + delta
         elif task.deadline is not None:
-            reference = max(task.deadline, today)
-            task.deadline = next_occurrence(task.recurrence, reference)
+            task.deadline = next_occurrence(
+                task.recurrence, task.deadline, max(task.deadline, today)
+            )
         else:
-            task.start_date = next_occurrence(task.recurrence, today)
+            task.start_date = next_occurrence(task.recurrence, today, today)
         # recurring task stays open: completed_at intentionally left null
     else:
         task.completed_at = datetime.now(UTC)
@@ -498,15 +539,7 @@ def h_task_delete(ctx: Ctx, args: dict) -> dict:
         st.is_deleted = True
         st.version = version
     # Cascade to comments of the task and its subtasks (§3.4).
-    task_ids = [task.id, *(st.id for st in subtasks)]
-    comments = ctx.session.execute(
-        select(Comment).where(
-            Comment.task_id.in_(task_ids), Comment.is_deleted.is_(False)
-        )
-    ).scalars().all()
-    for c in comments:
-        c.is_deleted = True
-        c.version = version
+    _delete_comments_of(ctx, [task.id, *(st.id for st in subtasks)], version)
     return {}
 
 

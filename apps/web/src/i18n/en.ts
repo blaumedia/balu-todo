@@ -23,6 +23,7 @@ export const en = {
   "sync.syncing": "Syncing…",
   "sync.offline": "Offline — saved locally",
   "sync.error": "Sync failed",
+  "sync.rejected": "{n} change(s) were rejected by the server and have been undone.",
 
   "quickadd.placeholder": "Add a task — try dates, #project, @label, !p1",
   "quickadd.hint": "Enter to add · Esc to close",

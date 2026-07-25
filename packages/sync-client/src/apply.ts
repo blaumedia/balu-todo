@@ -82,10 +82,20 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
           s.updated_at = now;
         }
       }
+      const deletedTaskIds = new Set<string>();
       for (const t of replica.tasks.values()) {
         if (t.project_id === id) {
           t.is_deleted = true;
           t.updated_at = now;
+          deletedTaskIds.add(t.id);
+        }
+      }
+      // Deleting a task cascades to its comments (§3.4) — deleting the project
+      // that holds those tasks has to do the same.
+      for (const c of replica.comments.values()) {
+        if (deletedTaskIds.has(c.task_id) && !c.is_deleted) {
+          c.is_deleted = true;
+          c.updated_at = now;
         }
       }
       break;
@@ -184,6 +194,14 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
       const t = replica.tasks.get(id);
       if (!t) break;
       patch(t, a, ["project_id", "section_id", "parent_task_id", "sort_order"]);
+      // A section always belongs to one project, so moving between projects
+      // without naming a new section clears it — same as the server (I4).
+      if (
+        Object.prototype.hasOwnProperty.call(a, "project_id") &&
+        !Object.prototype.hasOwnProperty.call(a, "section_id")
+      ) {
+        t.section_id = null;
+      }
       t.updated_at = now;
       break;
     }
@@ -191,14 +209,25 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
       const t = replica.tasks.get(id);
       if (!t) break;
       if (t.recurrence) {
+        // Mirrors the server's h_task_complete exactly (contract §3.3): anchor on
+        // the task's own date so the rule keeps its phase, and advance the
+        // deadline directly when there is no start date.
         const today = ctx.today();
-        const anchor = t.start_date ?? today;
-        const base = t.start_date && t.start_date > today ? t.start_date : today;
-        const next = nextOccurrence(t.recurrence, anchor, base);
-        if (next) {
-          const delta = t.start_date ? diffDaysISO(t.start_date, next) : diffDaysISO(base, next);
-          t.start_date = t.start_date ? next : next;
-          if (t.deadline) t.deadline = addDaysISO(t.deadline, delta);
+        if (t.start_date != null) {
+          const from = t.start_date;
+          const next = nextOccurrence(t.recurrence, from, from > today ? from : today);
+          if (next) {
+            const delta = diffDaysISO(from, next);
+            t.start_date = next;
+            if (t.deadline) t.deadline = addDaysISO(t.deadline, delta);
+          }
+        } else if (t.deadline != null) {
+          const from = t.deadline;
+          const next = nextOccurrence(t.recurrence, from, from > today ? from : today);
+          if (next) t.deadline = next;
+        } else {
+          const next = nextOccurrence(t.recurrence, today, today);
+          if (next) t.start_date = next;
         }
       } else {
         t.completed_at = now;

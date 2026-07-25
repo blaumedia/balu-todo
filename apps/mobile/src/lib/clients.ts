@@ -3,6 +3,9 @@
 // once the server URL is known.
 import { createApiClient, type ApiClient } from '@balu/api-client';
 import { createSyncClient, type SyncClient } from '@balu/sync-client';
+import { Alert } from 'react-native';
+import { makeT } from '../i18n';
+import { useApp } from '../store/app';
 import { sqliteKV } from './kv';
 
 let api: ApiClient | null = null;
@@ -56,6 +59,15 @@ export function initSync(serverUrl: string, workspaceId: string, userId: string)
     storage: sqliteKV,
     onAuthFail: async () => {
       await client?.refresh();
+    },
+    onCommandsRejected: (rejected) => {
+      // The replica has already been re-pulled; tell the user their optimistic
+      // change did not stick instead of letting it vanish silently.
+      const { locale } = useApp.getState();
+      Alert.alert(
+        makeT(locale)('sync.error'),
+        makeT(locale)('sync.rejected').replace('{n}', String(rejected.length)),
+      );
     },
   });
   sync.start();
