@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 
 from .config import get_settings
-from .urlguard import UnsafeUrl, check_outbound_url
+from .urlguard import UnsafeUrl, checked_outbound_target, pinned_resolution
 
 logger = logging.getLogger("balu.notifications")
 
@@ -52,19 +52,24 @@ def send_ntfy(config: dict[str, Any], title: str, body: str) -> None:
         raise ChannelUnavailable("ntfy channel is missing a url")
     # Re-check at send time: DNS may have changed since the channel was stored.
     try:
-        url = check_outbound_url(url)
+        url, host, address = checked_outbound_target(url)
     except UnsafeUrl as exc:
         # Deliberately vague: `exc` names the resolved address, and this message
         # reaches the client through POST /me/channels/test (S3/S6).
         logger.warning("blocked ntfy delivery to an unsafe url", exc_info=exc)
         raise ChannelUnavailable("ntfy url is not allowed") from exc
-    resp = httpx.post(
-        url,
-        content=body.encode("utf-8"),
-        headers={"Title": title, "Content-Type": "text/plain; charset=utf-8"},
-        timeout=_HTTP_TIMEOUT,
-        follow_redirects=False,  # a redirect would bypass the SSRF guard
-    )
+
+    # Connect to the address we just validated, not to whatever the hostname
+    # resolves to a moment later: without this, a 0-TTL record can answer public
+    # for the check and private for the connection (DNS rebinding).
+    with pinned_resolution(host, address):
+        resp = httpx.post(
+            url,
+            content=body.encode("utf-8"),
+            headers={"Title": title, "Content-Type": "text/plain; charset=utf-8"},
+            timeout=_HTTP_TIMEOUT,
+            follow_redirects=False,  # a redirect would bypass the SSRF guard
+        )
     # `raise_for_status` treats 3xx as success, so an un-followed redirect would
     # be reported as a working channel that silently delivers nothing.
     if resp.is_redirect:

@@ -227,7 +227,17 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     return out;
   }
 
-  function applyResponse(resp: SyncResponse): void {
+  /**
+   * Fold a sync response into the replica.
+   *
+   * `stillQueued` are the commands that have NOT been accepted by this response
+   * and are still waiting to be sent. A full response replaces the replica with
+   * pure server state, which would otherwise blank out their optimistic effects
+   * until the next flush re-sent them — unsent edits visibly vanishing and
+   * reappearing. Re-applying them on top restores the "server state + what I
+   * have not sent yet" view the user expects.
+   */
+  function applyResponse(resp: SyncResponse, stillQueued: SyncCommand[] = []): void {
     const mapping = resp.temp_id_mapping ?? {};
     const hasMapping = Object.keys(mapping).length > 0;
 
@@ -241,6 +251,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       for (const l of resp.labels) if (!l.is_deleted) replica.labels.set(l.id, l);
       for (const c of resp.comments ?? []) if (!c.is_deleted) replica.comments.set(c.id, c);
       for (const m of resp.members) if (!m.is_deleted) replica.members.set(m.id, m);
+      // Refs were rewritten above, so these carry real ids where the server has
+      // assigned them. Rejected commands are never in `stillQueued` — they are
+      // dropped from the queue — so this cannot resurrect one.
+      for (const cmd of stillQueued) applyCommand(replica, cmd, ctx);
     } else {
       if (hasMapping) {
         rewriteReplicaRefs(replica, mapping);
@@ -302,9 +316,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
           // entirely, stranding the phantom for good.
           await markNeedsFullSync();
         }
-        applyResponse(resp); // may rewrite the rest of `queue` in place
         const sent = new Set(batch.map((c) => c.uuid));
-        queue = queue.filter((c) => !sent.has(c.uuid));
+        const remaining = queue.filter((c) => !sent.has(c.uuid));
+        applyResponse(resp, remaining); // may rewrite `queue` refs in place
+        queue = remaining;
         await persistQueue();
         await persistToken();
         await persistReplica();
@@ -328,13 +343,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     // is no per-command inverse, so the only cure is a full sync — which the
     // persisted flag guarantees will happen, retrying on every later sync until
     // one succeeds.
-    //
-    // Known cost: if the flush threw with commands still queued and the network
-    // recovers in time for this pull, the full response replaces the replica and
-    // those queued commands' optimistic effects disappear until the next flush
-    // re-sends them. The commands themselves are durable and nothing is lost —
-    // the user just sees unsent edits blink out and come back. Re-applying the
-    // queue over a full sync would avoid it and is the obvious v2 refinement.
+
     if (needsFullSync) await pull();
     if (rejected.length > 0) opts.onCommandsRejected?.(rejected);
   }
@@ -343,7 +352,8 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     setStatus("syncing");
     try {
       const resp = await doSync([]);
-      applyResponse(resp);
+      // Nothing was sent, so everything queued is still pending.
+      applyResponse(resp, queue);
       await persistToken();
       await persistReplica();
       // Only a *full* response actually replaced the replica (a delta would have

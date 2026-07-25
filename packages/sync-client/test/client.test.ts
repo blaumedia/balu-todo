@@ -516,6 +516,30 @@ describe("rejected commands (contract §5.2)", () => {
     expect(await inner.getItem(`balu:needsFullSync:${WS}`)).toBeNull();
   });
 
+  it("keeps unsent edits visible across the recovery full sync", async () => {
+    // A full response replaces the replica with pure server state. Commands
+    // still waiting in the queue have not reached the server, so without
+    // re-applying them the user's unsent edits blink out and only come back on
+    // the next flush.
+    const server = makeRejectingServer(rejectByTitle("nope"));
+    let calls = 0;
+    const flaky: typeof server.fetch = async (url, init) => {
+      calls += 1;
+      if (calls === 3) throw new TypeError("network down"); // kills batch 2
+      return server.fetch(url, init);
+    };
+    const c = track(createSyncClient(base({ fetch: flaky, maxBatch: 1 })));
+    await c.sync();
+    c.mutate({ type: "task_add", args: { title: "nope" } }); // rejected
+    c.mutate({ type: "task_add", args: { title: "unsent" } }); // never reaches the server
+    await c.flush();
+
+    const titles = c.getSnapshot().tasks.map((t) => t.title);
+    expect(titles).not.toContain("nope"); // rejection rolled back
+    expect(titles).toContain("unsent"); // still-queued edit survives the full sync
+    expect(c.getSnapshot().pending).toBe(1);
+  });
+
   it("leaves the replica alone when every command is accepted", async () => {
     const server = makeRejectingServer(() => null);
     const seen: any[] = [];

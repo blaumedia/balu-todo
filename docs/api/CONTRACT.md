@@ -401,7 +401,9 @@ Per-user external channels — the self-hosted answer to app-store push relays.
 
 Channel shapes: `{"type": "ntfy", "url": "https://ntfy.sh/<topic>"}` ·
 `{"type": "email", "address": "…"}` · `{"type": "telegram", "chat_id": "…"}`.
-Email requires server SMTP config (`BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`), telegram
+ntfy URLs must resolve to a public address, checked when stored and again at send
+time; the request is then pinned to the address that was validated, so a rebinding
+DNS answer cannot redirect it. Email requires server SMTP config (`BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`), telegram
 requires `BALU_TELEGRAM_BOT_TOKEN`; configuring a channel whose transport is not set up
 server-side → `400 channel_unavailable`.
 
