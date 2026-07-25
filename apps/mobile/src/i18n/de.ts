@@ -71,7 +71,7 @@ export const de: Record<TranslationKey, string> = {
   'comment.delete': 'Löschen',
   'comment.save': 'Speichern',
   'comment.edited': 'bearbeitet',
-  'comment.justNow': 'gerade eben',
+  'time.justNow': 'gerade eben',
   'comment.readOnly': 'Du hast nur Lesezugriff.',
 
   'priority.none': 'Keine',

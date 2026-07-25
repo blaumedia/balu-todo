@@ -2,6 +2,7 @@
 // store with single-flight auto-refresh on 401. Framework-free.
 
 import type {
+  AsyncKV,
   AuthResult,
   AuthTokens,
   Channel,
@@ -16,11 +17,8 @@ import type {
   Workspace,
 } from "@balu/domain";
 
-export interface AsyncKV {
-  getItem(key: string): Promise<string | null>;
-  setItem(key: string, value: string): Promise<void>;
-  removeItem(key: string): Promise<void>;
-}
+// Declared once in @balu/domain (D6); re-exported so existing imports keep working.
+export type { AsyncKV };
 
 export interface ApiClientOptions {
   /** Defaults to `/api/v1` (same-origin; the server serves the SPA). */

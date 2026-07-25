@@ -2,6 +2,7 @@
 // No fuzzy-search dependency: exact / word-prefix / subsequence scoring only,
 // shared so every client ranks results identically.
 
+import { isOpen } from "./taskLists.js";
 import type { Label, Project, Task } from "./types.js";
 
 export type SearchKind = "task" | "project" | "label";
@@ -103,4 +104,76 @@ export function searchItems(query: string, input: SearchInput, limit = 20): Sear
 
   out.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
   return out.slice(0, limit);
+}
+
+// ── Grouped search over the replica ──────────────────────────────────────────
+// The same scoring as `searchItems`, but returned per kind and with the options
+// the mobile search screen needs. Mobile used to carry its own plain-substring
+// implementation (D2/I6), so the two platforms ranked identical queries
+// differently.
+
+export interface ReplicaSearchInput extends SearchInput {
+  /** Raw query text; trimmed + lower-cased internally. */
+  query: string;
+  /** Include completed tasks (default: open only). */
+  includeCompleted?: boolean;
+  /** Include archived projects (default: hidden). */
+  includeArchivedProjects?: boolean;
+  /** Max tasks returned (projects/labels are naturally small). */
+  cap?: number;
+}
+
+export interface ReplicaSearchResults {
+  tasks: Task[];
+  projects: Project[];
+  labels: Label[];
+}
+
+const TASK_CAP = 100;
+
+/**
+ * Rank tasks (title + notes), projects and labels for `query`, grouped by kind.
+ * Tasks put open before completed, then best score first. Empty query returns
+ * nothing. Pure and total.
+ */
+export function searchReplica(input: ReplicaSearchInput): ReplicaSearchResults {
+  const q = input.query.trim().toLowerCase();
+  if (!q) return { tasks: [], projects: [], labels: [] };
+  const cap = input.cap ?? TASK_CAP;
+
+  const scoredTasks: Array<{ task: Task; score: number }> = [];
+  for (const task of input.tasks) {
+    if (task.is_deleted) continue;
+    if (!input.includeCompleted && !isOpen(task)) continue;
+    const titleScore = scoreText(q, task.title);
+    const notesScore = task.notes ? scoreText(q, task.notes) : null;
+    let score: number | null = titleScore;
+    if (score == null && notesScore != null) score = notesScore - 300;
+    if (score != null) scoredTasks.push({ task, score });
+  }
+  scoredTasks.sort((a, b) => {
+    const openness = (a.task.completed_at == null ? 0 : 1) - (b.task.completed_at == null ? 0 : 1);
+    return openness || b.score - a.score || a.task.title.localeCompare(b.task.title);
+  });
+
+  const projects = rank(
+    input.projects.filter(
+      (p) => !p.is_deleted && (input.includeArchivedProjects || p.archived_at == null),
+    ),
+    q,
+    (p) => p.name,
+  );
+  const labels = rank(input.labels.filter((l) => !l.is_deleted), q, (l) => l.name);
+
+  return { tasks: scoredTasks.slice(0, cap).map((s) => s.task), projects, labels };
+}
+
+function rank<T>(items: ReadonlyArray<T>, q: string, name: (item: T) => string): T[] {
+  const scored: Array<{ item: T; score: number }> = [];
+  for (const item of items) {
+    const score = scoreText(q, name(item));
+    if (score != null) scored.push({ item, score });
+  }
+  scored.sort((a, b) => b.score - a.score || name(a.item).localeCompare(name(b.item)));
+  return scored.map((s) => s.item);
 }

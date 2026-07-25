@@ -2,9 +2,17 @@
 // task draft plus token spans for live pill highlighting. German + English.
 
 import { buildMatchers, SYMBOL_MATCHERS, type Matcher } from "./grammar.js";
+import { buildTitle } from "./title.js";
 import type { ParseOptions, ParseResult, Token } from "./types.js";
 
 export type { Locale, ParseOptions, ParseResult, Token, TokenType } from "./types.js";
+export { buildTitle } from "./title.js";
+export {
+  composeTaskArgs,
+  type ComposeContext,
+  type ComposeOptions,
+  type NamedEntity,
+} from "./compose.js";
 
 interface Candidate extends Token {
   order: number; // tie-break: lower = higher priority
@@ -60,19 +68,6 @@ function resolve(cands: Candidate[]): Candidate[] {
     }
   }
   return chosen;
-}
-
-/** Strip the given token spans from `text` and collapse whitespace. */
-export function buildTitle(text: string, tokens: ReadonlyArray<{ start: number; end: number }>): string {
-  const spans = [...tokens].sort((a, b) => a.start - b.start);
-  let out = "";
-  let cursor = 0;
-  for (const s of spans) {
-    if (s.start > cursor) out += text.slice(cursor, s.start);
-    cursor = Math.max(cursor, s.end);
-  }
-  out += text.slice(cursor);
-  return out.replace(/\s+/g, " ").trim();
 }
 
 export function parseQuickAdd(text: string, opts: ParseOptions): ParseResult {

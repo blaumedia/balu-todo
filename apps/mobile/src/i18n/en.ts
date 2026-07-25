@@ -68,7 +68,7 @@ export const en = {
   'comment.delete': 'Delete',
   'comment.save': 'Save',
   'comment.edited': 'edited',
-  'comment.justNow': 'just now',
+  'time.justNow': 'just now',
   'comment.readOnly': 'You have read-only access.',
 
   'priority.none': 'None',
