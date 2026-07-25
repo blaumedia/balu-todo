@@ -6,8 +6,6 @@ plaintext is returned only from the create call.
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -28,15 +26,12 @@ from ..schemas.invite import (
 )
 from ..schemas.workspace import AcceptInviteResponse, WorkspaceOut
 from ..sync.engine import ROLE_RANK, bump_version
+from ..tokens import hash_token, new_token
 from .workspaces import _parse_ws_id, get_membership
 
 router = APIRouter(tags=["invites"])
 
 INVITE_TTL = timedelta(days=14)
-
-
-def _hash_token(raw: str) -> str:
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def _require_admin(db: Session, ws_id: uuid.UUID, user: User) -> Membership:
@@ -75,13 +70,13 @@ def create_invite(
 ) -> InviteCreateResponse:
     ws_id = _parse_ws_id(workspace_id)
     _require_admin(db, ws_id, user)
-    raw = secrets.token_urlsafe(32)
+    raw = new_token()
     invite = Invite(
         id=uuid.uuid4(),
         workspace_id=ws_id,
         role=body.role,
         email=str(body.email) if body.email else None,
-        token_hash=_hash_token(raw),
+        token_hash=hash_token(raw),
         revoked=False,
         expires_at=datetime.now(UTC) + INVITE_TTL,
     )
@@ -148,7 +143,7 @@ def accept_invite(
         raise invalid_invite_token()
 
     invite = db.execute(
-        select(Invite).where(Invite.token_hash == _hash_token(body.token))
+        select(Invite).where(Invite.token_hash == hash_token(body.token))
     ).scalar_one_or_none()
     if invite is None or invite.revoked or _aware(invite.expires_at) <= datetime.now(UTC):
         raise invalid_invite_token()

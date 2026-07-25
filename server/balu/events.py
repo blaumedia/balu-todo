@@ -16,20 +16,19 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Comment, Project, Task, User, UserChannel
+from .delivery import Sender, deliver_to_user, task_context
+from .models import Comment, Task, User
 from .notifications import send_to_channel
-from .sync.serialize import iso_date
 
 logger = logging.getLogger("balu.events")
 
-EventSender = Callable[[str, dict[str, Any], str, str], None]
+#: Alias kept for the existing call sites / dependency override.
+EventSender = Sender
 
 
 # ---------------------------------------------------------------------------
@@ -58,38 +57,8 @@ def get_event_sender() -> EventSender:
 
 
 # ---------------------------------------------------------------------------
-# Delivery helpers
+# Delivery helpers  (the loop and the body live in balu.delivery — D9)
 # ---------------------------------------------------------------------------
-def _deliver(
-    session: Session, sender: EventSender, user_id: uuid.UUID, title: str, body: str
-) -> None:
-    """Send one message to every channel of one user. Per-channel failures logged."""
-    channels = (
-        session.execute(select(UserChannel).where(UserChannel.user_id == user_id))
-        .scalars()
-        .all()
-    )
-    for channel in channels:
-        try:
-            sender(channel.type, channel.config, title, body)
-        except Exception as exc:  # noqa: BLE001 - log and continue, never propagate
-            logger.warning(
-                "event delivery failed for user=%s channel=%s: %s", user_id, channel.type, exc
-            )
-
-
-def _task_context(session: Session, task: Task) -> str:
-    """Project + deadline lines, mirroring the reminder message body."""
-    lines: list[str] = []
-    if task.project_id is not None:
-        project = session.get(Project, task.project_id)
-        if project is not None and not project.is_deleted:
-            lines.append(f"Project: {project.name}")
-    if task.deadline is not None:
-        lines.append(f"Due: {iso_date(task.deadline)}")
-    return "\n".join(lines)
-
-
 def _deliver_assignment(
     session: Session, sender: EventSender, actor_name: str, event: AssignmentEvent
 ) -> None:
@@ -97,7 +66,7 @@ def _deliver_assignment(
     if task is None or task.is_deleted:
         return
     title = f"{actor_name} assigned you: {task.title}"
-    _deliver(session, sender, event.assignee_id, title, _task_context(session, task))
+    deliver_to_user(session, sender, event.assignee_id, title, task_context(session, task))
 
 
 def _comment_recipients(
@@ -140,7 +109,7 @@ def _deliver_comment(
         return
     title = f"{actor_name} commented on: {task.title}"
     for recipient_id in _comment_recipients(session, task, comment):
-        _deliver(session, sender, recipient_id, title, comment.body)
+        deliver_to_user(session, sender, recipient_id, title, comment.body)
 
 
 # ---------------------------------------------------------------------------
