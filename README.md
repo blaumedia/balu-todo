@@ -65,7 +65,7 @@ bypass the key check.
 | `apps/web/` | React web client (Vite + TS) |
 | `apps/mobile/` | Expo/React Native app (iOS + Android) |
 | `packages/` | shared TS: `@balu/domain`, `@balu/nl-parser` (de+en), `@balu/sync-client`, `@balu/api-client` |
-| `docs/` | design language, API + sync contract, roadmap |
+| `docs/` | API + sync contract, screenshots |
 
 ## Development
 
@@ -73,13 +73,27 @@ bypass the key check.
 - Web: `pnpm install && pnpm --filter @balu/web dev` (proxies `/api` → `:8000`)
 - Mobile: `pnpm --filter @balu/mobile start` — see `apps/mobile/README.md`
 
+## Ideas
+
+Things that might land later. No dates attached — this is a self-hosted project, and
+the order will follow what people actually run into.
+
+- **Shared-group mechanics** — fair rotation for recurring chores (round-robin /
+  least-busy) and opt-in group points, for households sharing a workspace.
+- **Kanban and calendar views** alongside the existing lists.
+- **Grocery-mode lists** with aisle auto-grouping.
+- **Capture polish** — share-sheet and intent capture on mobile, natural-language
+  completion inside the date picker.
+
+Explicit non-goals: no Gantt charts, no time tracking, no docs-and-notes platform.
+Feature restraint is deliberate — capture friction is what makes a todo app stop
+getting used, and every added surface is a chance to introduce some. There are also
+no paid tiers to design around; self-hosted means everything is on.
+
 ## Docs
 
 - [docs/api/CONTRACT.md](docs/api/CONTRACT.md) — API + sync-protocol contract (source of
   truth; start here to write your own client)
-- [docs/DESIGN.md](docs/DESIGN.md) — design language: color system, typography, motion, IA
-- [docs/ROADMAP.md](docs/ROADMAP.md) — what's next, and the explicit non-goals
-- [CHANGELOG.md](CHANGELOG.md)
 
 ## License
 

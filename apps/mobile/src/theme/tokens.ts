@@ -1,5 +1,4 @@
-// Balu design tokens for React Native — transcribed from the design language
-// in docs/DESIGN.md §2–5.
+// Balu design tokens for React Native.
 // Light/dark are the same token *names* with different values; components never
 // reference raw hex, only `theme.<token>`.
 
