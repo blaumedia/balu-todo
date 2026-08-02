@@ -114,3 +114,26 @@ jobs:
             --build-arg SKIP_WEB=0 \
             --build-arg VERSION="$VERSION" \
             $TAGS $OUTPUT .
+      - name: Publish the GitHub release
+        # Release notes have to live where people can actually read them: this
+        # forge is not reachable from outside, so the mirror is the only public
+        # face. Last step on purpose — a release that points at images which
+        # failed to push would be worse than no release.
+        #
+        # Reuses GHCR_TOKEN deliberately: it is a classic PAT whose `repo`
+        # scope already covers releases on the mirror, so this adds no second
+        # credential to rotate. The token is passed through `env` rather than
+        # interpolated into the script, so it never appears in the run log.
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GH_REPO: blaumedia/balu-todo
+        run: |
+          if [ "$PUBLISH" != "1" ]; then
+            echo "Dry run: not touching GitHub releases."
+            exit 0
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "GHCR_TOKEN is not set — skipping the GitHub release." >&2
+            exit 0
+          fi
+          python3 .gitea/scripts/github_release.py
