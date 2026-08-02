@@ -43,7 +43,9 @@ JWT bearer auth. `Authorization: Bearer <access_token>` on every authenticated r
 Rules:
 
 - Registration is gated by env `BALU_ALLOW_REGISTRATION` (default `true`). When disabled
-  → `403 registration_disabled`. (Invite flows come later.)
+  → `403 registration_disabled`. **Invites do not bypass this gate**: `POST /invites/accept`
+  resolves an authenticated user, so it can only add an account that already exists. With
+  registration closed there is no route to a new account at all.
 - `POST /auth/register` auto-creates a personal workspace named after the user — the
   full name, e.g. "Anna Maria Schmidt" — with the user as `owner`.
 - **Throttling (v1.2.1):** `/auth/login`, `/auth/register` and `/auth/refresh` are rate

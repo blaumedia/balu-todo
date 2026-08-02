@@ -112,8 +112,13 @@ docker compose up --build
 - Set a real `BALU_SECRET_KEY` (e.g. `openssl rand -hex 32`) and `BALU_DB_PASSWORD`.
 - CORS is same-origin by default. Only set `BALU_CORS_ORIGINS` if you serve the web
   client from a different origin than the API.
-- Put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front and set
-  `BALU_ALLOW_REGISTRATION=false` after creating your accounts — invites still work.
+- Put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front, and set
+  `BALU_ALLOW_REGISTRATION=false` once **everyone who needs an account has one**.
+  Read that literally: registration is the only way an account is created. A
+  workspace invite adds an *existing* user to a workspace — `POST /invites/accept`
+  authenticates first — so it cannot get a new person onto a closed server. To add
+  someone later, flip the setting back to `true` while they sign up, then close it
+  again.
 - Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`
   enable email, `BALU_TELEGRAM_BOT_TOKEN` enables Telegram; ntfy needs nothing.
 - Back up the `balu-db` volume; the app container is stateless.
