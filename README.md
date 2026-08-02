@@ -17,24 +17,95 @@ A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 |---|---|
 | ![Today, light](docs/screenshots/web-today-light.png) | ![Today, dark](docs/screenshots/web-today-dark.png) |
 
+The same data, on the phone — the mobile apps are full clients, not a web view:
+
+| Today | Today, dark | Task detail |
+|---|---|---|
+| ![iOS Today, light](docs/screenshots/ios-today-light.png) | ![iOS Today, dark](docs/screenshots/ios-today-dark.png) | ![iOS task detail](docs/screenshots/ios-detail.png) |
+
+Point them at your own server on first launch — there is no account with us.
+[App Store](https://apps.apple.com/app/balu-private-todo-tasks/id6794310209) ·
+[Google Play](https://play.google.com/store/apps/details?id=com.blaumedia.balutodo) ·
+or build `apps/mobile/` yourself.
+
 ## Run it
 
-Requires Docker Compose **2.24+** (the `env_file` long syntax).
+Releases are published as multi-arch images (`linux/amd64`, `linux/arm64`) — no
+build step, no toolchain:
 
 ```sh
-cp .env.example .env
-printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" >> .env
-docker compose up --build
+docker pull ghcr.io/blaumedia/balu-todo:latest
+```
+
+`:latest` follows the newest release; every release also gets an immutable `:X.Y.Z`
+tag — pin that one in production. Put this in a `docker-compose.yml`:
+
+```yaml
+name: balu
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: balu
+      POSTGRES_PASSWORD: ${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env}
+      POSTGRES_DB: balu
+    volumes:
+      - balu-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balu -d balu"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    image: ghcr.io/blaumedia/balu-todo:latest
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://balu:${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env}@db:5432/balu
+      SECRET_KEY: ${BALU_SECRET_KEY:?set BALU_SECRET_KEY in .env}
+    ports:
+      - "${BALU_PORT:-8080}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  balu-db:
+```
+
+and next to it a `.env` with the two required secrets:
+
+```sh
+printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" > .env
+docker compose up -d
 ```
 
 Open http://localhost:8080, register, done. One app container + Postgres — that's the
-whole deployment. Configuration via env: `BALU_PORT`, `BALU_SECRET_KEY`,
-`BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`, `BALU_CORS_ORIGINS`.
+whole deployment; the schema migrates itself on startup. Configuration via env:
+`BALU_PORT`, `BALU_SECRET_KEY`, `BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`,
+`BALU_CORS_ORIGINS`, plus the optional notification transports — the full list with
+comments is [`.env.example`](.env.example), and every one of them reaches the
+container through `env_file`. Upgrading is `docker compose pull && docker compose up -d`.
 
 `BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** — compose refuses to
 start without them, and the server refuses to boot on a weak (<32 char) or
 placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to
 bypass the key check.
+
+### Build it yourself instead
+
+The compose file in this repo builds from source rather than pulling. Requires
+Docker Compose **2.24+** (the `env_file` long syntax):
+
+```sh
+git clone https://github.com/blaumedia/balu-todo && cd balu-todo
+cp .env.example .env
+printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" >> .env
+docker compose up --build
+```
 
 ### Production notes
 
