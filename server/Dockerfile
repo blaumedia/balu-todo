@@ -55,9 +55,14 @@ COPY server/ ./
 # Web dist -> static (present only when SKIP_WEB=0)
 COPY --from=webbuild /build/apps/web/dist/ ./static/
 
-# Drop root: the app never writes inside its own tree.
-RUN useradd --system --uid 10001 --user-group --no-create-home balu \
-    && chown -R balu:balu /app
+# Drop root. The app never writes inside its own tree, so it has no reason to
+# own it either — root-owned, world-readable files are if anything harder to
+# tamper with once the process is unprivileged.
+#
+# The recursive chown this replaces was the single slowest thing in the release
+# build: ~40k venv files, one emulated syscall each, minutes per non-native
+# architecture under QEMU, for no benefit at all.
+RUN useradd --system --uid 10001 --user-group --no-create-home balu
 USER balu
 
 EXPOSE 8000
