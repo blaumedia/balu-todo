@@ -34,6 +34,7 @@
         "track": "production"
       },
       "ios": {
+        "ascAppId": "0000000000",
         "ascApiKeyPath": "/path/to/your/AuthKey_XXXXXXXXXX.p8",
         "ascApiKeyId": "XXXXXXXXXX",
         "ascApiKeyIssuerId": "00000000-0000-0000-0000-000000000000",
