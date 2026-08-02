@@ -1,11 +1,19 @@
 name: release
 
-# Tag vX.Y.Z → build the self-hosting image (web client baked in) and push it
-# to the Gitea packages registry as <owner>/balu:<version> and :latest.
-# Image tags are the version — rollback is a re-point, never a rebuild.
+# Tag vX.Y.Z → build the self-hosting image (web client baked in) for amd64 and
+# arm64 and push it to two registries:
 #
-# The registry host comes from the `REGISTRY_HOST` Actions variable (org or
-# repo level) so this file carries no forge hostname.
+#   * the Gitea packages registry as <owner>/balu:<version> and :latest — what
+#     the deployments here pull. The host comes from the `REGISTRY_HOST` Actions
+#     variable (org or repo level) so this file carries no forge hostname.
+#   * GHCR as ghcr.io/blaumedia/balu-todo:<version> and :latest — what the
+#     public README tells people to `docker pull`. Needs the `GHCR_TOKEN` secret
+#     (a *classic* PAT with write:packages; fine-grained tokens cannot grant it)
+#     and, if the token owner is not the org, a `GHCR_USER` variable. Without
+#     the secret the GHCR tags are simply not built or pushed — the run still
+#     publishes to Gitea rather than failing.
+#
+# Image tags are the version — rollback is a re-point, never a rebuild.
 #
 # Can also be dispatched manually. A dispatch is a **dry run by default**: it
 # authenticates and builds, then pushes nothing — the way to prove credentials
@@ -21,6 +29,10 @@ on:
         description: "Verify login and build only — push nothing"
         type: boolean
         default: true
+
+env:
+  GHCR_IMAGE: ghcr.io/blaumedia/balu-todo
+  PLATFORMS: linux/amd64,linux/arm64
 
 jobs:
   image:
@@ -54,25 +66,51 @@ jobs:
             echo "VERSION=dryrun-$(echo "$GITHUB_SHA" | cut -c1-7)" >> "$GITHUB_ENV"
             echo "PUBLISH=0" >> "$GITHUB_ENV"
           fi
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx
+        # Multi-platform images cannot be produced by plain `docker build`, and
+        # they cannot be loaded into the local image store either — buildx has
+        # to push the manifest list itself, hence the single build+push step.
+        uses: docker/setup-buildx-action@v3
       - name: Login to registry
         # The built-in GITHUB_TOKEN cannot authenticate against the packages
         # registry — use the org Actions secret (a PAT with write:package),
         # same as the other repos on this forge. This step runs on dry runs too;
         # verifying it is the point of them.
         run: echo "${{ secrets.REGISTRY_TOKEN }}" | docker login "${{ vars.REGISTRY_HOST }}" -u "${{ github.actor }}" --password-stdin
-      - name: Build
+      - name: Login to GHCR
+        # Not fatal when unconfigured: a fork, or this repo before the token is
+        # in place, should still cut releases to the forge registry.
         run: |
-          TAGS="-t $IMAGE:$VERSION"
-          if [ "$PUBLISH" = "1" ]; then TAGS="$TAGS -t $IMAGE:latest"; fi
-          docker build -f server/Dockerfile --build-arg SKIP_WEB=0 $TAGS .
-      - name: Push
-        # Guarded in shell rather than with `if:` on purpose — an expression that
-        # evaluates unexpectedly would publish from a dry run, which is the one
-        # outcome this must never have.
-        run: |
-          if [ "$PUBLISH" != "1" ]; then
-            echo "Dry run: authenticated to ${{ vars.REGISTRY_HOST }} and built $IMAGE:$VERSION. Pushing nothing."
+          if [ -z "${{ secrets.GHCR_TOKEN }}" ]; then
+            echo "GHCR_TOKEN is not set — skipping the public $GHCR_IMAGE tags." >&2
+            echo "GHCR=0" >> "$GITHUB_ENV"
             exit 0
           fi
-          docker push $IMAGE:$VERSION
-          docker push $IMAGE:latest
+          GHCR_USER="${{ vars.GHCR_USER }}"
+          [ -n "$GHCR_USER" ] || GHCR_USER="${{ github.repository_owner }}"
+          echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          echo "GHCR=1" >> "$GITHUB_ENV"
+      - name: Build and push
+        # Push is guarded in shell rather than with `if:` on purpose — an
+        # expression that evaluates unexpectedly would publish from a dry run,
+        # which is the one outcome this must never have. A dry run still builds
+        # every platform; `type=cacheonly` just throws the result away.
+        run: |
+          TAGS="-t $IMAGE:$VERSION"
+          [ "$GHCR" = "1" ] && TAGS="$TAGS -t $GHCR_IMAGE:$VERSION"
+          if [ "$PUBLISH" = "1" ]; then
+            TAGS="$TAGS -t $IMAGE:latest"
+            [ "$GHCR" = "1" ] && TAGS="$TAGS -t $GHCR_IMAGE:latest"
+            OUTPUT="--push"
+          else
+            OUTPUT="--output=type=cacheonly"
+            echo "Dry run: authenticated, building $VERSION for $PLATFORMS. Pushing nothing."
+          fi
+          docker buildx build \
+            -f server/Dockerfile \
+            --platform "$PLATFORMS" \
+            --build-arg SKIP_WEB=0 \
+            --build-arg VERSION="$VERSION" \
+            $TAGS $OUTPUT .

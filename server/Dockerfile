@@ -2,7 +2,10 @@
 # Build context is the repo root so the web client can be built in later integration.
 
 # ---- Stage 1: web build (guarded; apps/web may be absent for now) ----------
-FROM node:22-alpine AS webbuild
+# Pinned to the *build* platform: the output is a pile of JS and CSS, identical
+# for every target arch, and running pnpm under QEMU turned the arm64 leg of the
+# multi-arch release build into the slowest thing in CI by far.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS webbuild
 ARG SKIP_WEB=1
 WORKDIR /build
 COPY . .
@@ -17,6 +20,17 @@ RUN if [ "$SKIP_WEB" = "0" ] && [ -d apps/web ]; then \
 
 # ---- Stage 2: python runtime ----------------------------------------------
 FROM python:3.12-slim AS runtime
+
+ARG VERSION=dev
+# `image.source` is not decoration: GHCR links a package to its repository (and
+# inherits that repo's visibility) by reading this label off the image. Without
+# it the push 403s on a fresh package.
+LABEL org.opencontainers.image.title="Balu" \
+      org.opencontainers.image.description="Self-hostable, multi-tenant todo app with iOS and Android clients" \
+      org.opencontainers.image.source="https://github.com/blaumedia/balu-todo" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="$VERSION"
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
