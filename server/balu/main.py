@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import OperationalError
 
+from . import __version__
 from .config import get_settings
 from .routers import auth as auth_router
 from .routers import channels as channels_router
@@ -88,7 +89,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Balu", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Balu", version=__version__, lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,
@@ -110,7 +111,7 @@ def create_app() -> FastAPI:
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
-    api = FastAPI(title="Balu API", version="0.1.0")
+    api = FastAPI(title="Balu API", version=__version__)
     api.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
