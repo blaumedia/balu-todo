@@ -67,7 +67,7 @@ Rules:
 | `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` |
 | `POST /workspaces` | `{name}` → `201 {workspace}`; creator becomes `owner` |
 | `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin |
-| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204` |
+| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. |
 | `GET /healthz` | `200 {"status":"ok"}` — no auth, for compose healthchecks |
 
 Object shapes:

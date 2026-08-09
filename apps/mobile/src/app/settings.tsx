@@ -21,8 +21,8 @@ import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
-import { getApi } from '../lib/clients';
-import { logout, switchWorkspace } from '../lib/boot';
+import { getApi, initSync } from '../lib/clients';
+import { establishSession, logout, switchWorkspace } from '../lib/boot';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -69,6 +69,13 @@ export default function SettingsScreen() {
   // the same stale `switching` from their render closure, so the actual
   // re-entry guard has to be a ref that is set synchronously.
   const switchingRef = useRef(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteInput, setDeleteInput] = useState('');
+  const deletingRef = useRef(false);
+
+  // `Alert.prompt` is iOS-only, so the type-the-name confirmation is an inline
+  // area inside the workspace card instead of a system dialog.
+  const isOwner = memberships.find((m) => m.workspace.id === workspace?.id)?.role === 'owner';
 
   useEffect(() => {
     getApi()
@@ -124,7 +131,9 @@ export default function SettingsScreen() {
   };
 
   const doSwitch = async (id: string) => {
-    if (switchingRef.current || id === workspace?.id) return;
+    // Both flows re-establish the session; letting them overlap could race two
+    // initSync calls, or switch *into* the workspace that is being deleted.
+    if (switchingRef.current || deletingRef.current || id === workspace?.id) return;
     switchingRef.current = true;
     setSwitching(true);
     try {
@@ -143,6 +152,64 @@ export default function SettingsScreen() {
     } catch {
       Alert.alert(t('workspace.switchError'));
     } finally {
+      switchingRef.current = false;
+      setSwitching(false);
+    }
+  };
+
+  const cancelDelete = () => {
+    setConfirmDelete(false);
+    setDeleteInput('');
+  };
+
+  const doDelete = async () => {
+    if (deletingRef.current || switchingRef.current || !workspace || !serverUrl) return;
+    const api = getApi();
+    if (!api) return;
+    const doomedId = workspace.id;
+    deletingRef.current = true;
+    switchingRef.current = true;
+    setSwitching(true);
+    try {
+      try {
+        await api.deleteWorkspace(doomedId);
+      } catch {
+        // Nothing happened server-side, so the live session is still valid.
+        Alert.alert(t('workspace.deleteError'));
+        return;
+      }
+      // Past this point the workspace is gone and the session points at
+      // something that no longer exists, so landing somewhere else is not
+      // optional. No preferred id: the remembered last-used id is the doomed
+      // one, so pickMembership falls through to the first remaining workspace -
+      // or to the fresh default the server minted when this was the last.
+      let ok = false;
+      for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+        try {
+          ok = await establishSession(serverUrl, api);
+        } catch {
+          ok = false;
+        }
+      }
+      // Last resort when the server stays unreachable: switch locally to a
+      // workspace we already know about, so the app is never left syncing
+      // against the deleted one until the next cold start.
+      if (!ok && user) {
+        const survivors = memberships.filter((m) => m.workspace.id !== doomedId);
+        if (survivors[0]) {
+          useApp.getState().setSession(user, survivors, survivors[0].workspace);
+          initSync(serverUrl, survivors[0].workspace.id, user.id);
+          ok = true;
+        }
+      }
+      if (!ok) Alert.alert(t('workspace.deleteError'));
+      cancelDelete();
+      // Same hygiene as a switch: everything under this screen still belongs to
+      // the workspace that no longer exists.
+      setContext({ kind: 'list', list: 'today' });
+      if (router.canDismiss()) router.dismissAll();
+    } finally {
+      deletingRef.current = false;
       switchingRef.current = false;
       setSwitching(false);
     }
@@ -181,7 +248,14 @@ export default function SettingsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <StackHeader title={t('settings.title')} />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        // iOS only: keeps the inline delete confirmation above the keyboard.
+        // Android manages the soft keyboard through the window softInputMode and
+        // ignores this prop, so it stays gated rather than set unconditionally.
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+      >
         {/* Account */}
         <SectionHeader>{t('settings.account')}</SectionHeader>
         <View style={styles.card}>
@@ -244,6 +318,52 @@ export default function SettingsScreen() {
                       <Icon name="check" size={18} color={theme.accent} strokeWidth={2} />
                     </View>
                   ) : null}
+
+              {isOwner && workspace ? (
+                confirmDelete ? (
+                  <View style={[styles.confirm, { borderTopColor: theme.border }]}>
+                    <Text style={[styles.note, { color: theme.textSecondary, paddingHorizontal: 0 }]}>
+                      {t('workspace.deletePrompt')}
+                    </Text>
+                    <TextInput
+                      value={deleteInput}
+                      onChangeText={setDeleteInput}
+                      autoFocus
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      accessibilityLabel={t('workspace.delete')}
+                      returnKeyType="done"
+                      placeholder={workspace.name}
+                      placeholderTextColor={theme.textTertiary}
+                      style={[styles.confirmInput, { color: theme.textPrimary, borderColor: theme.border }]}
+                    />
+                    <View style={styles.confirmActions}>
+                      <Button
+                        title={t('common.cancel')}
+                        variant="secondary"
+                        onPress={cancelDelete}
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        title={t('workspace.delete')}
+                        danger
+                        disabled={deleteInput.trim() !== workspace.name.trim()}
+                        onPress={doDelete}
+                        style={{ flex: 1 }}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => setConfirmDelete(true)}
+                    accessibilityRole="button"
+                    style={[styles.wsRow, { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }]}
+                  >
+                    <Icon name="trash-2" size={18} color={theme.danger} strokeWidth={2} />
+                    <Text style={[styles.wsName, { color: theme.danger }]}>{t('workspace.delete')}</Text>
+                  </Pressable>
+                )
+              ) : null}
             </View>
           </>
         ) : null}
@@ -428,6 +548,9 @@ const styles = StyleSheet.create({
   note: { fontSize: font.caption, paddingHorizontal: space.s1, paddingTop: space.s2 },
   wsRow: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingVertical: space.s3 },
   wsName: { flex: 1, minWidth: 0, fontSize: font.body },
+  confirm: { gap: space.s2, paddingVertical: space.s3, borderTopWidth: StyleSheet.hairlineWidth },
+  confirmInput: { minHeight: 44, borderWidth: 1, borderRadius: radius.control, paddingHorizontal: space.s3, fontSize: font.body },
+  confirmActions: { flexDirection: 'row', gap: space.s2 },
   segmentRow: { flexDirection: 'row', gap: space.s2, paddingVertical: space.s2 },
   seg: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: space.s3, borderWidth: 1, borderRadius: radius.control },
   segText: { fontSize: font.secondary, fontWeight: font.weightMedium },

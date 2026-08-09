@@ -80,6 +80,7 @@ export const de: Record<TranslationKey, string> = {
   "settings.title": "Einstellungen",
   "settings.account": "Konto",
   "settings.appearance": "Darstellung",
+  "settings.workspace": "Workspace",
   "settings.members": "Mitglieder",
   "settings.notifications": "Benachrichtigungen",
   "settings.mcp": "Claude / MCP",
@@ -141,6 +142,10 @@ export const de: Record<TranslationKey, string> = {
   "workspace.new": "Neuer Workspace",
   "workspace.newName": "Workspace-Name",
   "workspace.create": "Erstellen",
+  "workspace.delete": "Workspace löschen",
+  "workspace.deletePrompt": "Das löscht den Workspace mit allen Projekten, Aufgaben und Kommentaren unwiderruflich. Gib den Namen des Workspace zur Bestätigung ein.",
+  "workspace.deleted": "Workspace gelöscht",
+  "workspace.deleteNameMismatch": "Der Name stimmt nicht überein.",
 
   "channels.subtitle": "Wohin Erinnerungen gehen. Pro Konto konfiguriert.",
   "channels.add": "Kanal hinzufügen",

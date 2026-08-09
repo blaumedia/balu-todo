@@ -77,6 +77,7 @@ export const en = {
   "settings.title": "Settings",
   "settings.account": "Account",
   "settings.appearance": "Appearance",
+  "settings.workspace": "Workspace",
   "settings.members": "Members",
   "settings.notifications": "Notifications",
   "settings.mcp": "Claude / MCP",
@@ -138,6 +139,10 @@ export const en = {
   "workspace.new": "New workspace",
   "workspace.newName": "Workspace name",
   "workspace.create": "Create",
+  "workspace.delete": "Delete workspace",
+  "workspace.deletePrompt": "This permanently deletes the workspace with all its projects, tasks and comments. Type the workspace name to confirm.",
+  "workspace.deleted": "Workspace deleted",
+  "workspace.deleteNameMismatch": "The name did not match.",
 
   "channels.subtitle": "Where reminders reach you. Configured per account.",
   "channels.add": "Add channel",

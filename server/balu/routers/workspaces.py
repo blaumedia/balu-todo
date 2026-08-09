@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Response, status
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
@@ -83,6 +84,37 @@ def delete_workspace(
     workspace = db.get(Workspace, ws_id)
     if workspace is None:
         raise not_found("workspace not found")
+
+    # Everyone who is about to lose this workspace - not just the deleter. An
+    # owner tearing down a shared workspace must not strand a member at zero
+    # workspaces either, so the rescue below runs for every live member.
+    member_ids = list(
+        db.execute(
+            select(Membership.user_id).where(
+                Membership.workspace_id == ws_id,
+                Membership.is_deleted.is_(False),
+            )
+        ).scalars()
+    )
+
     db.delete(workspace)  # hard delete; FK cascades remove contents
+    db.flush()
+
+    # An account without a workspace has nowhere to land on the next boot, so
+    # anyone left at zero gets a fresh default - named exactly as registration
+    # names it (balu/routers/auth.py).
+    for member_id in member_ids:
+        remaining = db.execute(
+            select(func.count())
+            .select_from(Membership)
+            .where(Membership.user_id == member_id, Membership.is_deleted.is_(False))
+        ).scalar_one()
+        if remaining:
+            continue
+        member = db.get(User, member_id)
+        if member is None:
+            continue
+        create_workspace_with_owner(db, member.name.strip() or "My workspace", member_id)
+
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

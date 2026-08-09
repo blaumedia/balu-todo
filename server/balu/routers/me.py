@@ -21,6 +21,10 @@ def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)
         select(Membership, Workspace)
         .join(Workspace, Workspace.id == Membership.workspace_id)
         .where(Membership.user_id == user.id, Membership.is_deleted.is_(False))
+        # Stable, oldest-first: the clients fall back to `memberships[0]` when the
+        # workspace they were in disappears, and an arbitrary row order would
+        # drop them somewhere different on every call.
+        .order_by(Membership.created_at)
     ).all()
     memberships = [
         MembershipOut(

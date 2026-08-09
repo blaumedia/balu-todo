@@ -108,6 +108,10 @@ export const en = {
   'settings.mcp': 'Claude / MCP',
 
   'workspace.switchError': 'Could not switch the workspace. Check your connection.',
+  'workspace.delete': 'Delete workspace',
+  'workspace.deletePrompt':
+    'This permanently deletes the workspace with all its projects, tasks and comments. Type the workspace name to confirm.',
+  'workspace.deleteError': 'Could not delete the workspace.',
 
   'mcp.subtitle': 'Connect Claude Code (or any MCP client) to this server and let it manage your tasks.',
   'mcp.endpoint': 'MCP endpoint',
