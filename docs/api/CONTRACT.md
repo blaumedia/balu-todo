@@ -446,3 +446,65 @@ from the command handlers (failures logged, never fail the command):
 - CORS: **same-origin by default** (v1.2.1 — the server serves its own SPA). Set
   `BALU_CORS_ORIGINS` to a comma-separated allow-list, or `*`, when the web client is
   hosted on a different origin. Credentials are bearer tokens, not cookies.
+
+## 10. Remote MCP server - v1.3 (optional, off by default)
+
+Off unless the deployment sets `BALU_MCP_ENABLED=true`. While off, **every endpoint in
+this section 404s**, including the settings ones - which is also what an older server
+without the feature does, so clients treat "404" as "hide the MCP section" rather than
+special-casing a flag. None of these routes appear in `openapi.json`, enabled or not:
+`/mcp` is JSON-RPC rather than REST, and the document should not vary with runtime
+configuration.
+
+**Per-user key.** Each user may hold one MCP bearer key, `balu_mcp_` + 256 bit urlsafe
+random, stored in plaintext on `users.mcp_key` (unique, indexed). Plaintext is
+deliberate: settings shows the key on every visit. It is **never minted implicitly** -
+reading settings is not a request for a non-expiring full-access credential, and both
+UIs read on mount only to decide whether to render the section. `POST /me/mcp/key` is
+the single explicit action: it mints the first key and re-rolls any later one, and the
+previous key stops authenticating immediately.
+
+| Endpoint | Auth | Notes |
+|---|---|---|
+| `GET /me/mcp` | access token | `{enabled, endpoint, key, claude_code_command}`; `key` is `null` until one is generated, and `claude_code_command` with it. Never writes. |
+| `POST /me/mcp/key` | access token | generates/replaces the key, same response shape with `key` set |
+| `POST /mcp` | `Authorization: Bearer <mcp key>` | the MCP endpoint (see below) |
+| `GET /mcp` | - | `405` (no server-initiated SSE stream) |
+
+`endpoint` is the absolute URL of `POST /mcp` as the server sees itself (honouring
+`X-Forwarded-Proto` only under `BALU_TRUSTED_PROXY_HOPS`, counted from the right like
+the rate limiter); `claude_code_command` is the ready-made `claude mcp add` line,
+assembled server-side so the web and mobile settings screens cannot drift apart on it.
+
+**Throttling:** `POST /me/mcp/key` is rate limited per client IP (20 per hour), and
+`POST /mcp` per client IP on **failed** authentications only - a connected client makes
+one POST per tool call and must never be throttled for working. Exceeding either limit →
+`429 rate_limited` with `Retry-After`. `GET /me/mcp` writes nothing and is not limited.
+
+**Transport.** MCP Streamable HTTP, JSON only: one JSON-RPC 2.0 request per POST,
+answered with one `application/json` response. No session id, no SSE, no batching.
+
+- Methods: `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`.
+- Only `2025-06-18` is negotiated. Earlier revisions require receivers to accept
+  JSON-RPC batches, which this server does not implement, so advertising them would be
+  a promise it does not keep; a client asking for another version gets `2025-06-18` back
+  and decides for itself. Capabilities: `tools` only.
+- Notifications (no `id`) get `202` with an empty body, whatever else is wrong with them.
+- Unknown method → `-32601`. Unparseable body → HTTP `400` with `-32700`. Well-formed
+  JSON that is not a request object (an array, say) → HTTP `400` with `-32600`.
+- Missing/unknown key → `401` with `WWW-Authenticate: Bearer`, and the attempt spends
+  rate-limit budget (see Throttling above).
+- A tool that refuses (not a member, unknown label, viewer role) is a **successful**
+  `tools/call` with `isError: true`, not a protocol error.
+
+**Tools** - `list_workspaces`, `list_projects`, `list_tasks`, `get_task`, `create_task`,
+`update_task`, `complete_task`, `reopen_task`, `add_comment`. Results are
+`content: [{type: "text", text: "<JSON>"}]`.
+
+Every mutation is expressed as a §5.4 command and applied through the same command
+processor the sync endpoint uses, so role rank (`viewer` is read-only), version
+stamping and §8 event notifications behave exactly as they do for any other client, and
+the change shows up in the next sync pull on web and mobile. A tool that needs more than
+one command (`update_task` moving a task *and* changing fields) validates every reference
+first and then applies them one at a time: commands commit individually, so it stops at
+the first rejection and the error names what did commit under `applied`.

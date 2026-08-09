@@ -2,8 +2,9 @@
 
 Recognised env vars: DATABASE_URL, SECRET_KEY, BALU_DEV, BALU_ALLOW_REGISTRATION,
 BALU_CORS_ORIGINS, token lifetimes, notification transports
-(BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM, BALU_TELEGRAM_BOT_TOKEN), and the
-reminder loop (BALU_REMINDERS_ENABLED, BALU_REMINDER_INTERVAL).
+(BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM, BALU_TELEGRAM_BOT_TOKEN), the
+reminder loop (BALU_REMINDERS_ENABLED, BALU_REMINDER_INTERVAL), and the remote
+MCP server (BALU_MCP_ENABLED).
 """
 
 from __future__ import annotations
@@ -90,6 +91,15 @@ class Settings(BaseSettings):
     reminder_interval: float = Field(
         default=30.0,
         validation_alias=AliasChoices("BALU_REMINDER_INTERVAL", "reminder_interval"),
+    )
+
+    # --- Remote MCP server ----------------------------------------------------
+    #: Off by default: it hands any MCP client that holds a per-user key full
+    #: read/write access to that user's workspaces, over a bearer token that
+    #: never expires. Opt in per deployment, not per default.
+    mcp_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BALU_MCP_ENABLED", "mcp_enabled"),
     )
 
     @property

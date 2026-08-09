@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { Locale, Theme } from "@balu/domain";
+import { useEffect, useState } from "react";
+import type { Locale, McpSettings, Theme } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { api } from "../lib/clients.js";
 import { logout } from "../lib/logout.js";
@@ -8,6 +8,7 @@ import { useApp } from "../store/app.js";
 import { Button } from "../components/Button.js";
 import { MembersSection } from "./MembersSection.js";
 import { ChannelsSection } from "./ChannelsSection.js";
+import { McpSection } from "./McpSection.js";
 
 const controlStyle: React.CSSProperties = {
   height: 40,
@@ -40,6 +41,16 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
   const setLocale = useApp((s) => s.setLocale);
   const setTheme = useApp((s) => s.setTheme);
   const [name, setName] = useState(user?.name ?? "");
+  // Null until the server answers. A 404 means this instance runs without
+  // BALU_MCP_ENABLED (or predates the feature) - either way the section stays hidden.
+  const [mcp, setMcp] = useState<McpSettings | null>(null);
+
+  useEffect(() => {
+    void api
+      .getMcpSettings()
+      .then(setMcp)
+      .catch(() => setMcp(null));
+  }, []);
 
   function saveName() {
     if (name.trim() && name !== user?.name) {
@@ -96,6 +107,12 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
         <Section title={t("settings.notifications")}>
           <ChannelsSection />
         </Section>
+
+        {mcp && (
+          <Section title={t("settings.mcp")}>
+            <McpSection settings={mcp} onSettings={setMcp} />
+          </Section>
+        )}
 
         <div>
           <Button variant="secondary" icon="log-out" onClick={signOut}>

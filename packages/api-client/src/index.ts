@@ -10,6 +10,7 @@ import type {
   Invite,
   InviteRole,
   Locale,
+  McpSettings,
   MeResponse,
   Role,
   Theme,
@@ -71,6 +72,12 @@ export interface ApiClient {
   getChannels(): Promise<Channel[]>;
   putChannels(channels: Channel[]): Promise<Channel[]>;
   testChannel(type: ChannelType): Promise<void>;
+
+  // ── Remote MCP server (contract §10) ─────────────────────────
+  /** Throws `not_found` when the server runs without `BALU_MCP_ENABLED`. */
+  getMcpSettings(): Promise<McpSettings>;
+  /** Mint a key, or replace the existing one. Never implicit - user action only. */
+  generateMcpKey(): Promise<McpSettings>;
 }
 
 export function createApiClient(opts: ApiClientOptions): ApiClient {
@@ -235,5 +242,8 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
       }).then((r) => r.channels),
     testChannel: (type) =>
       authed<void>("/me/channels/test", { method: "POST", body: JSON.stringify({ type }) }),
+
+    getMcpSettings: () => authed<McpSettings>("/me/mcp", { method: "GET" }),
+    generateMcpKey: () => authed<McpSettings>("/me/mcp/key", { method: "POST" }),
   };
 }

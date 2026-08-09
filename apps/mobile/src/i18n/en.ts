@@ -103,6 +103,19 @@ export const en = {
   'settings.logout': 'Log out',
   'settings.save': 'Save',
   'settings.workspace': 'Workspace',
+  'settings.mcp': 'Claude / MCP',
+
+  'mcp.subtitle': 'Connect Claude Code (or any MCP client) to this server and let it manage your tasks.',
+  'mcp.endpoint': 'MCP endpoint',
+  'mcp.key': 'Auth key',
+  'mcp.reveal': 'Show key',
+  'mcp.hide': 'Hide key',
+  'mcp.hint': 'Add it to Claude Code:',
+  'mcp.noKey': 'No key yet. Generate one to connect a client.',
+  'mcp.generate': 'Generate key',
+  'mcp.regenerate': 'Generate a new key',
+  'mcp.regenerateHint': 'Anything connected with the old key stops working.',
+  'mcp.regenerateConfirm': 'Generate a new key? Every client still using the old one loses access immediately.',
 
   'theme.system': 'System',
   'theme.light': 'Light',
@@ -152,6 +165,7 @@ export const en = {
   'date.overdue': 'Overdue',
 
   'common.cancel': 'Cancel',
+  'common.copy': 'Copy',
   'common.done': 'Done',
   'common.delete': 'Delete',
 } as const;

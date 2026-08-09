@@ -1,7 +1,21 @@
-import type { Locale, Theme } from '@balu/domain';
+import type { Locale, McpSettings, Theme } from '@balu/domain';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+// `Clipboard` is deprecated in react-native core but still shipped, and it is the
+// only clipboard this app can use without pulling in a native module and forcing
+// a new dev-client/store build for a copy button.
+import {
+  Alert,
+  Clipboard,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
@@ -14,6 +28,16 @@ import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
+
+/**
+ * The `balu_mcp_` prefix followed by a fixed run of dots. Fixed, not
+ * proportional: the masked form should not hint at the key's length, and it has
+ * to render identically to the web client's.
+ */
+function maskKey(key: string): string {
+  const prefix = 'balu_mcp_';
+  return `${key.startsWith(prefix) ? prefix : ''}${'\u2022'.repeat(16)}`;
+}
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -33,6 +57,46 @@ export default function SettingsScreen() {
 
   const [name, setName] = useState(user?.name ?? '');
   const [permissionDenied, setPermissionDenied] = useState(false);
+  // Null until the server answers. A 404 means this instance runs without
+  // BALU_MCP_ENABLED (or predates the feature) - either way the section stays hidden.
+  const [mcp, setMcp] = useState<McpSettings | null>(null);
+  const [mcpRevealed, setMcpRevealed] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    getApi()
+      ?.getMcpSettings()
+      .then(setMcp)
+      .catch(() => setMcp(null));
+  }, []);
+
+  const copyValue = (field: string, value: string) => {
+    Clipboard.setString(value);
+    setCopied(field);
+    setTimeout(() => setCopied((c) => (c === field ? null : c)), 1500);
+  };
+
+  const storeKey = () => {
+    getApi()
+      ?.generateMcpKey()
+      .then((next) => {
+        setMcp(next);
+        setMcpRevealed(false);
+      })
+      .catch(() => Alert.alert(t('auth.errorGeneric')));
+  };
+
+  const generateMcpKey = () => {
+    // Replacing a key breaks live connections; minting the first one cannot.
+    if (!mcp?.key) {
+      storeKey();
+      return;
+    }
+    Alert.alert(t('mcp.regenerate'), t('mcp.regenerateConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('mcp.regenerate'), style: 'destructive', onPress: storeKey },
+    ]);
+  };
 
   const toggleReminders = async (next: boolean) => {
     if (!next) {
@@ -182,6 +246,83 @@ export default function SettingsScreen() {
           {permissionDenied ? t('settings.remindersDenied') : t('settings.remindersHint')}
         </Text>
 
+        {/* Claude / MCP */}
+        {mcp ? (
+          <>
+            <SectionHeader>{t('settings.mcp')}</SectionHeader>
+            <Text style={[styles.note, { color: theme.textTertiary, paddingBottom: space.s2 }]}>
+              {t('mcp.subtitle')}
+            </Text>
+            <View style={styles.card}>
+              <Text style={[styles.fieldLabel, { color: theme.textSecondary, width: undefined }]}>{t('mcp.endpoint')}</Text>
+              <Pressable onPress={() => copyValue('endpoint', mcp.endpoint)} style={styles.monoRow}>
+                <Text style={[styles.mono, { color: theme.textPrimary }]} numberOfLines={1}>
+                  {mcp.endpoint}
+                </Text>
+                <Icon name={copied === 'endpoint' ? 'check' : 'copy'} size={16} color={theme.accent} strokeWidth={2} />
+              </Pressable>
+
+              {mcp.key == null ? (
+                <Text style={[styles.note, { color: theme.textTertiary, paddingHorizontal: 0 }]}>{t('mcp.noKey')}</Text>
+              ) : (
+                <>
+                  <Text style={[styles.fieldLabel, { color: theme.textSecondary, width: undefined, marginTop: space.s3 }]}>
+                    {t('mcp.key')}
+                  </Text>
+                  <View style={styles.monoRow}>
+                    <Text style={[styles.mono, { color: theme.textPrimary }]} numberOfLines={1}>
+                      {mcpRevealed ? mcp.key : maskKey(mcp.key)}
+                    </Text>
+                    <Pressable
+                      onPress={() => setMcpRevealed((v) => !v)}
+                      accessibilityLabel={mcpRevealed ? t('mcp.hide') : t('mcp.reveal')}
+                      hitSlop={8}
+                    >
+                      <Icon name={mcpRevealed ? 'eye-off' : 'eye'} size={16} color={theme.accent} strokeWidth={2} />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => copyValue('key', mcp.key ?? '')}
+                      accessibilityLabel={t('common.copy')}
+                      hitSlop={8}
+                    >
+                      <Icon name={copied === 'key' ? 'check' : 'copy'} size={16} color={theme.accent} strokeWidth={2} />
+                    </Pressable>
+                  </View>
+
+                  <Text style={[styles.fieldLabel, { color: theme.textSecondary, width: undefined, marginTop: space.s3 }]}>
+                    {t('mcp.hint')}
+                  </Text>
+                  <Pressable
+                    onPress={() => copyValue('command', mcp.claude_code_command ?? '')}
+                    style={styles.monoRow}
+                  >
+                    <Text style={[styles.mono, { color: theme.textPrimary }]} numberOfLines={2}>
+                      {mcpRevealed
+                        ? mcp.claude_code_command
+                        : mcp.claude_code_command?.replace(mcp.key, maskKey(mcp.key))}
+                    </Text>
+                    <Icon name={copied === 'command' ? 'check' : 'copy'} size={16} color={theme.accent} strokeWidth={2} />
+                  </Pressable>
+                </>
+              )}
+            </View>
+            <Pressable onPress={generateMcpKey} style={styles.linkRow}>
+              <Icon
+                name={mcp.key == null ? 'key' : 'refresh-cw'}
+                size={16}
+                color={mcp.key == null ? theme.accent : theme.danger}
+                strokeWidth={2}
+              />
+              <Text style={[styles.link, { color: mcp.key == null ? theme.accent : theme.danger }]}>
+                {t(mcp.key == null ? 'mcp.generate' : 'mcp.regenerate')}
+              </Text>
+            </Pressable>
+            {mcp.key == null ? null : (
+              <Text style={[styles.note, { color: theme.textTertiary }]}>{t('mcp.regenerateHint')}</Text>
+            )}
+          </>
+        ) : null}
+
         {/* Server */}
         <SectionHeader>{t('settings.server')}</SectionHeader>
         <View style={styles.card}>
@@ -216,5 +357,8 @@ const styles = StyleSheet.create({
   seg: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: space.s3, borderWidth: 1, borderRadius: radius.control },
   segText: { fontSize: font.secondary, fontWeight: font.weightMedium },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: space.s3, paddingHorizontal: space.s1 },
+  monoRow: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingVertical: space.s2 },
+  // `Menlo` exists only on iOS; Android silently falls back to a proportional face.
+  mono: { flex: 1, fontSize: font.caption, fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }) },
   link: { fontSize: font.secondary, fontWeight: font.weightMedium },
 });

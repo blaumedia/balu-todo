@@ -86,9 +86,9 @@ docker compose up -d
 Open http://localhost:8080, register, done. One app container + Postgres — that's the
 whole deployment; the schema migrates itself on startup. Configuration via env:
 `BALU_PORT`, `BALU_SECRET_KEY`, `BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`,
-`BALU_CORS_ORIGINS`, plus the optional notification transports — the full list with
-comments is [`.env.example`](.env.example), and every one of them reaches the
-container through `env_file`. Upgrading is `docker compose pull && docker compose up -d`.
+`BALU_CORS_ORIGINS`, `BALU_MCP_ENABLED`, plus the optional notification transports - the
+full list with comments is [`.env.example`](.env.example), and every one of them reaches
+the container through `env_file`. Upgrading is `docker compose pull && docker compose up -d`.
 
 `BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** — compose refuses to
 start without them, and the server refuses to boot on a weak (<32 char) or
@@ -132,6 +132,32 @@ docker compose up --build
   Postgres only applies it when initialising an empty volume. Rotate the role
   instead — `docker compose exec db psql -U balu -d balu -c "ALTER USER balu WITH
   PASSWORD '…';"` — or start from a fresh volume.
+
+## Claude Code (MCP)
+
+Balu can act as a remote MCP server, so Claude Code manages your tasks directly:
+"what's due this week", "file these three under Haushalt with a deadline of Friday".
+It is **off by default** - turn it on per deployment:
+
+```sh
+BALU_MCP_ENABLED=true
+```
+
+Then open **Settings → Claude / MCP** in the web or mobile app and hit **Generate key**.
+Nothing is minted until you ask for it; afterwards the screen shows the endpoint, the
+key, and the ready-made command:
+
+```sh
+claude mcp add --transport http balu https://balu.example.com/api/v1/mcp \
+  --header "Authorization: Bearer balu_mcp_…"
+```
+
+The key is a bearer token with full access to that account's workspaces and it does not
+expire - treat it like a password, and use **Generate a new key** in settings if it ever
+leaks (every client using the old one loses access immediately). Read-only viewers stay
+read-only over MCP too, and anything Claude changes syncs to web and mobile like any
+other client. Tools: `list_workspaces`, `list_projects`, `list_tasks`, `get_task`,
+`create_task`, `update_task`, `complete_task`, `reopen_task`, `add_comment`.
 
 ## Repo layout
 

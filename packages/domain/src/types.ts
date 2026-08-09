@@ -143,6 +143,25 @@ export interface TelegramChannel {
 /** A per-user external notification channel (contract §8). */
 export type Channel = NtfyChannel | EmailChannel | TelegramChannel;
 
+// ── Remote MCP server (contract §10) ──────────────────────────────────
+
+/**
+ * What a client needs to connect an MCP client to this server. Absent entirely
+ * (the endpoint 404s) when the server runs without `BALU_MCP_ENABLED`.
+ */
+export interface McpSettings {
+  enabled: boolean;
+  /** Absolute URL of the MCP endpoint, as this server sees itself. */
+  endpoint: string;
+  /**
+   * The per-user bearer key, or null while the user has not generated one.
+   * Reading settings never mints a key, so this stays null until asked for.
+   */
+  key: string | null;
+  /** Ready-made `claude mcp add …` line, assembled server-side. Null while `key` is. */
+  claude_code_command: string | null;
+}
+
 // ── Auth REST payloads (contract §1–2) ────────────────────────────────
 
 export interface AuthTokens {

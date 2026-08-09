@@ -20,6 +20,7 @@ from .config import get_settings
 from .routers import auth as auth_router
 from .routers import channels as channels_router
 from .routers import invites as invites_router
+from .routers import mcp as mcp_router
 from .routers import me as me_router
 from .routers import members as members_router
 from .routers import sync as sync_router
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     api.include_router(invites_router.router)
     api.include_router(members_router.router)
     api.include_router(channels_router.router)
+    api.include_router(mcp_router.router)
     api.include_router(sync_router.router)
     app.mount("/api/v1", api)
     # Expose the API sub-app so tests can install dependency overrides on it

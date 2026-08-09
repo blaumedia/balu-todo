@@ -160,6 +160,26 @@ def test_stale_buckets_are_reclaimed():
     assert lim.tracked_keys() == 1
 
 
+def test_sweep_horizon_self_registers_new_rules(monkeypatch):
+    """A rule declared anywhere must widen the sweep horizon on its own.
+
+    It used to be a hand-maintained max over the four auth rules, so a bucket
+    could be swept while a wider rule's window still counted its hits - handing
+    that budget back for free.
+    """
+    import balu.ratelimit as ratelimit
+
+    monkeypatch.setattr(ratelimit, "_longest_window", 0.0)
+    rule = RateLimit(5, 10_000.0)
+    assert ratelimit.longest_window() == 10_000.0
+
+    lim = SlidingWindowLimiter()
+    lim.record("old", rule, now=0.0)
+    for _ in range(256):  # drives a sweep, still inside `rule`'s window
+        lim.record("live", rule, now=9_000.0)
+    assert lim.tracked_keys() == 2
+
+
 def test_check_leaves_no_empty_bucket_behind():
     lim = SlidingWindowLimiter()
     lim.check("never-seen", RateLimit(5, 300.0), now=0.0)

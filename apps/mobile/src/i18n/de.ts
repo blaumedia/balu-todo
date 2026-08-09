@@ -107,6 +107,20 @@ export const de: Record<TranslationKey, string> = {
   'settings.logout': 'Abmelden',
   'settings.save': 'Speichern',
   'settings.workspace': 'Arbeitsbereich',
+  'settings.mcp': 'Claude / MCP',
+
+  'mcp.subtitle':
+    'Claude Code (oder einen anderen MCP-Client) mit diesem Server verbinden und Aufgaben verwalten lassen.',
+  'mcp.endpoint': 'MCP-Endpunkt',
+  'mcp.key': 'Auth-Key',
+  'mcp.reveal': 'Key anzeigen',
+  'mcp.hide': 'Key verbergen',
+  'mcp.hint': 'In Claude Code hinzufügen:',
+  'mcp.noKey': 'Noch kein Key. Erzeuge einen, um einen Client zu verbinden.',
+  'mcp.generate': 'Key erzeugen',
+  'mcp.regenerate': 'Neuen Key erzeugen',
+  'mcp.regenerateHint': 'Alles, was mit dem alten Key verbunden ist, funktioniert danach nicht mehr.',
+  'mcp.regenerateConfirm': 'Neuen Key erzeugen? Jeder Client mit dem alten Key verliert sofort den Zugriff.',
 
   'theme.system': 'System',
   'theme.light': 'Hell',
@@ -156,6 +170,7 @@ export const de: Record<TranslationKey, string> = {
   'date.overdue': 'Überfällig',
 
   'common.cancel': 'Abbrechen',
+  'common.copy': 'Kopieren',
   'common.done': 'Fertig',
   'common.delete': 'Löschen',
 };

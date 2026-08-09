@@ -25,6 +25,11 @@ from dataclasses import dataclass
 
 from .config import get_settings
 
+#: Widest `window` any rule has ever declared. `_sweep` reclaims buckets older
+#: than this, so it must cover every rule in the process: sweeping a bucket while
+#: some rule's window still counts its hits hands that budget back for free.
+_longest_window = 0.0
+
 
 @dataclass(frozen=True)
 class RateLimit:
@@ -33,6 +38,17 @@ class RateLimit:
     limit: int
     window: float
 
+    def __post_init__(self) -> None:
+        # Self-registering rather than a hand-maintained list of rules: the sweep
+        # horizon used to be a `max` over the four auth rules, which held only
+        # because no later rule happened to be wider.
+        global _longest_window
+        _longest_window = max(_longest_window, self.window)
+
+
+def longest_window() -> float:
+    return _longest_window
+
 
 # Login: generous enough for a shared NAT, tight enough to stop credential
 # stuffing. The per-account bucket is what actually protects one user.
@@ -40,6 +56,13 @@ LOGIN_PER_IP = RateLimit(30, 300)
 LOGIN_PER_ACCOUNT = RateLimit(8, 300)
 REGISTER_PER_IP = RateLimit(10, 3600)
 REFRESH_PER_IP = RateLimit(120, 300)
+# The MCP endpoint verifies a bearer key without a session, so it needs the same
+# guard as login. Only *failed* authentications spend budget (§10) - a connected
+# client makes one POST per tool call and must not be throttled for working.
+MCP_AUTH_PER_IP = RateLimit(30, 300)
+# Minting a key is a deliberate click behind an authenticated session; this only
+# bounds someone hammering it.
+MCP_KEY_PER_IP = RateLimit(20, 3600)
 
 # Upper bound on tracked buckets. Reaching it means either a very busy instance
 # or someone cycling identities; either way we drop the coldest entries rather
@@ -51,8 +74,9 @@ _SWEEP_EVERY = 256
 class SlidingWindowLimiter:
     """Thread-safe sliding-window counter.
 
-    `allow` is what production uses; `check`/`record` are the same halves exposed
-    separately for tests.
+    `allow` is what most call sites use; `check`/`record` are the same halves
+    exposed separately, for tests and for buckets that only charge failures (the
+    MCP endpoint verifies a key on every tool call and must not bill success).
 
     On the account bucket, note what the current design does and does not buy.
     `auth.login` calls `allow` only **after** verifying the password, so an
@@ -88,10 +112,7 @@ class SlidingWindowLimiter:
 
     def _sweep(self, now: float) -> None:
         """Drop buckets whose newest hit is older than the longest window."""
-        horizon = now - max(
-            r.window
-            for r in (LOGIN_PER_IP, LOGIN_PER_ACCOUNT, REGISTER_PER_IP, REFRESH_PER_IP)
-        )
+        horizon = now - longest_window()
         stale = [k for k, hits in self._hits.items() if not hits or hits[-1] <= horizon]
         for k in stale:
             del self._hits[k]
