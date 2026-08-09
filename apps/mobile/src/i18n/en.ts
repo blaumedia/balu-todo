@@ -107,6 +107,8 @@ export const en = {
   'settings.workspace': 'Workspace',
   'settings.mcp': 'Claude / MCP',
 
+  'workspace.switchError': 'Could not switch the workspace. Check your connection.',
+
   'mcp.subtitle': 'Connect Claude Code (or any MCP client) to this server and let it manage your tasks.',
   'mcp.endpoint': 'MCP endpoint',
   'mcp.key': 'Auth key',

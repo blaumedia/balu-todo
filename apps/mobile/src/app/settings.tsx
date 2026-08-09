@@ -1,6 +1,6 @@
 import type { Locale, McpSettings, Theme } from '@balu/domain';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 // `Clipboard` is deprecated in react-native core but still shipped, and it is the
 // only clipboard this app can use without pulling in a native module and forcing
 // a new dev-client/store build for a copy button.
@@ -22,7 +22,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
 import { getApi } from '../lib/clients';
-import { logout } from '../lib/boot';
+import { logout, switchWorkspace } from '../lib/boot';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -45,6 +45,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const user = useApp((s) => s.user);
   const workspace = useApp((s) => s.workspace);
+  const memberships = useApp((s) => s.memberships);
   const serverUrl = useApp((s) => s.serverUrl);
   const themeSetting = useApp((s) => s.theme);
   const locale = useApp((s) => s.locale);
@@ -52,6 +53,7 @@ export default function SettingsScreen() {
   const setLocale = useApp((s) => s.setLocale);
   const setUser = useApp((s) => s.setUser);
   const setServerUrl = useApp((s) => s.setServerUrl);
+  const setContext = useApp((s) => s.setContext);
   const remindersEnabled = useApp((s) => s.remindersEnabled);
   const setRemindersEnabled = useApp((s) => s.setRemindersEnabled);
 
@@ -62,6 +64,11 @@ export default function SettingsScreen() {
   const [mcp, setMcp] = useState<McpSettings | null>(null);
   const [mcpRevealed, setMcpRevealed] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
+  // The state flag only drives the dimming: two taps in the same frame both read
+  // the same stale `switching` from their render closure, so the actual
+  // re-entry guard has to be a ref that is set synchronously.
+  const switchingRef = useRef(false);
 
   useEffect(() => {
     getApi()
@@ -113,6 +120,31 @@ export default function SettingsScreen() {
     } else {
       setPermissionDenied(true);
       setRemindersEnabled(false);
+    }
+  };
+
+  const doSwitch = async (id: string) => {
+    if (switchingRef.current || id === workspace?.id) return;
+    switchingRef.current = true;
+    setSwitching(true);
+    try {
+      const ok = await switchWorkspace(id);
+      if (!ok) {
+        Alert.alert(t('workspace.switchError'));
+        return;
+      }
+      // Everything under this screen still belongs to the old workspace: a
+      // project screen would re-set the compose context to a foreign project id
+      // when it regains focus, and the next quick-add would be rejected by the
+      // server. Reset the context and collapse the stack back to the tabs, which
+      // set the context themselves on focus.
+      setContext({ kind: 'list', list: 'today' });
+      if (router.canDismiss()) router.dismissAll();
+    } catch {
+      Alert.alert(t('workspace.switchError'));
+    } finally {
+      switchingRef.current = false;
+      setSwitching(false);
     }
   };
 
@@ -169,10 +201,51 @@ export default function SettingsScreen() {
             <Text style={[styles.fieldValue, { color: theme.textTertiary }]}>{user?.email ?? '—'}</Text>
           </View>
         </View>
-        {workspace ? (
-          <Text style={[styles.note, { color: theme.textTertiary }]}>
-            {t('settings.workspace')}: {workspace.name}
-          </Text>
+        {/* Workspace */}
+        {memberships.length > 0 || workspace ? (
+          <>
+            <SectionHeader>{t('settings.workspace')}</SectionHeader>
+            <View style={[styles.card, switching && { opacity: 0.6 }]}>
+              {memberships.length > 0
+                ? memberships.map((m, i) => {
+                    const active = m.workspace.id === workspace?.id;
+                    return (
+                      <Pressable
+                        key={m.workspace.id}
+                        onPress={() => doSwitch(m.workspace.id)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active, disabled: switching }}
+                        style={({ pressed }) => [
+                          styles.wsRow,
+                          i < memberships.length - 1 && {
+                            borderBottomWidth: StyleSheet.hairlineWidth,
+                            borderBottomColor: theme.border,
+                          },
+                          pressed && !active && { backgroundColor: theme.accentWash },
+                        ]}
+                      >
+                        <Text
+                          style={[styles.wsName, { color: active ? theme.accent : theme.textPrimary }]}
+                          numberOfLines={1}
+                        >
+                          {m.workspace.name}
+                        </Text>
+                        {active ? <Icon name="check" size={18} color={theme.accent} strokeWidth={2} /> : null}
+                      </Pressable>
+                    );
+                  })
+                : // Offline boot: the cached session has no membership list, so show
+                  // the current workspace on its own rather than hiding the section.
+                  workspace ? (
+                    <View style={styles.wsRow} accessibilityState={{ selected: true }}>
+                      <Text style={[styles.wsName, { color: theme.accent }]} numberOfLines={1}>
+                        {workspace.name}
+                      </Text>
+                      <Icon name="check" size={18} color={theme.accent} strokeWidth={2} />
+                    </View>
+                  ) : null}
+            </View>
+          </>
         ) : null}
 
         {/* Appearance */}
@@ -353,6 +426,8 @@ const styles = StyleSheet.create({
   fieldInput: { flex: 1, fontSize: font.body, textAlign: 'right' },
   fieldValue: { flex: 1, fontSize: font.body, textAlign: 'right' },
   note: { fontSize: font.caption, paddingHorizontal: space.s1, paddingTop: space.s2 },
+  wsRow: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingVertical: space.s3 },
+  wsName: { flex: 1, minWidth: 0, fontSize: font.body },
   segmentRow: { flexDirection: 'row', gap: space.s2, paddingVertical: space.s2 },
   seg: { flex: 1, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center', paddingVertical: space.s3, borderWidth: 1, borderRadius: radius.control },
   segText: { fontSize: font.secondary, fontWeight: font.weightMedium },

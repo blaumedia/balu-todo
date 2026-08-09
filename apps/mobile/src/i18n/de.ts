@@ -111,6 +111,8 @@ export const de: Record<TranslationKey, string> = {
   'settings.workspace': 'Arbeitsbereich',
   'settings.mcp': 'Claude / MCP',
 
+  'workspace.switchError': 'Der Arbeitsbereich konnte nicht gewechselt werden. Prüfe deine Verbindung.',
+
   'mcp.subtitle':
     'Claude Code (oder einen anderen MCP-Client) mit diesem Server verbinden und Aufgaben verwalten lassen.',
   'mcp.endpoint': 'MCP-Endpunkt',

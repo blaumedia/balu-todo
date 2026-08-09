@@ -1,7 +1,7 @@
 import { pickMembership, type Locale, type Theme, type User, type Workspace } from '@balu/domain';
 import type { ApiClient } from '@balu/api-client';
 import { useApp } from '../store/app';
-import { getApi, initApi, initSync } from './clients';
+import { getApi, getSync, initApi, initSync } from './clients';
 import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
 
@@ -21,6 +21,11 @@ export async function establishSession(
   serverUrl: string,
   api: ApiClient,
   preferredWorkspaceId?: string | null,
+  /**
+   * Explicit switch: land in `preferredWorkspaceId` or nowhere. Boot leaves this
+   * off because falling back is exactly what it wants.
+   */
+  requireExact = false,
 ): Promise<boolean> {
   const me = await api.getMe();
   // Same rule as the web app (I8): explicit → last used → first. Taking
@@ -29,10 +34,34 @@ export async function establishSession(
   const lastUsed = await sqliteKV.getItem(SETTINGS.lastWorkspaceId);
   const membership = pickMembership(me.memberships, preferredWorkspaceId, lastUsed);
   if (!membership) return false;
+  // Bail out before any mutation. pickMembership falls back to last-used/first
+  // when the requested workspace vanished from /me (membership revoked while the
+  // app was open); for a switch that fallback is a different workspace than the
+  // user asked for, and mutating first would leave them in it with only an error
+  // alert to show for it. Returning here keeps the live session fully intact.
+  if (requireExact && membership.workspace.id !== preferredWorkspaceId) return false;
   useApp.getState().setSession(me.user, me.memberships, membership.workspace);
   initSync(serverUrl, membership.workspace.id, me.user.id);
   void resumeReminders();
   return true;
+}
+
+/** Switch to another workspace of the signed-in user. Returns false if the
+ *  prerequisites are missing; throws when the server is unreachable. */
+export async function switchWorkspace(workspaceId: string): Promise<boolean> {
+  const { serverUrl } = useApp.getState();
+  const api = getApi();
+  if (!serverUrl || !api) return false;
+  // initSync stops the old client, and stop() cancels its debounced flush, so
+  // nudge the outgoing queue out now. Deliberately not awaited: the sync POST
+  // has no timeout, so on a black-hole network the await would stall the switch
+  // for the platform's socket timeout. Nothing can be lost or misrouted either
+  // way - the queue is persisted under the old workspace's key and the in-flight
+  // request keeps writing there.
+  void getSync()?.flush().catch(() => {});
+  // `requireExact`: a revoked membership must fail the switch without touching
+  // the session, not silently drop the user into another workspace.
+  return establishSession(serverUrl, api, workspaceId, true);
 }
 
 /** Boot the app: load settings, hydrate tokens, resume or fall back to login. */
