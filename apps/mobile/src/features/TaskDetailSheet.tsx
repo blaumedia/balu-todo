@@ -69,6 +69,7 @@ function DetailBody({
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes);
   const [showProjects, setShowProjects] = useState(false);
+  const [showSections, setShowSections] = useState(false);
   const [showRecurrence, setShowRecurrence] = useState(false);
   const [showAssignee, setShowAssignee] = useState(false);
   const user = useApp((s) => s.user);
@@ -80,6 +81,12 @@ function DetailBody({
 
   const completed = task.completed_at != null;
   const project = task.project_id ? snap.projects.find((p) => p.id === task.project_id) : undefined;
+  const sections = task.project_id
+    ? snap.sections
+        .filter((s) => !s.is_deleted && s.project_id === task.project_id)
+        .sort((a, b) => a.sort_order - b.sort_order)
+    : [];
+  const section = task.section_id ? sections.find((s) => s.id === task.section_id) : undefined;
 
   const members = snap.members.filter((m) => !m.is_deleted);
   const multiMember = members.length > 1;
@@ -218,6 +225,48 @@ function DetailBody({
               />
             ))}
         </View>
+      ) : null}
+
+      {/* Section move - within the current project only */}
+      {sections.length > 0 ? (
+        <>
+          <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowSections((s) => !s)}>
+            <Icon name="layers" size={20} color={theme.textTertiary} strokeWidth={2} />
+            <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.section')}</Text>
+            <View style={styles.value}>
+              <Text style={[styles.valueText, { color: section ? theme.textPrimary : theme.textTertiary }]}>
+                {section ? section.name : t('detail.noSection')}
+              </Text>
+              <Icon name={showSections ? 'chevron-down' : 'chevron-right'} size={16} color={theme.textTertiary} strokeWidth={2} />
+            </View>
+          </Pressable>
+          {showSections ? (
+            <View style={styles.subList}>
+              <SubOption
+                label={t('detail.noSection')}
+                active={task.section_id == null}
+                onPress={() => {
+                  // No project_id - task_move keeps the current project.
+                  moveTask(task.id, { section_id: null });
+                  setShowSections(false);
+                }}
+                theme={theme}
+              />
+              {sections.map((s) => (
+                <SubOption
+                  key={s.id}
+                  label={s.name}
+                  active={task.section_id === s.id}
+                  onPress={() => {
+                    moveTask(task.id, { section_id: s.id });
+                    setShowSections(false);
+                  }}
+                  theme={theme}
+                />
+              ))}
+            </View>
+          ) : null}
+        </>
       ) : null}
 
       {/* Assignee — only in shared workspaces (contract §4) */}

@@ -47,21 +47,18 @@ export default function ProjectScreen() {
         right={<ProgressRing done={doneCount} total={projectTasks.length} />}
       />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {openTasks.length === 0 ? (
+        {openTasks.length === 0 && sections.length === 0 ? (
           <EmptyState text={t('empty.project')} />
         ) : (
           <>
             <TaskItems tasks={body} maps={maps} today={today} hideProject />
-            {sections.map((section) => {
-              const items = bySection(section.id);
-              if (items.length === 0) return null;
-              return (
-                <View key={section.id}>
-                  <SectionHeader>{section.name}</SectionHeader>
-                  <TaskItems tasks={items} maps={maps} today={today} hideProject />
-                </View>
-              );
-            })}
+            {/* Empty sections stay visible - otherwise a fresh section looks like nothing happened. */}
+            {sections.map((section) => (
+              <View key={section.id}>
+                <SectionHeader>{section.name}</SectionHeader>
+                <TaskItems tasks={bySection(section.id)} maps={maps} today={today} hideProject />
+              </View>
+            ))}
           </>
         )}
       </ScrollView>

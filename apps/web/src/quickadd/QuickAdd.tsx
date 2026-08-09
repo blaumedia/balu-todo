@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
@@ -10,6 +10,12 @@ import { Icon } from "../components/Icon.js";
 import { Button } from "../components/Button.js";
 
 const DRAFT_KEY = "balu:quickdraft";
+
+/** A quick-add title is one logical line - newlines (pasted, or left in an older
+ *  draft from when Shift+Enter inserted them) collapse to a single space. */
+function sanitize(v: string): string {
+  return v.replace(/\n+/g, " ");
+}
 
 function tokenStyle(tok: Token): CSSProperties {
   switch (tok.type) {
@@ -33,7 +39,11 @@ const SHARED_TEXT: CSSProperties = {
   fontSize: 20,
   lineHeight: "28px",
   letterSpacing: "normal",
-  whiteSpace: "pre",
+  // Wrapping (not scrolling) keeps mirror and textarea in lockstep: a scrolling
+  // textarea would slide its text away from the fixed mirror.
+  whiteSpace: "pre-wrap",
+  overflowWrap: "break-word",
+  wordBreak: "break-word",
   // Applied to textarea AND highlight mirror alike - keep in sync or the
   // token pills drift from the caret.
   padding: "0 12px",
@@ -48,7 +58,10 @@ export function QuickAdd() {
   const snapshot = useSnapshot();
   const today = todayLocalISO();
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [text, setText] = useState<string>(() => globalThis.localStorage?.getItem(DRAFT_KEY) ?? "");
+  const [text, setText] = useState<string>(() => sanitize(globalThis.localStorage?.getItem(DRAFT_KEY) ?? ""));
+  // Set when onChange collapsed a newline, so the caret can be put back where
+  // the paste ended instead of jumping to the end of the controlled value.
+  const caretRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -61,6 +74,13 @@ export function QuickAdd() {
       }
     }
   }, [open]);
+
+  useLayoutEffect(() => {
+    const pos = caretRef.current;
+    if (pos == null) return;
+    caretRef.current = null;
+    inputRef.current?.setSelectionRange(pos, pos);
+  });
 
   const parsed = useMemo(() => parseQuickAdd(text, { locale, referenceDate: today }), [text, locale, today]);
 
@@ -135,15 +155,14 @@ export function QuickAdd() {
         <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "18px 20px" }}>
           <Icon name="plus" size={22} color="var(--accent)" style={{ marginTop: 3 }} />
           <div style={{ position: "relative", flex: 1, minHeight: 28 }}>
+            {/* The mirror sits in normal flow and defines the field's height;
+                the textarea is stretched over it. */}
             <div
               aria-hidden
               style={{
                 ...SHARED_TEXT,
-                position: "absolute",
-                inset: 0,
                 color: "var(--text-primary)",
                 pointerEvents: "none",
-                overflow: "hidden",
               }}
             >
               {text ? segments : <span style={{ color: "var(--text-tertiary)" }}>{t("quickadd.placeholder")}</span>}
@@ -153,13 +172,25 @@ export function QuickAdd() {
               rows={1}
               value={text}
               onChange={(e) => {
-                setText(e.target.value);
-                persistDraft(e.target.value);
+                // Sanitize before parsing so token offsets keep matching the mirror.
+                const raw = e.target.value;
+                const v = sanitize(raw);
+                // Only a collapsed newline shifts the caret off its DOM position;
+                // plain typing must not touch the selection. Arming the ref also
+                // needs v to differ from the current state, otherwise setText bails
+                // and the fixup would fire on some later, unrelated render.
+                caretRef.current =
+                  v !== raw && v !== text ? sanitize(raw.slice(0, e.target.selectionStart ?? raw.length)).length : null;
+                setText(v);
+                persistDraft(v);
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+                // While an IME composes, Enter confirms it and Escape cancels it -
+                // both keystrokes belong to the composition, not to us.
+                if (e.nativeEvent.isComposing) return;
+                if (e.key === "Enter") {
                   e.preventDefault();
-                  create();
+                  if (!e.shiftKey) create();
                 }
                 if (e.key === "Escape") {
                   e.preventDefault();
@@ -168,8 +199,10 @@ export function QuickAdd() {
               }}
               style={{
                 ...SHARED_TEXT,
-                position: "relative",
+                position: "absolute",
+                inset: 0,
                 width: "100%",
+                height: "100%",
                 border: "none",
                 outline: "none",
                 background: "transparent",

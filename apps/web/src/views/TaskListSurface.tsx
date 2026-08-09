@@ -60,6 +60,8 @@ export interface TaskListSurfaceProps {
   locale: Locale;
   t: (k: TranslationKey) => string;
   dnd?: DndConfig;
+  /** Keep empty groups visible, so a newly created (still empty) section shows up. */
+  showEmptyGroups?: boolean;
 }
 
 function EmptyState({ label }: { label: string }) {
@@ -166,7 +168,7 @@ function DroppableGroup({ groupKey, children }: { groupKey: string; children: Re
   );
 }
 
-export function TaskListSurface({ groups, emptyLabel, showProject, projects, labels, today, locale, t, dnd }: TaskListSurfaceProps) {
+export function TaskListSurface({ groups, emptyLabel, showProject, projects, labels, today, locale, t, dnd, showEmptyGroups }: TaskListSurfaceProps) {
   const focusedIndex = useApp((s) => s.focusedIndex);
   const selectTask = useApp((s) => s.selectTask);
   const setVisibleTaskIds = useApp((s) => s.setVisibleTaskIds);
@@ -238,7 +240,9 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
     dnd.onReorder(fromGroup, arrayMove(ids, from, to));
   }
 
-  const hasAny = flat.length > 0;
+  // With showEmptyGroups the headers alone are worth rendering, so an empty
+  // project still shows its sections. Zero tasks and zero headers stays empty.
+  const hasAny = flat.length > 0 || (showEmptyGroups === true && groups.some((g) => g.header));
   let runningIndex = -1;
 
   const rows = (
@@ -298,7 +302,7 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
 
         return (
           <Fragment key={g.key}>
-            {g.header && g.tasks.length > 0 && <SectionHeader>{g.header}</SectionHeader>}
+            {g.header && (g.tasks.length > 0 || showEmptyGroups) && <SectionHeader>{g.header}</SectionHeader>}
             {dnd?.mode === "reorder" ? (
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 {body}

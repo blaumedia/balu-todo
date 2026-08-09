@@ -49,6 +49,7 @@ export function ProjectView({ snapshot, projectId }: { snapshot: Snapshot; proje
         today={today}
         locale={locale}
         t={t}
+        showEmptyGroups
         dnd={writable ? { mode: "reorder", onReorder: (_key, ids) => getSync()?.mutate({ type: "task_reorder", args: { items: spacedOrders(ids) } }) } : undefined}
       />
       {writable && (

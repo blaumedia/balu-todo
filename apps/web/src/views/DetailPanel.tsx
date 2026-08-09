@@ -211,6 +211,9 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
   const projects = snapshot.projects
     .filter((p) => !p.is_deleted && p.archived_at == null)
     .sort((a, b) => a.sort_order - b.sort_order);
+  const sections = snapshot.sections
+    .filter((s) => !s.is_deleted && s.project_id === task.project_id)
+    .sort((a, b) => a.sort_order - b.sort_order);
   const labels = snapshot.labels.filter((l) => !l.is_deleted).sort((a, b) => a.sort_order - b.sort_order);
   const members = snapshot.members
     .filter((m) => !m.is_deleted)
@@ -342,7 +345,10 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
           <Row label={t("detail.project")}>
             <select
               value={task.project_id ?? ""}
-              onChange={(e) => sync?.mutate({ type: "task_move", args: { id: task.id, project_id: e.target.value || null, section_id: null } })}
+              onChange={(e) => {
+                if (!writable) return; // pointerEvents:none does not block keyboard selection
+                sync?.mutate({ type: "task_move", args: { id: task.id, project_id: e.target.value || null, section_id: null } });
+              }}
               style={{
                 height: 32,
                 padding: "0 8px",
@@ -362,6 +368,36 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
               ))}
             </select>
           </Row>
+          {task.project_id != null && sections.length > 0 && (
+            <Row label={t("detail.section")}>
+              <select
+                value={task.section_id ?? ""}
+                onChange={(e) => {
+                  if (!writable) return; // pointerEvents:none does not block keyboard selection
+                  // No project_id in the args - task_move then keeps the current
+                  // project and only validates the section against it.
+                  sync?.mutate({ type: "task_move", args: { id: task.id, section_id: e.target.value || null } });
+                }}
+                style={{
+                  height: 32,
+                  padding: "0 8px",
+                  borderRadius: "var(--radius-control)",
+                  border: "1px solid var(--border)",
+                  background: "var(--surface)",
+                  color: "var(--text-primary)",
+                  fontSize: "var(--text-secondary-size)",
+                  fontFamily: "var(--font-sans)",
+                }}
+              >
+                <option value="">{t("detail.noSection")}</option>
+                {sections.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </Row>
+          )}
           {shared && (
             <Row label={t("detail.assignee")}>
               <AssigneeField
