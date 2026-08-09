@@ -160,6 +160,8 @@ export const en = {
   'project.newProject': 'New project',
   'project.newProjectName': 'Project name',
   'project.addTask': 'Add task',
+  'project.deleteSection': 'Delete section',
+  'project.deleteSectionConfirm': 'Delete this section? Its tasks are kept and moved out of the section.',
 
   'date.today': 'Today',
   'date.tomorrow': 'Tomorrow',

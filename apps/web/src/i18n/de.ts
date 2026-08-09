@@ -196,6 +196,8 @@ export const de: Record<TranslationKey, string> = {
   "project.newProjectName": "Projektname",
   "project.addSection": "Abschnitt hinzufügen",
   "project.sectionName": "Abschnittsname",
+  "project.deleteSection": "Abschnitt löschen",
+  "project.deleteSectionConfirm": "Diesen Abschnitt löschen? Die Aufgaben bleiben erhalten und werden aus dem Abschnitt gelöst.",
 
   "date.today": "Heute",
   "date.tomorrow": "Morgen",

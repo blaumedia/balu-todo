@@ -34,6 +34,10 @@ export function moveTask(id: string, args: { project_id?: string | null; section
   return mutate('task_move', { id, ...args });
 }
 
+export function deleteSection(id: string) {
+  return mutate('section_delete', { id });
+}
+
 /** Schedule presets — set start_date/evening/someday coherently. */
 export function scheduleTask(
   id: string,

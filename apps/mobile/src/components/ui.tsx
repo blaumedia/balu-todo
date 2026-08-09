@@ -17,10 +17,16 @@ export function ScreenHeader({ title, right }: { title: string; right?: ReactNod
   );
 }
 
-/** Uppercase, tracked caption section header (DESIGN §3 caption). */
-export function SectionHeader({ children }: { children: string }) {
+/** Uppercase, tracked caption section header (DESIGN §3 caption).
+ *  `numberOfLines` is opt-in: headers that share their row with an accessory
+ *  need to truncate rather than push it off-screen. */
+export function SectionHeader({ children, numberOfLines }: { children: string; numberOfLines?: number }) {
   const theme = useTheme();
-  return <Text style={[styles.section, { color: theme.textTertiary }]}>{children}</Text>;
+  return (
+    <Text style={[styles.section, { color: theme.textTertiary }]} numberOfLines={numberOfLines}>
+      {children}
+    </Text>
+  );
 }
 
 export function EmptyState({ text, icon }: { text: string; icon?: IconName }) {

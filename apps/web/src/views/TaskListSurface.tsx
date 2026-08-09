@@ -21,6 +21,7 @@ import type { TranslationKey } from "../i18n/index.js";
 import { useApp } from "../store/app.js";
 import { useSnapshot } from "../store/useSync.js";
 import { Icon } from "../components/Icon.js";
+import { IconButton } from "../components/IconButton.js";
 import { TaskItem } from "./TaskItem.js";
 
 /** Per-row assignment/comment context, derived once from the replica. */
@@ -62,6 +63,8 @@ export interface TaskListSurfaceProps {
   dnd?: DndConfig;
   /** Keep empty groups visible, so a newly created (still empty) section shows up. */
   showEmptyGroups?: boolean;
+  /** Render a delete affordance on group headers; called with the group key (= section id). */
+  onDeleteGroup?: (groupKey: string) => void;
 }
 
 function EmptyState({ label }: { label: string }) {
@@ -86,19 +89,56 @@ function EmptyState({ label }: { label: string }) {
   );
 }
 
-function SectionHeader({ children }: { children: string }) {
+const SECTION_TEXT: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 500,
+  letterSpacing: "0.4px",
+  textTransform: "uppercase",
+  color: "var(--text-tertiary)",
+};
+
+/** Touch devices have no hover, so a reveal-on-hover control would stay invisible
+ *  while still being tappable. Evaluated once - the input type does not change. */
+const NO_HOVER = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(hover: none)").matches;
+
+/** The label is only meaningful together with the action, so they travel as a pair. */
+interface SectionDelete {
+  action: () => void;
+  label: string;
+}
+
+function SectionHeader({ children, onDelete }: { children: string; onDelete?: SectionDelete }) {
+  const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  // No delete affordance: render exactly what every other surface renders.
+  if (!onDelete) {
+    return <div style={{ ...SECTION_TEXT, padding: "18px 12px 6px" }}>{children}</div>;
+  }
+
   return (
     <div
-      style={{
-        fontSize: 11,
-        fontWeight: 500,
-        letterSpacing: "0.4px",
-        textTransform: "uppercase",
-        color: "var(--text-tertiary)",
-        padding: "18px 12px 6px",
-      }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", alignItems: "center", gap: 4, padding: "18px 12px 6px" }}
     >
-      {children}
+      <div style={SECTION_TEXT}>{children}</div>
+      <IconButton
+        icon="trash-2"
+        size="sm"
+        label={onDelete.label}
+        onClick={onDelete.action}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          // The 28px button would otherwise push the caption down; negative
+          // margin keeps the header's text geometry identical to the plain one.
+          margin: "-8px 0",
+          opacity: hover || focused || NO_HOVER ? 1 : 0,
+          transition:
+            "opacity var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard)",
+        }}
+      />
     </div>
   );
 }
@@ -168,7 +208,7 @@ function DroppableGroup({ groupKey, children }: { groupKey: string; children: Re
   );
 }
 
-export function TaskListSurface({ groups, emptyLabel, showProject, projects, labels, today, locale, t, dnd, showEmptyGroups }: TaskListSurfaceProps) {
+export function TaskListSurface({ groups, emptyLabel, showProject, projects, labels, today, locale, t, dnd, showEmptyGroups, onDeleteGroup }: TaskListSurfaceProps) {
   const focusedIndex = useApp((s) => s.focusedIndex);
   const selectTask = useApp((s) => s.selectTask);
   const setVisibleTaskIds = useApp((s) => s.setVisibleTaskIds);
@@ -302,7 +342,15 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
 
         return (
           <Fragment key={g.key}>
-            {g.header && (g.tasks.length > 0 || showEmptyGroups) && <SectionHeader>{g.header}</SectionHeader>}
+            {g.header && (g.tasks.length > 0 || showEmptyGroups) && (
+              <SectionHeader
+                onDelete={
+                  onDeleteGroup ? { action: () => onDeleteGroup(g.key), label: t("project.deleteSection") } : undefined
+                }
+              >
+                {g.header}
+              </SectionHeader>
+            )}
             {dnd?.mode === "reorder" ? (
               <SortableContext items={groupIds} strategy={verticalListSortingStrategy}>
                 {body}

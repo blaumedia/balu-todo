@@ -50,6 +50,11 @@ export function ProjectView({ snapshot, projectId }: { snapshot: Snapshot; proje
         locale={locale}
         t={t}
         showEmptyGroups
+        onDeleteGroup={writable ? (sectionId) => {
+          if (globalThis.confirm(t("project.deleteSectionConfirm"))) {
+            getSync()?.mutate({ type: "section_delete", args: { id: sectionId } });
+          }
+        } : undefined}
         dnd={writable ? { mode: "reorder", onReorder: (_key, ids) => getSync()?.mutate({ type: "task_reorder", args: { items: spacedOrders(ids) } }) } : undefined}
       />
       {writable && (
