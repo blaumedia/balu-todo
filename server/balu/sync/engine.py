@@ -9,8 +9,9 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from ..models import Comment, Label, Membership, Project, Section, Task, User
+from ..models import Attachment, Comment, Label, Membership, Project, Section, Task, User
 from .serialize import (
+    serialize_attachment,
     serialize_comment,
     serialize_label,
     serialize_member,
@@ -68,9 +69,21 @@ def decode_token(token: str) -> int | None:
 # Incremental pull
 # ---------------------------------------------------------------------------
 def collect_changes(
-    session: Session, workspace_id: uuid.UUID, since: int | None
+    session: Session,
+    workspace_id: uuid.UUID,
+    since: int | None,
+    upper: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Gather changed objects. `since is None` => full sync (live objects only)."""
+    """Gather changed objects. `since is None` => full sync (live objects only).
+
+    `upper` is the version the caller will hand back as the sync token, read
+    *before* this runs. Bounding every query by it makes the response a
+    consistent snapshot of one moment: under READ COMMITTED each statement here
+    sees a fresh database snapshot, so a writer committing while this function
+    runs would otherwise land in some collections and not others, and - worse -
+    could be missed entirely by a token that had already moved past it.
+    Anything committing above the bound is simply delivered by the next sync.
+    """
     full = since is None
 
     def fetch(model):
@@ -79,6 +92,8 @@ def collect_changes(
             stmt = stmt.where(model.is_deleted.is_(False))
         else:
             stmt = stmt.where(model.version > since)
+        if upper is not None:
+            stmt = stmt.where(model.version <= upper)
         return session.execute(stmt).scalars().all()
 
     projects = [serialize_project(p) for p in fetch(Project)]
@@ -86,6 +101,7 @@ def collect_changes(
     tasks = [serialize_task(t) for t in fetch(Task)]
     labels = [serialize_label(label) for label in fetch(Label)]
     comments = [serialize_comment(c) for c in fetch(Comment)]
+    attachments = [serialize_attachment(a) for a in fetch(Attachment)]
 
     mstmt = select(Membership, User).join(User, User.id == Membership.user_id).where(
         Membership.workspace_id == workspace_id
@@ -94,6 +110,8 @@ def collect_changes(
         mstmt = mstmt.where(Membership.is_deleted.is_(False))
     else:
         mstmt = mstmt.where(Membership.version > since)
+    if upper is not None:
+        mstmt = mstmt.where(Membership.version <= upper)
     members = [serialize_member(m, u) for m, u in session.execute(mstmt).all()]
 
     return {
@@ -102,6 +120,7 @@ def collect_changes(
         "tasks": tasks,
         "labels": labels,
         "comments": comments,
+        "attachments": attachments,
         "members": members,
     }
 

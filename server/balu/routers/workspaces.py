@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..attachments import remove_workspace_blobs
 from ..auth import get_current_user
 from ..db import get_db
 from ..errors import forbidden, not_found, validation_error
@@ -117,4 +118,11 @@ def delete_workspace(
         create_workspace_with_owner(db, member.name.strip() or "My workspace", member_id)
 
     db.commit()
+
+    # The rows went with the FK cascade; the blobs are on a filesystem that
+    # knows nothing about it. Best-effort and after the commit - a failure here
+    # leaks bytes, whereas doing it first would delete a live workspace's files
+    # if the commit then failed.
+    remove_workspace_blobs(ws_id)
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

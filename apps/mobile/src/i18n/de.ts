@@ -76,6 +76,15 @@ export const de: Record<TranslationKey, string> = {
   'time.justNow': 'gerade eben',
   'comment.readOnly': 'Du hast nur Lesezugriff.',
 
+  'attachment.title': 'Anhänge',
+  'attachment.add': 'Anhang hinzufügen',
+  'attachment.delete': 'Anhang löschen',
+  'attachment.deleteConfirm': 'Diesen Anhang löschen?',
+  'attachment.uploadError': 'Upload fehlgeschlagen. Prüfe Verbindung und Dateigröße.',
+  'attachment.downloadError': 'Download fehlgeschlagen. Prüfe deine Verbindung.',
+  'attachment.photo': 'Foto',
+  'attachment.file': 'Datei',
+
   'priority.none': 'Keine',
   'priority.p1': 'P1',
   'priority.p2': 'P2',

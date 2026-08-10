@@ -3,8 +3,9 @@
 Recognised env vars: DATABASE_URL, SECRET_KEY, BALU_DEV, BALU_ALLOW_REGISTRATION,
 BALU_CORS_ORIGINS, token lifetimes, notification transports
 (BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM, BALU_TELEGRAM_BOT_TOKEN), the
-reminder loop (BALU_REMINDERS_ENABLED, BALU_REMINDER_INTERVAL), and the remote
-MCP server (BALU_MCP_ENABLED).
+reminder loop (BALU_REMINDERS_ENABLED, BALU_REMINDER_INTERVAL), the remote
+MCP server (BALU_MCP_ENABLED), and attachment storage (BALU_DATA_DIR,
+BALU_MAX_ATTACHMENT_MB).
 """
 
 from __future__ import annotations
@@ -61,6 +62,24 @@ class Settings(BaseSettings):
     )
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 60
+
+    # --- Attachment storage ---------------------------------------------------
+    #: Root for server-side data that is not in the database. Attachment blobs
+    #: live at `{data_dir}/attachments/{workspace_id}/{attachment_id}` - no file
+    #: extension, because the original name and `content_type` are DB columns and
+    #: a client-supplied extension on disk is an attack surface, not information.
+    data_dir: str = Field(
+        default="./data",
+        validation_alias=AliasChoices("BALU_DATA_DIR", "data_dir"),
+    )
+    #: Per-file upload cap. The upload endpoint parses the multipart body itself
+    #: and counts bytes as they arrive, aborting the moment the cap is crossed,
+    #: so an oversized body is never buffered in memory, never spooled to a temp
+    #: file, and leaves no partial blob behind.
+    max_attachment_mb: int = Field(
+        default=25,
+        validation_alias=AliasChoices("BALU_MAX_ATTACHMENT_MB", "max_attachment_mb"),
+    )
 
     # --- Notification transports (env-gated) ---------------------------------
     smtp_host: str = Field(

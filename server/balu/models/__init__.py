@@ -1,5 +1,6 @@
 """SQLAlchemy models for Balu."""
 
+from .attachment import Attachment
 from .channel import UserChannel
 from .comment import Comment
 from .invite import Invite
@@ -12,6 +13,7 @@ from .user import User
 from .workspace import Membership, RefreshToken, Workspace
 
 __all__ = [
+    "Attachment",
     "Comment",
     "Invite",
     "Label",

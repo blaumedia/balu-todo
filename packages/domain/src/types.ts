@@ -81,6 +81,22 @@ export interface Comment extends SyncBase {
   body: string;
 }
 
+/**
+ * A file attached to a task (contract §3.7, v1.4).
+ *
+ * Only this metadata syncs - the bytes move over REST (§3.7.1) and only while
+ * online, so a client can render the list offline but not the content.
+ */
+export interface Attachment extends SyncBase {
+  task_id: string;
+  /** Server-sanitized basename, ≤ 255 chars. */
+  filename: string;
+  /** Media type as stored; `application/octet-stream` when it was implausible. */
+  content_type: string;
+  size_bytes: number;
+  created_by: string | null;
+}
+
 export interface Member extends SyncBase {
   /** `id` equals the user id (contract §3.5). */
   name: string;
@@ -199,7 +215,8 @@ export type CommandType =
   | "label_delete"
   | "comment_add"
   | "comment_update"
-  | "comment_delete";
+  | "comment_delete"
+  | "attachment_delete";
 
 // ── Comment command args (contract §5.4, v1.2) ────────────────────────
 
@@ -215,6 +232,18 @@ export interface CommentUpdateArgs {
 }
 /** `comment_delete` args — author or admin+ (contract §3.4). */
 export interface CommentDeleteArgs {
+  id: string;
+}
+
+// ── Attachment command args (contract §5.4, v1.4) ─────────────────────
+
+/**
+ * `attachment_delete` args - any role ≥ member, no ownership rule.
+ *
+ * There is no `attachment_add`: uploads are REST (§3.7.1), because a durable
+ * command queue replayed on every reconnect is the wrong place for megabytes.
+ */
+export interface AttachmentDeleteArgs {
   id: string;
 }
 
@@ -250,6 +279,7 @@ export interface SyncResponse {
   tasks: Task[];
   labels: Label[];
   comments: Comment[];
+  attachments: Attachment[];
   members: Member[];
 }
 

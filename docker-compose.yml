@@ -38,6 +38,10 @@ services:
       SECRET_KEY: ${BALU_SECRET_KEY:?set BALU_SECRET_KEY in .env — see .env.example}
       BALU_ALLOW_REGISTRATION: ${BALU_ALLOW_REGISTRATION:-true}
       BALU_CORS_ORIGINS: ${BALU_CORS_ORIGINS:-}
+    volumes:
+      # Attachment blobs. BALU_DATA_DIR=/data comes from the image; without this
+      # mount every upload would die with the container that accepted it.
+      - balu-data:/data
     ports:
       - "${BALU_PORT:-8080}:8000"
     depends_on:
@@ -47,3 +51,4 @@ services:
 
 volumes:
   balu-db:
+  balu-data:

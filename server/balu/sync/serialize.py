@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from typing import Any
 
-from ..models import Comment, Membership, Project, Section, Task, User
+from ..models import Attachment, Comment, Membership, Project, Section, Task, User
 
 
 def iso_dt(value: datetime | None) -> str | None:
@@ -101,6 +101,21 @@ def serialize_comment(c: Comment) -> dict[str, Any]:
         "created_at": iso_dt(c.created_at),
         "updated_at": iso_dt(c.updated_at),
         "is_deleted": c.is_deleted,
+    }
+
+
+def serialize_attachment(a: Attachment) -> dict[str, Any]:
+    return {
+        "id": str(a.id),
+        "workspace_id": str(a.workspace_id),
+        "task_id": str(a.task_id),
+        "filename": a.filename,
+        "content_type": a.content_type,
+        "size_bytes": a.size_bytes,
+        "created_by": str(a.created_by) if a.created_by else None,
+        "created_at": iso_dt(a.created_at),
+        "updated_at": iso_dt(a.updated_at),
+        "is_deleted": a.is_deleted,
     }
 
 

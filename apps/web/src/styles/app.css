@@ -124,3 +124,21 @@ textarea {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* Attachment remove affordance: hidden until the item is hovered or the button
+   itself takes keyboard focus, so the grid stays calm (DESIGN §3) without the
+   action becoming unreachable without a mouse. */
+.balu-attachment-item .balu-attachment-remove {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+.balu-attachment-item:hover .balu-attachment-remove,
+.balu-attachment-item .balu-attachment-remove:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  /* Touch: there is no hover, so the action is always visible. */
+  .balu-attachment-item .balu-attachment-remove {
+    opacity: 1;
+  }
+}

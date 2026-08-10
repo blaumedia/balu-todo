@@ -8,6 +8,7 @@ const EMPTY: Snapshot = {
   tasks: [],
   labels: [],
   comments: [],
+  attachments: [],
   members: [],
   status: "offline",
   syncToken: "*",

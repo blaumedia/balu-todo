@@ -1,4 +1,4 @@
-import type { Comment, Project, Task } from "@balu/domain";
+import type { Attachment, Comment, Project, Task } from "@balu/domain";
 
 let seq = 0;
 export function makeTask(over: Partial<Task> & { id: string }): Task {
@@ -55,6 +55,63 @@ export function makeComment(over: Partial<Comment> & { id: string }): Comment {
     is_deleted: false,
     ...over,
   };
+}
+
+export function makeAttachment(over: Partial<Attachment> & { id: string }): Attachment {
+  return {
+    workspace_id: "w1",
+    task_id: "t1",
+    filename: "file.bin",
+    content_type: "application/octet-stream",
+    size_bytes: 1024,
+    created_by: "u1",
+    created_at: "2026-07-01T00:00:00Z",
+    updated_at: "2026-07-01T00:00:00Z",
+    is_deleted: false,
+    ...over,
+  };
+}
+
+/**
+ * A server that answers every request with the collections it was handed.
+ *
+ * Attachments have no `*_add` command (uploads are REST, contract §3.7.1), so
+ * the only way one enters a replica is a sync response - which is exactly what
+ * this fakes.
+ */
+export function makeSeedServer(
+  seed: Partial<Record<
+    "projects" | "sections" | "tasks" | "labels" | "comments" | "attachments" | "members",
+    unknown[]
+  >>,
+  opts: { fullSync?: boolean } = {},
+) {
+  const calls: Array<{ sync_token: string; commands: any[] }> = [];
+  let version = 0;
+
+  const fetchImpl = async (_url: any, init: any): Promise<Response> => {
+    calls.push(JSON.parse(init.body));
+    version += 1;
+    const resp = {
+      sync_token: `v${version}`,
+      full_sync: opts.fullSync ?? true,
+      sync_status: {},
+      temp_id_mapping: {},
+      projects: seed.projects ?? [],
+      sections: seed.sections ?? [],
+      tasks: seed.tasks ?? [],
+      labels: seed.labels ?? [],
+      comments: seed.comments ?? [],
+      attachments: seed.attachments ?? [],
+      members: seed.members ?? [],
+    };
+    return new Response(JSON.stringify(resp), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  return { calls, fetch: fetchImpl as unknown as typeof fetch };
 }
 
 /**

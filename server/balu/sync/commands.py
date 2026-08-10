@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..attachments import remove_blob
 from ..events import (
     AssignmentEvent,
     CommentEvent,
@@ -26,6 +27,7 @@ from ..events import (
     dispatch_events,
 )
 from ..models import (
+    Attachment,
     Comment,
     Label,
     Membership,
@@ -220,6 +222,13 @@ def _get_comment(ctx: Ctx, ref: Any) -> Comment:
     return obj
 
 
+def _get_attachment(ctx: Ctx, ref: Any) -> Attachment:
+    obj = ctx.session.get(Attachment, _as_uuid(ref))
+    if obj is None or obj.is_deleted or obj.workspace_id != ctx.workspace_id:
+        raise CommandError("not_found", "attachment not found")
+    return obj
+
+
 def _is_member(ctx: Ctx, user_id: uuid.UUID) -> bool:
     m = ctx.session.get(Membership, {"workspace_id": ctx.workspace_id, "user_id": user_id})
     return m is not None and not m.is_deleted
@@ -368,10 +377,12 @@ def h_project_delete(ctx: Ctx, args: dict) -> dict:
         st.is_deleted = True
         st.version = version
 
-    # Deleting a task cascades to its comments (§3.4) — deleting the project that
-    # holds those tasks has to do the same, or the comments stay live and keep
-    # syncing against tasks that no longer exist.
-    _delete_comments_of(ctx, parent_ids + [st.id for st in orphans], version)
+    # Deleting a task cascades to its comments (§3.4) and attachments (§3.7) -
+    # deleting the project that holds those tasks has to do the same, or they
+    # stay live and keep syncing against tasks that no longer exist.
+    dead_task_ids = parent_ids + [st.id for st in orphans]
+    _delete_comments_of(ctx, dead_task_ids, version)
+    _delete_attachments_of(ctx, dead_task_ids, version)
     return {}
 
 
@@ -386,6 +397,25 @@ def _delete_comments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) -> No
     for c in comments:
         c.is_deleted = True
         c.version = version
+
+
+def _delete_attachments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) -> None:
+    """Soft-delete the tasks' attachments and drop their blobs (best-effort).
+
+    The rows must stay (soft-deleted, version bumped) so clients learn to remove
+    them locally, but the bytes have nothing left to belong to.
+    """
+    if not task_ids:
+        return
+    attachments = ctx.session.execute(
+        select(Attachment).where(
+            Attachment.task_id.in_(task_ids), Attachment.is_deleted.is_(False)
+        )
+    ).scalars().all()
+    for a in attachments:
+        a.is_deleted = True
+        a.version = version
+        remove_blob(a.workspace_id, a.id)
 
 
 def h_section_add(ctx: Ctx, args: dict) -> dict:
@@ -580,8 +610,10 @@ def h_task_delete(ctx: Ctx, args: dict) -> dict:
     for st in subtasks:
         st.is_deleted = True
         st.version = version
-    # Cascade to comments of the task and its subtasks (§3.4).
-    _delete_comments_of(ctx, [task.id, *(st.id for st in subtasks)], version)
+    # Cascade to comments (§3.4) and attachments (§3.7) of the task and its subtasks.
+    dead_task_ids = [task.id, *(st.id for st in subtasks)]
+    _delete_comments_of(ctx, dead_task_ids, version)
+    _delete_attachments_of(ctx, dead_task_ids, version)
     return {}
 
 
@@ -701,6 +733,21 @@ def h_comment_delete(ctx: Ctx, args: dict) -> dict:
     return {}
 
 
+def h_attachment_delete(ctx: Ctx, args: dict) -> dict:
+    """Soft-delete an attachment; any writable role may remove any of them.
+
+    Uploading is REST (§3.7) - there is no `attachment_add` command, so this is
+    the only attachment mutation that travels the queue.
+    """
+    attachment = _get_attachment(ctx, args.get("id"))
+    attachment.is_deleted = True
+    attachment.version = ctx.bump()
+    # Before the commit, so a later failure in this transaction leaves a live row
+    # whose blob is gone (download 404s) rather than a blob nothing points at.
+    remove_blob(attachment.workspace_id, attachment.id)
+    return {}
+
+
 HANDLERS: dict[str, Callable[[Ctx, dict], dict]] = {
     "project_add": h_project_add,
     "project_update": h_project_update,
@@ -721,6 +768,7 @@ HANDLERS: dict[str, Callable[[Ctx, dict], dict]] = {
     "comment_add": h_comment_add,
     "comment_update": h_comment_update,
     "comment_delete": h_comment_delete,
+    "attachment_delete": h_attachment_delete,
 }
 
 _ADD_COMMANDS = {"project_add", "section_add", "task_add", "label_add", "comment_add"}

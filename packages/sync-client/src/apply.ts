@@ -101,12 +101,18 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
           deletedTaskIds.add(st.id);
         }
       }
-      // Deleting a task cascades to its comments (§3.4) — deleting the project
-      // that holds those tasks has to do the same.
+      // Deleting a task cascades to its comments (§3.4) and attachments (§3.7)
+      // - deleting the project that holds those tasks has to do the same.
       for (const c of replica.comments.values()) {
         if (deletedTaskIds.has(c.task_id) && !c.is_deleted) {
           c.is_deleted = true;
           c.updated_at = now;
+        }
+      }
+      for (const at of replica.attachments.values()) {
+        if (deletedTaskIds.has(at.task_id) && !at.is_deleted) {
+          at.is_deleted = true;
+          at.updated_at = now;
         }
       }
       break;
@@ -260,7 +266,8 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
     }
     case "task_delete": {
       // Collect the task and its subtasks — deleting a task cascades to its
-      // subtasks (contract §5.4) and to every one of their comments (§3.4).
+      // subtasks (contract §5.4) and to every one of their comments (§3.4) and
+      // attachments (§3.7).
       const deletedIds = new Set<string>([id]);
       const t = replica.tasks.get(id);
       if (t) {
@@ -278,6 +285,12 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
         if (deletedIds.has(c.task_id) && !c.is_deleted) {
           c.is_deleted = true;
           c.updated_at = now;
+        }
+      }
+      for (const at of replica.attachments.values()) {
+        if (deletedIds.has(at.task_id) && !at.is_deleted) {
+          at.is_deleted = true;
+          at.updated_at = now;
         }
       }
       break;
@@ -355,6 +368,16 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
       if (c) {
         c.is_deleted = true;
         c.updated_at = now;
+      }
+      break;
+    }
+    case "attachment_delete": {
+      // The only attachment command: uploads are REST (§3.7.1), so nothing
+      // here ever *creates* one - the metadata arrives through the next pull.
+      const at = replica.attachments.get(id);
+      if (at) {
+        at.is_deleted = true;
+        at.updated_at = now;
       }
       break;
     }

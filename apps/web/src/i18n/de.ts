@@ -70,6 +70,13 @@ export const de: Record<TranslationKey, string> = {
   "comments.edited": "bearbeitet",
   "comments.deleteConfirm": "Diesen Kommentar löschen?",
 
+  "attachment.title": "Anhänge",
+  "attachment.add": "Anhang hinzufügen",
+  "attachment.delete": "Anhang löschen",
+  "attachment.deleteConfirm": "Diesen Anhang löschen?",
+  "attachment.uploadError": "Upload fehlgeschlagen. Prüfe Verbindung und Dateigröße.",
+  "attachment.downloadError": "Download fehlgeschlagen. Prüfe deine Verbindung.",
+
   "time.justNow": "gerade eben",
 
   "priority.none": "Keine",

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createSyncClient, memoryKV, type SyncClient } from "../src/index.js";
-import { makeRejectingServer, makeServer } from "./helpers.js";
+import {
+  makeAttachment,
+  makeProject,
+  makeRejectingServer,
+  makeSeedServer,
+  makeServer,
+  makeTask,
+} from "./helpers.js";
 
 const BASE = "http://test/api/v1";
 const WS = "w1";
@@ -598,5 +605,161 @@ describe("recurring task_complete mirrors the server (I1/I5)", () => {
     const t = c.getSnapshot().tasks[0]!;
     expect(t.start_date).toBe("2026-07-26");
     expect(t.deadline).toBeNull();
+  });
+});
+
+describe("attachments (v1.4)", () => {
+  it("ingests the attachments collection from a sync response", async () => {
+    const server = makeSeedServer({
+      tasks: [makeTask({ id: "T1" })],
+      attachments: [makeAttachment({ id: "A1", task_id: "T1", filename: "shot.png" })],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    await c.sync();
+
+    const snap = c.getSnapshot();
+    expect(snap.attachments).toHaveLength(1);
+    expect(snap.attachments[0]!.filename).toBe("shot.png");
+    expect(snap.attachments[0]!.task_id).toBe("T1");
+  });
+
+  it("attachment_delete soft-deletes it optimistically", async () => {
+    const server = makeSeedServer({
+      tasks: [makeTask({ id: "T1" })],
+      attachments: [makeAttachment({ id: "A1", task_id: "T1" })],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    await c.sync();
+
+    c.mutate({ type: "attachment_delete", args: { id: "A1" } });
+    expect(c.getSnapshot().attachments[0]!.is_deleted).toBe(true);
+  });
+
+  it("task_delete cascades to the task's attachments", async () => {
+    const server = makeSeedServer({
+      tasks: [makeTask({ id: "T1" }), makeTask({ id: "T2" })],
+      attachments: [
+        makeAttachment({ id: "A1", task_id: "T1" }),
+        makeAttachment({ id: "A2", task_id: "T1" }),
+        makeAttachment({ id: "A3", task_id: "T2" }),
+      ],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    await c.sync();
+
+    c.mutate({ type: "task_delete", args: { id: "T1" } });
+
+    const snap = c.getSnapshot();
+    expect(snap.attachments.find((a) => a.id === "A1")!.is_deleted).toBe(true);
+    expect(snap.attachments.find((a) => a.id === "A2")!.is_deleted).toBe(true);
+    // Another task's attachment is untouched.
+    expect(snap.attachments.find((a) => a.id === "A3")!.is_deleted).toBe(false);
+  });
+
+  it("task_delete cascades to a subtask's attachments", async () => {
+    const server = makeSeedServer({
+      tasks: [makeTask({ id: "T1" }), makeTask({ id: "T2", parent_task_id: "T1" })],
+      attachments: [makeAttachment({ id: "A1", task_id: "T2" })],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    await c.sync();
+
+    c.mutate({ type: "task_delete", args: { id: "T1" } });
+    expect(c.getSnapshot().attachments[0]!.is_deleted).toBe(true);
+  });
+
+  it("project_delete cascades to the attachments of its tasks", async () => {
+    const server = makeSeedServer({
+      projects: [makeProject({ id: "P1" })],
+      tasks: [makeTask({ id: "T1", project_id: "P1" }), makeTask({ id: "T2" })],
+      attachments: [
+        makeAttachment({ id: "A1", task_id: "T1" }),
+        makeAttachment({ id: "A2", task_id: "T2" }),
+      ],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    await c.sync();
+
+    c.mutate({ type: "project_delete", args: { id: "P1" } });
+
+    const snap = c.getSnapshot();
+    expect(snap.attachments.find((a) => a.id === "A1")!.is_deleted).toBe(true);
+    expect(snap.attachments.find((a) => a.id === "A2")!.is_deleted).toBe(false);
+  });
+
+  it("project_delete reaches a subtask's attachments through the null-project subtask pass", async () => {
+    const server = makeSeedServer({
+      projects: [makeProject({ id: "P1" })],
+      // The subtask's own project_id is null - it only survives the cascade via
+      // the parent pass, and its attachments have to go with it.
+      tasks: [
+        makeTask({ id: "T1", project_id: "P1" }),
+        makeTask({ id: "T2", parent_task_id: "T1" }),
+      ],
+      attachments: [makeAttachment({ id: "A1", task_id: "T2" })],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    await c.sync();
+
+    c.mutate({ type: "project_delete", args: { id: "P1" } });
+    expect(c.getSnapshot().attachments[0]!.is_deleted).toBe(true);
+  });
+
+  it("a delta marking an attachment deleted drops it from the replica", async () => {
+    const seed = makeSeedServer({
+      tasks: [makeTask({ id: "T1" })],
+      attachments: [makeAttachment({ id: "A1", task_id: "T1" })],
+    });
+    const storage = memoryKV();
+    const c = track(createSyncClient(base({ fetch: seed.fetch, storage })));
+    await c.sync();
+    expect(c.getSnapshot().attachments).toHaveLength(1);
+
+    const delta = makeSeedServer(
+      { attachments: [makeAttachment({ id: "A1", task_id: "T1", is_deleted: true })] },
+      { fullSync: false },
+    );
+    const c2 = track(createSyncClient(base({ fetch: delta.fetch, storage })));
+    await c2.hydrate();
+    await c2.sync();
+    expect(c2.getSnapshot().attachments).toHaveLength(0);
+  });
+
+  it("keeps attachments durable across client re-instantiation", async () => {
+    const storage = memoryKV();
+    const server = makeSeedServer({
+      tasks: [makeTask({ id: "T1" })],
+      attachments: [makeAttachment({ id: "A1", task_id: "T1", filename: "keep.pdf" })],
+    });
+    const c = track(createSyncClient(base({ fetch: server.fetch, storage })));
+    await c.sync();
+
+    const offline: typeof fetch = (async () => {
+      throw new TypeError("network down");
+    }) as unknown as typeof fetch;
+    const c2 = track(createSyncClient(base({ fetch: offline, storage })));
+    await c2.hydrate();
+    expect(c2.getSnapshot().attachments[0]!.filename).toBe("keep.pdf");
+  });
+
+  it("hydrates a replica persisted before attachments existed", async () => {
+    // A pre-v1.4 client wrote a replica with no `attachments` key at all.
+    const storage = memoryKV({
+      "balu:replica:w1": JSON.stringify({
+        projects: [],
+        sections: [],
+        tasks: [makeTask({ id: "T1" })],
+        labels: [],
+        comments: [],
+        members: [],
+      }),
+    });
+    const offline: typeof fetch = (async () => {
+      throw new TypeError("network down");
+    }) as unknown as typeof fetch;
+    const c = track(createSyncClient(base({ fetch: offline, storage })));
+    await c.hydrate();
+    expect(c.getSnapshot().tasks).toHaveLength(1);
+    expect(c.getSnapshot().attachments).toEqual([]);
   });
 });

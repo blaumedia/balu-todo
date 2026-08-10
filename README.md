@@ -65,6 +65,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://balu:${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env}@db:5432/balu
       SECRET_KEY: ${BALU_SECRET_KEY:?set BALU_SECRET_KEY in .env}
+    volumes:
+      - balu-data:/data
     ports:
       - "${BALU_PORT:-8080}:8000"
     depends_on:
@@ -74,6 +76,7 @@ services:
 
 volumes:
   balu-db:
+  balu-data:
 ```
 
 and next to it a `.env` with the two required secrets:
@@ -121,7 +124,10 @@ docker compose up --build
   again.
 - Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`
   enable email, `BALU_TELEGRAM_BOT_TOKEN` enables Telegram; ntfy needs nothing.
-- Back up the `balu-db` volume; the app container is stateless.
+- Back up **both** volumes: `balu-db` holds everything except attachment files,
+  and `balu-data` holds those files. They are not in the database dump, so a
+  database-only backup restores every task with its attachments listed and none
+  of them downloadable. `BALU_MAX_ATTACHMENT_MB` (default 25) caps each upload.
 - Behind a reverse proxy, set `BALU_TRUSTED_PROXY_HOPS` to the number of proxies
   in front of Balu (usually `1`) so rate limiting keys on the real client address
   from `X-Forwarded-For`. Leave it at `0` when Balu is exposed directly —

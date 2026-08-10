@@ -17,6 +17,7 @@ from sqlalchemy.exc import OperationalError
 
 from . import __version__
 from .config import get_settings
+from .routers import attachments as attachments_router
 from .routers import auth as auth_router
 from .routers import channels as channels_router
 from .routers import invites as invites_router
@@ -140,6 +141,7 @@ def create_app() -> FastAPI:
     api.include_router(members_router.router)
     api.include_router(channels_router.router)
     api.include_router(mcp_router.router)
+    api.include_router(attachments_router.router)
     api.include_router(sync_router.router)
     app.mount("/api/v1", api)
     # Expose the API sub-app so tests can install dependency overrides on it

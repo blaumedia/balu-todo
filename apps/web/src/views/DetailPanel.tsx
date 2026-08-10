@@ -12,6 +12,7 @@ import { AssigneeChip } from "../components/AssigneeChip.js";
 import { DateField } from "./DateField.js";
 import { ReminderField } from "./ReminderField.js";
 import { CommentsSection } from "./Comments.js";
+import { AttachmentsSection } from "./Attachments.js";
 
 const PRIORITY_COLORS: Record<number, string> = {
   1: "var(--priority-1)",
@@ -450,6 +451,8 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
             </Row>
           )}
         </div>
+
+        <AttachmentsSection snapshot={snapshot} taskId={task.id} />
 
         <CommentsSection snapshot={snapshot} taskId={task.id} />
       </div>

@@ -54,6 +54,10 @@ def validation_error(message: str = "Validation error") -> ApiError:
     return ApiError(422, "validation_error", message)
 
 
+def too_large(message: str = "File is too large") -> ApiError:
+    return ApiError(413, "too_large", message)
+
+
 def invalid_invite_token() -> ApiError:
     # §7: invite accept with an unknown/revoked/expired token → 400 invalid_token.
     return ApiError(400, "invalid_token", "Invite is invalid, revoked, or expired")

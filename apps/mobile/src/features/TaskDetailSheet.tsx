@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from
 import { BottomSheet } from '../components/BottomSheet';
 import { Checkbox } from '../components/Checkbox';
 import { Icon } from '../components/Icon';
+import { AttachmentsSection } from './AttachmentsSection';
 import { DateField } from './DateField';
 import { ReminderField } from './ReminderField';
 import {
@@ -382,6 +383,9 @@ function DetailBody({
         style={[styles.notes, { color: theme.textPrimary }]}
         multiline
       />
+
+      {/* Attachments */}
+      <AttachmentsSection taskId={task.id} snap={snap} writable={writable} />
 
       {/* Comments */}
       <CommentsSection

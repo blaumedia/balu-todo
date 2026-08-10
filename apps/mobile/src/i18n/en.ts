@@ -73,6 +73,15 @@ export const en = {
   'time.justNow': 'just now',
   'comment.readOnly': 'You have read-only access.',
 
+  'attachment.title': 'Attachments',
+  'attachment.add': 'Add attachment',
+  'attachment.delete': 'Delete attachment',
+  'attachment.deleteConfirm': 'Delete this attachment?',
+  'attachment.uploadError': 'Upload failed. Check your connection and file size.',
+  'attachment.downloadError': 'Download failed. Check your connection.',
+  'attachment.photo': 'Photo',
+  'attachment.file': 'File',
+
   'priority.none': 'None',
   'priority.p1': 'P1',
   'priority.p2': 'P2',

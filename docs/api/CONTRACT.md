@@ -21,7 +21,7 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`.
   Error messages are for humans and never carry internal detail (driver messages,
   the submitted body, transport hostnames) — that goes to the server log.
 
@@ -87,10 +87,13 @@ Object shapes:
 
 ## 3. Data model (workspace-scoped, synced)
 
-All five resource types below travel through the sync endpoint. Common envelope fields on
+All resource types below travel through the sync endpoint. Common envelope fields on
 every synced object: `id`, `workspace_id`, `created_at`, `updated_at`, `is_deleted`
 (soft-delete flag — deleted objects still appear in incremental syncs so clients can
 remove them locally).
+
+Attachments (§3.7) are the one split case: their **metadata** syncs like everything
+else, their **bytes** move over REST (§3.7.1) and only while online.
 
 ### 3.1 `project`
 
@@ -208,6 +211,64 @@ error `name_taken`).
  "role": "owner", "created_at": "…", "updated_at": "…", "is_deleted": false}
 ```
 
+### 3.7 `attachment` - v1.4
+
+Files hanging off a task, any content type. **Metadata syncs, bytes do not.**
+
+```json
+{"id": "…", "workspace_id": "…", "task_id": "…",
+ "filename": "Rechnung.pdf", "content_type": "application/pdf", "size_bytes": 91238,
+ "created_by": "…", "created_at": "…", "updated_at": "…", "is_deleted": false}
+```
+
+- The list therefore renders offline; opening or adding a file requires a connection.
+- Blobs live on a server-side filesystem volume (`BALU_DATA_DIR`, default `./data`, `/data`
+  in the Docker image) at `{data_dir}/attachments/{workspace_id}/{attachment_id}` - no
+  extension: `filename` and `content_type` are columns, and nothing the uploader controls
+  becomes a path component. **The volume is not in the database dump**; back both up.
+- `filename` is stored sanitized: basename only, printable characters, ≤ 255. A
+  `content_type` that is not a plausible media type is stored as
+  `application/octet-stream` (it is echoed into a response header on download).
+- Size cap per file: `BALU_MAX_ATTACHMENT_MB`, default 25. The server parses the multipart
+  body itself and counts bytes as they arrive, so an oversized upload is cut off the moment
+  it crosses the cap: `413 too_large`, nothing buffered in memory, nothing spooled to a
+  temp file, no partial blob left behind. A `Content-Length` that already exceeds the cap
+  is refused before the body is read at all.
+- Ordering: `created_at` ascending within a task.
+- Roles: `viewer` sees the list and downloads; `member`+ may upload and delete. There is
+  **no ownership rule** - any writable role may delete any attachment (unlike comments,
+  which are author-gated).
+- Deleting a task (or the project holding it) soft-deletes its attachments, versions
+  bumped, and removes their blobs. Deleting a **workspace** is a hard delete: rows go with
+  the FK cascade and the workspace's blob directory is removed.
+
+#### 3.7.1 Blob transfer (REST, online-only)
+
+| Endpoint | Notes |
+|---|---|
+| `POST /workspaces/{id}/attachments` | `multipart/form-data` with fields `task_id` and `file`. Membership + role ≥ member (`viewer` → `403 forbidden`). Unknown, deleted, or other-workspace `task_id` → `404 not_found`. Over the cap → `413 too_large`. A body that is not multipart, is malformed, is **truncated** (cut off before the closing boundary), or carries no file part / no `task_id`, → `422 validation_error` - a partial upload is never stored as a complete one. Field order is free: the `file` part may precede `task_id`. A zero-byte file is valid. → `201` with the attachment object above. |
+| `GET /workspaces/{id}/attachments/{attachment_id}/file` | Membership, **any role**. Streams the blob with `Content-Type: <content_type>`, `Content-Disposition: attachment; filename=<filename>` and `X-Content-Type-Options: nosniff`. Unknown/soft-deleted attachment, one from another workspace, or a row whose blob is missing → `404 not_found`. |
+
+Both take the normal `Authorization: Bearer <access_token>` header - there are no signed
+or query-parameter URLs in v1, so a client renders a thumbnail by fetching the bytes
+itself rather than by pointing an `<img src>` at the endpoint.
+
+**Authentication is resolved before any of the upload body is read**, and the response is
+always a download, never a render. Both are load-bearing rather than incidental:
+
+- A framework that binds the file to a handler parameter parses (and spools to disk) the
+  whole body *before* the auth check runs, which would let an anonymous caller fill the
+  volume and only then collect a `401`. The endpoint therefore takes the raw request and
+  drives the multipart parser itself.
+- Any content type may be stored, so `Content-Disposition: attachment` plus `nosniff` is
+  what stops an uploaded `text/html` file from executing as script in the origin that
+  holds every user's session.
+
+A successful upload **bumps the workspace version** and stamps the new row with it, so the
+metadata arrives through the next incremental sync like any other change. There is
+deliberately no `attachment_add` command: replaying a durable command queue that carries
+megabytes is a different product.
+
 ## 4. Smart-list predicates (shared client/server logic)
 
 Defined here so every client and the server agree exactly. `open` means
@@ -266,7 +327,7 @@ effects of those commands) are returned.
   "sync_status": {"9f1e…": "ok", "8c2d…": {"error_code": "not_found", "error": "…"}},
   "temp_id_mapping": {"tmp-a": "3d0f…"},
   "projects": [...], "sections": [...], "tasks": [...], "labels": [...],
-  "comments": [...], "members": [...]
+  "comments": [...], "attachments": [...], "members": [...]
 }
 ```
 
@@ -276,6 +337,14 @@ effects of those commands) are returned.
 - Implementation note (server): per-workspace monotonic `version` bigint; every mutation
   bumps it and stamps the row; `sync_token` encodes the version. Any encoding is fine —
   clients treat it as opaque.
+- **The token is a consistent snapshot bound.** The server reads the version counter
+  first and returns every changed object with `since < version ≤ token`, so the response
+  is one coherent moment rather than a mix of them. A write that commits while the
+  request is being served lands *above* the token and is delivered by the next sync.
+  Delivery is therefore **at-least-once**: an object may arrive twice (clients upsert by
+  id, so a repeat is a no-op), and never zero times. The reverse order - collecting rows
+  before reading the counter - silently skips anything committing in between, forever,
+  because the client persists the advanced token and only ever asks for versions above it.
 
 ### 5.3 `temp_id`
 
@@ -294,7 +363,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 |---|---|
 | `project_add` | `temp_id`, `name`, `color?`, `sort_order?` |
 | `project_update` | `id`, then any of `name, color, sort_order, archived_at` |
-| `project_delete` | `id` — soft-deletes project + its sections + its tasks + those tasks' comments |
+| `project_delete` | `id` - soft-deletes project + its sections + its tasks + those tasks' comments and attachments |
 | `section_add` | `temp_id`, `project_id`, `name`, `sort_order?` |
 | `section_update` | `id`, any of `name, sort_order` |
 | `section_delete` | `id` — its tasks move to the project body (section_id → null) |
@@ -303,7 +372,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. |
 | `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) — see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
-| `task_delete` | `id` — soft-deletes task + its subtasks + all their comments |
+| `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed) |
 | `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` — bulk, single container expected |
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
@@ -311,6 +380,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `comment_add` (v1.2) | `temp_id`, `task_id`, `body` |
 | `comment_update` (v1.2) | `id`, `body` — author only |
 | `comment_delete` (v1.2) | `id` — author or admin+ |
+| `attachment_delete` (v1.4) | `id` - soft-deletes the row and removes its blob; any role ≥ member. Uploading is REST (§3.7.1), so this is the only attachment command. |
 
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
 (id/temp_id unknown or deleted), `forbidden` (viewer role; or comment edit/delete by

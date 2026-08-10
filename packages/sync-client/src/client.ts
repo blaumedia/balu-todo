@@ -3,6 +3,7 @@
 
 import {
   todayLocalISO,
+  type Attachment,
   type Comment,
   type CommandInput,
   type IsoDate,
@@ -64,6 +65,7 @@ export interface Snapshot {
   tasks: Task[];
   labels: Label[];
   comments: Comment[];
+  attachments: Attachment[];
   members: Member[];
   status: SyncStatus;
   syncToken: string;
@@ -146,6 +148,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       tasks: [...replica.tasks.values()],
       labels: [...replica.labels.values()],
       comments: [...replica.comments.values()],
+      attachments: [...replica.attachments.values()],
       members: [...replica.members.values()],
       status,
       syncToken,
@@ -250,6 +253,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       for (const t of resp.tasks) if (!t.is_deleted) replica.tasks.set(t.id, t);
       for (const l of resp.labels) if (!l.is_deleted) replica.labels.set(l.id, l);
       for (const c of resp.comments ?? []) if (!c.is_deleted) replica.comments.set(c.id, c);
+      for (const a of resp.attachments ?? []) if (!a.is_deleted) replica.attachments.set(a.id, a);
       for (const m of resp.members) if (!m.is_deleted) replica.members.set(m.id, m);
       // Refs were rewritten above, so these carry real ids where the server has
       // assigned them. Rejected commands are never in `stillQueued` — they are
@@ -265,6 +269,8 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       mergeInto(replica.tasks, resp.tasks);
       mergeInto(replica.labels, resp.labels);
       mergeInto(replica.comments, resp.comments ?? []);
+      // `?? []` because an older server simply has no `attachments` key.
+      mergeInto(replica.attachments, resp.attachments ?? []);
       mergeInto(replica.members, resp.members);
     }
 

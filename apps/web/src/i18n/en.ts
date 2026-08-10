@@ -67,6 +67,13 @@ export const en = {
   "comments.edited": "edited",
   "comments.deleteConfirm": "Delete this comment?",
 
+  "attachment.title": "Attachments",
+  "attachment.add": "Add attachment",
+  "attachment.delete": "Delete attachment",
+  "attachment.deleteConfirm": "Delete this attachment?",
+  "attachment.uploadError": "Upload failed. Check your connection and file size.",
+  "attachment.downloadError": "Download failed. Check your connection.",
+
   "time.justNow": "just now",
 
   "priority.none": "None",

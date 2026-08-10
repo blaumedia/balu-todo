@@ -63,6 +63,15 @@ COPY --from=webbuild /build/apps/web/dist/ ./static/
 # build: ~40k venv files, one emulated syscall each, minutes per non-native
 # architecture under QEMU, for no benefit at all.
 RUN useradd --system --uid 10001 --user-group --no-create-home balu
+
+# Attachment blobs are the one thing the app does write, and they must survive
+# the container. The chown is scoped to this single directory on purpose: the
+# recursive one removed above is what made every non-native release build crawl,
+# and /data is one directory, not 40k venv files.
+ENV BALU_DATA_DIR=/data
+RUN mkdir -p /data && chown balu:balu /data
+VOLUME /data
+
 USER balu
 
 EXPOSE 8000

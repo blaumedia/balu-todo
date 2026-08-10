@@ -76,3 +76,9 @@ export function updateComment(id: string, body: string) {
 export function deleteComment(id: string) {
   return mutate('comment_delete', { id });
 }
+
+// ── Attachments (contract §5.4, v1.4) ─────────────────────────────────────
+// Only the delete travels the command queue; uploading is REST (§3.7.1).
+export function deleteAttachment(id: string) {
+  return mutate('attachment_delete', { id });
+}

@@ -30,4 +30,5 @@ class SyncResponse(BaseModel):
     tasks: list[dict[str, Any]]
     labels: list[dict[str, Any]]
     comments: list[dict[str, Any]]
+    attachments: list[dict[str, Any]]
     members: list[dict[str, Any]]

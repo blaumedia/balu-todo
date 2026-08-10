@@ -24,6 +24,12 @@ export function rewriteReplicaRefs(replica: Replica, mapping: Mapping): void {
   for (const c of replica.comments.values()) {
     c.task_id = map(mapping, c.task_id) ?? c.task_id;
   }
+  // Attachments cannot hold a temp ref - an upload is REST and the server only
+  // accepts a real `task_id` - but they are mapped anyway so this stays true by
+  // construction rather than by assumption.
+  for (const a of replica.attachments.values()) {
+    a.task_id = map(mapping, a.task_id) ?? a.task_id;
+  }
 }
 
 const ID_KEYS = ["id", "project_id", "section_id", "parent_task_id", "assigned_to", "task_id"];
@@ -53,6 +59,7 @@ export function removeTempEntries(replica: Replica, mapping: Mapping): void {
     replica.tasks.delete(temp);
     replica.labels.delete(temp);
     replica.comments.delete(temp);
+    replica.attachments.delete(temp);
     replica.members.delete(temp);
   }
 }

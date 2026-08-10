@@ -60,3 +60,64 @@ def test_stale_or_garbage_token_forces_full_sync(client, user):
     resp = sync(client, user, "not-a-real-token")
     assert resp["full_sync"] is True
     assert len(resp["tasks"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# At-least-once delivery (I: incremental sync must never skip committed data)
+# ---------------------------------------------------------------------------
+def _commit_during_collect(monkeypatch, make_change):
+    """Run `make_change` inside the sync request, right after changes are read.
+
+    Simulates the window a concurrent writer really commits in: under READ
+    COMMITTED every statement of the request sees a fresh snapshot, so anything
+    that commits between "read the changes" and "read the version counter" is
+    visible to the second statement but was not returned by the first.
+    """
+    from balu.routers import sync as sync_router
+
+    real_collect = sync_router.collect_changes
+    fired = {"done": False}
+
+    def collect_then_commit(*args, **kwargs):
+        changes = real_collect(*args, **kwargs)
+        if not fired["done"]:
+            fired["done"] = True
+            make_change()
+        return changes
+
+    monkeypatch.setattr(sync_router, "collect_changes", collect_then_commit)
+    return fired
+
+
+def test_incremental_sync_never_skips_a_task_committed_mid_request(client, user, monkeypatch):
+    """A second device's `task_add` landing mid-request must not be lost.
+
+    The version counter and the row it stamps commit in one transaction, so the
+    counter can only move after the row is visible - but the sync endpoint used
+    to read the rows first and the counter second, handing back a token that had
+    already advanced past a row it never sent. Every later incremental pull asks
+    for `version > token`, so the task was skipped permanently.
+    """
+    first = sync(client, user, "*")
+    token = first["sync_token"]
+
+    created = {}
+
+    def concurrent_task_add():
+        # A genuine second client, with its own request and its own transaction.
+        resp = sync(client, user, "*", [cmd("task_add", temp_id="race", title="From device A")])
+        created["id"] = resp["temp_id_mapping"]["race"]
+
+    _commit_during_collect(monkeypatch, concurrent_task_add)
+
+    during = sync(client, user, token)
+    monkeypatch.undo()
+
+    assert created.get("id"), "the concurrent write did not run"
+    if any(t["id"] == created["id"] for t in during["tasks"]):
+        return  # delivered immediately - also correct
+
+    later = sync(client, user, during["sync_token"])
+    assert any(t["id"] == created["id"] for t in later["tasks"]), (
+        "task committed mid-request was skipped forever"
+    )
