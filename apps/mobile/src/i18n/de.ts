@@ -64,6 +64,9 @@ export const de: Record<TranslationKey, string> = {
   'detail.assignee': 'Zuständig',
   'detail.unassigned': 'Niemand',
   'detail.assigneeMe': '{name} (ich)',
+  'detail.metaCreated': 'Erstellt',
+  'detail.metaChanged': 'Geändert',
+  'detail.metaCompleted': 'Erledigt',
 
   'comment.section': 'Kommentare',
   'comment.empty': 'Noch keine Kommentare.',

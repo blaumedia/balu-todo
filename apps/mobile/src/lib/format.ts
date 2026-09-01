@@ -6,11 +6,13 @@ import {
   dowISO,
   relativeDate as domainRelativeDate,
   relativeTime as domainRelativeTime,
+  timestampLabel as domainTimestampLabel,
   type DateNames,
   type DateTone,
   type IsoDate,
   type IsoDateTime,
   type Locale,
+  type MetaDateNames,
 } from '@balu/domain';
 import type { TranslationKey } from '../i18n';
 
@@ -87,4 +89,25 @@ export function relativeDate(
     tomorrow: t('date.tomorrow'),
     yesterday: t('date.yesterday'),
   });
+}
+
+/** Absolute date with year, e.g. "Aug 3, 2026" (en) / "3. Aug. 2026" (de). */
+export function dateWithYear(iso: IsoDate, locale: Locale): string {
+  const { y, m, d } = parts(iso);
+  const month = MONTH_SHORT[locale][m - 1];
+  return locale === 'de' ? `${d}. ${month} ${y}` : `${month} ${d}, ${y}`;
+}
+
+/** Local wall-clock time, 24h, e.g. "14:05". Matches the web app (I7); no Intl here. */
+export function timeHM(iso: IsoDateTime): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const META_NAMES: MetaDateNames = { date: dateWithYear, time: timeHM };
+
+/** Absolute label for a task's created / changed / completed timestamp. */
+export function timestampLabel(iso: IsoDateTime, nowMs: number, locale: Locale): string {
+  return domainTimestampLabel(iso, nowMs, locale, META_NAMES);
 }

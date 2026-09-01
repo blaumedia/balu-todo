@@ -53,6 +53,9 @@ export const en = {
   "detail.assignee": "Assignee",
   "detail.assignNobody": "Nobody",
   "detail.assignMe": "Assign to me",
+  "detail.metaCreated": "Created",
+  "detail.metaChanged": "Changed",
+  "detail.metaCompleted": "Completed",
 
   "assign.me": "Me",
 

@@ -24,7 +24,7 @@ import {
   commentsForTask,
   initials,
 } from '../lib/collab';
-import { relativeTime } from '../lib/format';
+import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useSnapshot } from '../store/useSnapshot';
@@ -384,6 +384,9 @@ function DetailBody({
         multiline
       />
 
+      {/* Task meta */}
+      <TaskMeta task={task} />
+
       {/* Attachments */}
       <AttachmentsSection taskId={task.id} snap={snap} writable={writable} />
 
@@ -438,6 +441,35 @@ function ToggleRow({
         trackColor={{ true: theme.accent, false: theme.border }}
         thumbColor="#fff"
       />
+    </View>
+  );
+}
+
+/**
+ * Read-only lifecycle line: created, last changed, and - for a finished task -
+ * completed. Sits between the notes and the attachments so the web app shows it
+ * at the same spot. Outside the `pointerEvents` block on purpose: a viewer must
+ * still be able to read it.
+ *
+ * "Changed", not "Edited": `updated_at` also moves when a task is reordered or
+ * ticked (contract §5.4 task_reorder / task_complete), so "Edited" would claim
+ * a content change that never happened.
+ */
+function TaskMeta({ task }: { task: Task }) {
+  const theme = useTheme();
+  const { t, locale } = useT();
+  const now = Date.now();
+  const changed = task.updated_at > task.created_at; // same test as the comment "edited" marker
+  const items = [`${t('detail.metaCreated')} ${timestampLabel(task.created_at, now, locale)}`];
+  if (changed) items.push(`${t('detail.metaChanged')} ${timestampLabel(task.updated_at, now, locale)}`);
+  if (task.completed_at) items.push(`${t('detail.metaCompleted')} ${timestampLabel(task.completed_at, now, locale)}`);
+  return (
+    <View style={styles.metaLine}>
+      {items.map((item) => (
+        <Text key={item} style={[styles.metaText, { color: theme.textTertiary }]}>
+          {item}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -661,6 +693,8 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill, borderWidth: 1 },
   chipText: { fontSize: font.caption, fontWeight: font.weightMedium },
   notes: { fontSize: font.body, paddingTop: space.s4, minHeight: 80, lineHeight: font.body * 1.4 },
+  metaLine: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s2, paddingVertical: space.s3 },
+  metaText: { fontSize: font.caption },
   delete: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingVertical: space.s4 },
   deleteText: { fontSize: font.body, fontWeight: font.weightMedium },
   assigneeChip: {

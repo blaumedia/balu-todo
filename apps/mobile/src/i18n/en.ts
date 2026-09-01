@@ -61,6 +61,9 @@ export const en = {
   'detail.assignee': 'Assignee',
   'detail.unassigned': 'Unassigned',
   'detail.assigneeMe': '{name} (me)',
+  'detail.metaCreated': 'Created',
+  'detail.metaChanged': 'Changed',
+  'detail.metaCompleted': 'Completed',
 
   'comment.section': 'Comments',
   'comment.empty': 'No comments yet.',

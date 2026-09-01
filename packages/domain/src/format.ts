@@ -4,7 +4,7 @@
 // mobile deliberately avoids `Intl` (Hermes' timezone support is uneven) while
 // web uses `Intl.DateTimeFormat` (D3).
 
-import { addDaysISO, compareISO, diffDaysISO } from "./dates.js";
+import { addDaysISO, compareISO, diffDaysISO, todayLocalISO } from "./dates.js";
 import type { IsoDate, IsoDateTime, Locale } from "./types.js";
 
 export type DateTone = "today" | "overdue" | "future";
@@ -69,4 +69,41 @@ export function relativeTime(
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d`;
   return names.dayMonth(iso.slice(0, 10) as IsoDate, locale);
+}
+
+/**
+ * Platform-provided names for absolute lifecycle timestamps. Injected for the
+ * same reason as `DateNames`: web formats with `Intl`, mobile with tables (D3).
+ */
+export interface MetaDateNames {
+  /** Absolute calendar date with year, e.g. "Aug 3, 2026" / "3. Aug. 2026". */
+  date(iso: IsoDate, locale: Locale): string;
+  /** Local wall-clock time, 24h `HH:MM`, e.g. "14:05". */
+  time(iso: IsoDateTime, locale: Locale): string;
+}
+
+/**
+ * Absolute label for a task's created / changed / completed timestamp.
+ *
+ * Deliberately not `relativeTime`: the created date is a fact worth reading
+ * years later, and the clock is only the informative part when it happened
+ * today - so older entries stay at date width and today's get "14:05".
+ *
+ * The calendar day comes from the *local* day of the instant (via
+ * `todayLocalISO`), never from `iso.slice(0, 10)` - the wire value is UTC and
+ * slicing it would show yesterday's date to a user just after local midnight.
+ */
+export function timestampLabel(
+  iso: IsoDateTime,
+  nowMs: number,
+  locale: Locale,
+  names: MetaDateNames,
+): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const day = todayLocalISO(new Date(then));
+  if (day === todayLocalISO(new Date(nowMs))) {
+    return `${names.date(day, locale)}, ${names.time(iso, locale)}`;
+  }
+  return names.date(day, locale);
 }
