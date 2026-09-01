@@ -35,7 +35,7 @@ export function SimpleListView({ snapshot, list }: { snapshot: Snapshot; list: S
     }
     groups = projects
       .filter((p) => byProject.has(p.id))
-      .map((p) => ({ key: p.id, header: p.name, tasks: byProject.get(p.id)! }));
+      .map((p) => ({ key: p.id, header: p.name, tasks: byProject.get(p.id)!, move: { project_id: p.id, section_id: null } }));
   } else {
     groups = [{ key: list, tasks }];
   }

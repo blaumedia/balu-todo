@@ -29,6 +29,7 @@ export function LogbookView({ snapshot }: { snapshot: Snapshot }) {
       groups={groups}
       emptyLabel={t("empty.logbook")}
       showProject
+      draggable={false}
       projects={maps.projects}
       labels={maps.labels}
       today={today}

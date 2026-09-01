@@ -208,6 +208,18 @@ export const en = {
   "project.deleteSection": "Delete section",
   "project.deleteSectionConfirm": "Delete this section? Its tasks are kept and moved out of the section.",
 
+  // Screen-reader announcements for drag & drop; a successful move stays
+  // silent otherwise (rejections are reported by sync.rejected).
+  "dnd.pickedUp": "Picked up {title}",
+  "dnd.projectPickedUp": "Picked up project {name}",
+  "dnd.overTarget": "Over {target}",
+  "dnd.overGeneric": "Over a list",
+  "dnd.droppedTarget": "Moved to {target}",
+  "dnd.staleTarget": "That task or its destination no longer exists.",
+  "dnd.dropped": "Task dropped",
+  "dnd.projectDropped": "Project dropped",
+  "dnd.cancelled": "Move cancelled",
+
   "date.today": "Today",
   "date.tomorrow": "Tomorrow",
   "date.yesterday": "Yesterday",

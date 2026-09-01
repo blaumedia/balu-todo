@@ -1,6 +1,9 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { todayLocalISO, type Priority } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
+import { applyMoveDrop, dragKind, getDragResolver, makeAnnouncements } from "../lib/drag.js";
+import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { useSnapshot } from "../store/useSync.js";
 import { Sidebar } from "./Sidebar.js";
@@ -25,6 +28,22 @@ export function Shell() {
   const snapshot = useSnapshot();
   const view = useApp((s) => s.view);
   const selectedTaskId = useApp((s) => s.selectedTaskId);
+  const { t } = useT();
+
+  // The one DndContext for the whole app (DESIGN §5). Surfaces stay dumb: they
+  // register a per-kind resolver and the handlers below decide whether a drop
+  // is a container move (consumed here) or the surface's own drag logic.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const onDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      if (!applyMoveDrop(e, snapshot)) {
+        const kind = dragKind(e.active.data.current);
+        if (kind) getDragResolver(kind)?.(e);
+      }
+    },
+    [snapshot],
+  );
+  const announcements = useMemo(() => makeAnnouncements(snapshot, t), [snapshot, t]);
 
   // Global keyboard map (DESIGN §7 / plan §6).
   useEffect(() => {
@@ -120,18 +139,20 @@ export function Shell() {
   else content = <SimpleListView snapshot={snapshot} list={view.list} />;
 
   return (
-    <div style={{ display: "flex", height: "100vh", width: "100vw", background: "var(--bg)", overflow: "hidden" }}>
-      <Sidebar snapshot={snapshot} />
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <Toolbar snapshot={snapshot} />
-        <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>{content}</div>
-          {selectedTaskId && view.kind !== "settings" && <DetailPanel snapshot={snapshot} />}
+    <DndContext sensors={sensors} onDragEnd={onDragEnd} accessibility={{ announcements }}>
+      <div style={{ display: "flex", height: "100vh", width: "100vw", background: "var(--bg)", overflow: "hidden" }}>
+        <Sidebar snapshot={snapshot} />
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <Toolbar snapshot={snapshot} />
+          <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>{content}</div>
+            {selectedTaskId && view.kind !== "settings" && <DetailPanel snapshot={snapshot} />}
+          </div>
         </div>
+        <QuickAdd />
+        <CommandPalette />
+        <Toast />
       </div>
-      <QuickAdd />
-      <CommandPalette />
-      <Toast />
-    </div>
+    </DndContext>
   );
 }
