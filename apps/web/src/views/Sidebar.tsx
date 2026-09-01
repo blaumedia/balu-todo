@@ -1,11 +1,5 @@
-import { useState } from "react";
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
+import { useEffect, useState } from "react";
+import { type DragEndEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   useSortable,
@@ -16,6 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { selectList, todayLocalISO, type Project, type SmartList } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
+import { dragKind, projectRowData, setDragResolver } from "../lib/drag.js";
 import { spacedOrders } from "../lib/reorder.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
@@ -36,14 +31,25 @@ const SMART: Array<[SmartList, string, TranslationKey]> = [
 ];
 
 function SortableProject({ project, active, onClick, draggable }: { project: Project; active: boolean; onClick: () => void; draggable: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active: dragActive } = useSortable({
     id: project.id,
     disabled: !draggable,
+    data: projectRowData(project.id),
   });
+  // The same dashed-outline idiom as the task surfaces: a project row lights
+  // up only for a *task* drag over it (a project reorder drag never counts).
+  const isMoveTarget = isOver && dragKind(dragActive?.data.current) === "task";
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+        borderRadius: "var(--radius-card)",
+        outline: isMoveTarget ? "2px dashed var(--accent)" : "2px dashed transparent",
+        outlineOffset: 2,
+      }}
       {...(draggable ? { ...attributes, ...listeners } : {})}
     >
       <SidebarItem projectColor={`var(--project-${project.color})`} label={project.name} active={active} onClick={onClick} />
@@ -76,8 +82,6 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     .filter((p) => !p.is_deleted && p.archived_at == null)
     .sort((a, b) => a.sort_order - b.sort_order);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
   function createProject() {
     const trimmed = name.trim();
     if (trimmed) {
@@ -109,6 +113,13 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       }
     }
   }
+
+  // Same as TaskListSurface: the handler closes over `projects` rebuilt each
+  // render, so re-register every render instead of risking a stale closure.
+  useEffect(() => {
+    setDragResolver("project", onProjectDragEnd);
+    return () => setDragResolver("project", null);
+  });
 
   return (
     <aside
@@ -176,19 +187,17 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       </div>
       <nav style={{ padding: "0 8px", display: "flex", flexDirection: "column", gap: 1, overflowY: "auto" }}>
         {writable ? (
-          <DndContext sensors={sensors} onDragEnd={onProjectDragEnd}>
-            <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-              {projects.map((p) => (
-                <SortableProject
-                  key={p.id}
-                  project={p}
-                  active={view.kind === "project" && view.projectId === p.id}
-                  onClick={() => setView({ kind: "project", projectId: p.id })}
-                  draggable
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
+          <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+            {projects.map((p) => (
+              <SortableProject
+                key={p.id}
+                project={p}
+                active={view.kind === "project" && view.projectId === p.id}
+                onClick={() => setView({ kind: "project", projectId: p.id })}
+                draggable
+              />
+            ))}
+          </SortableContext>
         ) : (
           projects.map((p) => (
             <SidebarItem

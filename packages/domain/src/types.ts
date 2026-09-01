@@ -235,6 +235,17 @@ export interface CommentDeleteArgs {
   id: string;
 }
 
+// ── Task command args (contract §5.4) ─────────────────────────────────
+
+/** `task_move` args (contract §5.4) - container change only; everything else is `task_update`. */
+export interface TaskMoveArgs {
+  id: string;
+  project_id?: string | null;
+  section_id?: string | null;
+  parent_task_id?: string | null;
+  sort_order?: number;
+}
+
 // ── Attachment command args (contract §5.4, v1.4) ─────────────────────
 
 /**

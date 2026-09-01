@@ -27,9 +27,9 @@ export function ProjectView({ snapshot, projectId }: { snapshot: Snapshot; proje
     .sort((a, b) => a.sort_order - b.sort_order);
 
   const groups: TaskGroup[] = [];
-  groups.push({ key: "body", tasks: open.filter((tk) => tk.section_id == null).sort(bySort) });
+  groups.push({ key: "body", tasks: open.filter((tk) => tk.section_id == null).sort(bySort), move: { project_id: projectId, section_id: null } });
   for (const s of sections) {
-    groups.push({ key: s.id, header: s.name, tasks: open.filter((tk) => tk.section_id === s.id).sort(bySort) });
+    groups.push({ key: s.id, header: s.name, tasks: open.filter((tk) => tk.section_id === s.id).sort(bySort), move: { project_id: projectId, section_id: s.id } });
   }
 
   function createSection() {

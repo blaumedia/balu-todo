@@ -211,6 +211,18 @@ export const de: Record<TranslationKey, string> = {
   "project.deleteSection": "Abschnitt löschen",
   "project.deleteSectionConfirm": "Diesen Abschnitt löschen? Die Aufgaben bleiben erhalten und werden aus dem Abschnitt gelöst.",
 
+  // Screenreader-Ankündigungen für Drag & Drop; ein erfolgreicher Move bleibt
+  // sonst still (Ablehnungen meldet sync.rejected).
+  "dnd.pickedUp": "{title} aufgenommen",
+  "dnd.projectPickedUp": "Projekt {name} aufgenommen",
+  "dnd.overTarget": "Über {target}",
+  "dnd.overGeneric": "Über einer Liste",
+  "dnd.droppedTarget": "In {target} verschoben",
+  "dnd.staleTarget": "Die Aufgabe oder ihr Ziel existiert nicht mehr.",
+  "dnd.dropped": "Aufgabe abgelegt",
+  "dnd.projectDropped": "Projekt abgelegt",
+  "dnd.cancelled": "Verschieben abgebrochen",
+
   "date.today": "Heute",
   "date.tomorrow": "Morgen",
   "date.yesterday": "Gestern",
