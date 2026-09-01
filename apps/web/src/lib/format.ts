@@ -3,11 +3,13 @@
 import {
   relativeDate as domainRelativeDate,
   relativeTime as domainRelativeTime,
+  timestampLabel as domainTimestampLabel,
   type DateNames,
   type DateTone,
   type IsoDate,
   type IsoDateTime,
   type Locale,
+  type MetaDateNames,
 } from "@balu/domain";
 import type { TranslationKey } from "../i18n/index.js";
 
@@ -63,4 +65,36 @@ export function relativeTime(
   t: (k: TranslationKey) => string,
 ): string {
   return domainRelativeTime(iso, nowMs, locale, NAMES, t("time.justNow"));
+}
+
+// ── Absolute lifecycle timestamps (task detail meta line) ─────────────
+
+/** Absolute date with year, e.g. "Aug 3, 2026" (en) / "3. Aug. 2026" (de). */
+export function dateWithYear(iso: IsoDate, locale: Locale): string {
+  return new Intl.DateTimeFormat(localeTag(locale), {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(dateAtNoon(iso));
+}
+
+/**
+ * Local wall-clock time, "14:05". `hourCycle: "h23"` is pinned on purpose:
+ * left to the locale default en-US would print "2:05 PM" while the mobile app
+ * prints "14:05", which is exactly the cross-platform drift I7 exists to stop.
+ */
+export function timeHM(iso: IsoDateTime, locale: Locale): string {
+  return new Intl.DateTimeFormat(localeTag(locale), {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(iso));
+}
+
+const META_NAMES: MetaDateNames = { date: dateWithYear, time: timeHM };
+
+/** Absolute label for a task's created / changed / completed timestamp. */
+export function timestampLabel(iso: IsoDateTime, nowMs: number, locale: Locale): string {
+  return domainTimestampLabel(iso, nowMs, locale, META_NAMES);
 }

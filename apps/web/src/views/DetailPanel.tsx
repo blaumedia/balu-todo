@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { todayLocalISO, type Member, type Priority } from "@balu/domain";
+import { todayLocalISO, type Locale, type Member, type Priority, type Task } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
+import { timestampLabel } from "../lib/format.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import type { TranslationKey } from "../i18n/index.js";
@@ -25,6 +26,32 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 36 }}>
       <span style={{ width: 96, flex: "none", fontSize: "var(--text-secondary-size)", color: "var(--text-secondary)" }}>{label}</span>
       <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Read-only lifecycle line: created, last changed, and - for a finished task -
+ * completed. Rendered outside the editable block on purpose: it is not a
+ * control, and a viewer (whose fields are inert) must still be able to read it.
+ *
+ * "Changed", not "Edited": `updated_at` also moves when a task is reordered or
+ * ticked (contract §5.4 task_reorder / task_complete), so "Edited" would claim
+ * a content change that never happened.
+ */
+function MetaLine({ task, locale, t }: { task: Task; locale: Locale; t: (k: TranslationKey) => string }) {
+  const nowMs = Date.now();
+  const changed = task.updated_at > task.created_at; // same test as the comment "edited" marker
+  const items = [`${t("detail.metaCreated")} ${timestampLabel(task.created_at, nowMs, locale)}`];
+  if (changed) items.push(`${t("detail.metaChanged")} ${timestampLabel(task.updated_at, nowMs, locale)}`);
+  if (task.completed_at) items.push(`${t("detail.metaCompleted")} ${timestampLabel(task.completed_at, nowMs, locale)}`);
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
+      {items.map((item) => (
+        <span key={item} style={{ whiteSpace: "nowrap" }}>
+          {item}
+        </span>
+      ))}
     </div>
   );
 }
@@ -451,6 +478,8 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
             </Row>
           )}
         </div>
+
+        <MetaLine task={task} locale={locale} t={t} />
 
         <AttachmentsSection snapshot={snapshot} taskId={task.id} />
 
