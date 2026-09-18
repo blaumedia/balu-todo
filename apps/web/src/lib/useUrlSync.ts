@@ -47,6 +47,17 @@ export function useUrlSync(): void {
   // what the effect above would build, so it writes nothing: no echo loop.
   useEffect(() => {
     function onPop(): void {
+      const st = useApp.getState();
+      // An open overlay owns its input (the same rule Shell's keyboard map
+      // follows): Back must not silently retarget QuickAdd's project context or
+      // close the palette mid-selection. The address bar keeps the popped URL
+      // until the next view/task change reconciles it - a bounded, deliberate
+      // inconsistency.
+      if (st.quickAddOpen || st.paletteOpen) return;
+      // A focused title/notes field commits on blur, and removing a focused node
+      // does not fire blur - commit the pending edit before the state change
+      // below unmounts or refills the panel.
+      (globalThis.document?.activeElement as HTMLElement | null)?.blur?.();
       const loc = globalThis.location;
       if (!loc) return;
       const route = parseAppUrl(loc.pathname, loc.search);

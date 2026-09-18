@@ -224,12 +224,16 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
     setNotes(task?.notes ?? "");
   }, [task?.id, task?.title, task?.notes]);
 
-  // Self-heal a dangling selection - but only once the replica has hydrated
-  // (syncToken "*" = still empty), or a deep-linked ?task= would be cleared
-  // before the data it points at ever arrives.
+  // Self-heal a dangling selection - but only once the server has confirmed
+  // the replica (`status === "synced"`). Do NOT gate on syncToken: hydrate()
+  // restores it from localStorage before the network round-trip, so "!== '*"
+  // only proves a local cache was loaded, and a RETURNING user's stale replica
+  // would clear a deep-linked ?task= a frame before its data arrives. While
+  // offline the dangling link is deliberately kept - never discard a link on
+  // unconfirmed data; this self-heals once a sync succeeds.
   useEffect(() => {
-    if (selectedTaskId && !task && snapshot.syncToken !== "*") selectTask(null);
-  }, [selectedTaskId, task, selectTask, snapshot.syncToken]);
+    if (selectedTaskId && !task && snapshot.status === "synced") selectTask(null);
+  }, [selectedTaskId, task, selectTask, snapshot.status]);
 
   if (!task) return null;
 

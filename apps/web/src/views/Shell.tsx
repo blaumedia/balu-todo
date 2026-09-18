@@ -133,12 +133,18 @@ export function Shell() {
   }, []);
 
   // Deep-linked project that does not exist in this workspace's replica
-  // (deleted, or the link came from another workspace): fall back to Today
-  // once the replica has actually loaded - syncToken "*" means "not yet
-  // hydrated" (sync-client), and bailing earlier would discard every deep
-  // link on a cold start. replaceState: self-healing must not pollute Back.
+  // (deleted, or the link came from another workspace): fall back to Today once
+  // the server has confirmed the replica - `status === "synced"` is the only
+  // such signal. Do NOT gate on syncToken: hydrate() restores it from
+  // localStorage before the network round-trip, so "!== '*'" only proves a
+  // local cache was loaded, and a RETURNING user's stale replica would discard
+  // the deep link a frame before the delta carrying its data arrives.
+  // replaceState: self-healing must not pollute Back. While offline
+  // ("offline"/"error") a dangling link is deliberately kept rather than
+  // healed - never discard a link on unconfirmed data; this self-heals once a
+  // sync succeeds.
   useEffect(() => {
-    if (view.kind !== "project" || snapshot.syncToken === "*") return;
+    if (view.kind !== "project" || snapshot.status !== "synced") return;
     const exists = snapshot.projects.some((p) => p.id === view.projectId && !p.is_deleted);
     if (!exists) {
       markReplaceNext();
