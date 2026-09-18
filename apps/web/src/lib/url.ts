@@ -41,7 +41,11 @@ export function parseAppUrl(pathname: string, search: string): AppRoute | null {
     return list ? { view: { kind: "list", list }, taskId } : null;
   }
   if (seg.length === 2 && seg[0] === "project" && seg[1]) {
-    return { view: { kind: "project", projectId: decodeURIComponent(seg[1]) }, taskId };
+    try {
+      return { view: { kind: "project", projectId: decodeURIComponent(seg[1]) }, taskId };
+    } catch {
+      return null;
+    }
   }
   return null;
 }

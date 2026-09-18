@@ -23,6 +23,11 @@ describe("parseAppUrl", () => {
     expect(parseAppUrl("/project/a%2Fb", "")).toEqual({ view: { kind: "project", projectId: "a/b" }, taskId: null });
   });
 
+  it("returns null instead of throwing on malformed percent-encoding", () => {
+    expect(parseAppUrl("/project/100%", "")).toBeNull();
+    expect(parseAppUrl("/project/%zz", "")).toBeNull();
+  });
+
   it("extracts ?task= on lists and projects", () => {
     expect(parseAppUrl("/today", "?task=t9")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t9" });
     expect(parseAppUrl("/project/p1", "?task=t9")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: "t9" });
@@ -32,9 +37,25 @@ describe("parseAppUrl", () => {
     expect(parseAppUrl("/today", "?task=")).toEqual({ view: { kind: "list", list: "today" }, taskId: null });
   });
 
+  it("treats an empty pathname as today", () => {
+    expect(parseAppUrl("", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: null });
+  });
+
+  it("accepts a search string without the leading ?", () => {
+    expect(parseAppUrl("/today", "task=t1")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1" });
+  });
+
+  it("takes the first task param when it is repeated", () => {
+    expect(parseAppUrl("/today", "?task=a&task=b")).toEqual({ view: { kind: "list", list: "today" }, taskId: "a" });
+  });
+
   it("tolerates trailing slashes", () => {
     expect(parseAppUrl("/inbox/", "")).toEqual({ view: { kind: "list", list: "inbox" }, taskId: null });
     expect(parseAppUrl("/project/p1/", "")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: null });
+  });
+
+  it("keeps the task param with a trailing slash", () => {
+    expect(parseAppUrl("/today/", "?task=t1")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1" });
   });
 
   it("returns null for paths it does not own", () => {
@@ -79,5 +100,18 @@ describe("roundtrip", () => {
   it("canonicalises the / alias", () => {
     const r = parseAppUrl("/", "");
     expect(r && buildAppUrl(r.view, r.taskId)).toBe("/today");
+  });
+
+  it("round-trips a task id that needs encoding", () => {
+    const url = buildAppUrl({ kind: "list", list: "today" }, "a b&c=d");
+    const q = url.indexOf("?");
+    const [pathname, search] = [url.slice(0, q), url.slice(q)];
+    expect(parseAppUrl(pathname, search)?.taskId).toBe("a b&c=d");
+  });
+
+  it("round-trips a project id containing a literal %", () => {
+    const url = buildAppUrl({ kind: "project", projectId: "100%" }, null);
+    expect(url).toBe("/project/100%25");
+    expect(parseAppUrl(url, "")).toEqual({ view: { kind: "project", projectId: "100%" }, taskId: null });
   });
 });

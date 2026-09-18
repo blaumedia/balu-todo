@@ -27,7 +27,10 @@ export function useUrlSync(): void {
   useEffect(() => {
     const loc = globalThis.location;
     const hist = globalThis.history;
-    if (!loc || !hist) return;
+    if (!loc || !hist) {
+      replaceNext = false;
+      return;
+    }
     const next = buildAppUrl(view, selectedTaskId);
     if (next === loc.pathname + loc.search) {
       replaceNext = false;
