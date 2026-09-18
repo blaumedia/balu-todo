@@ -311,6 +311,8 @@ def test_delete_task_removes_it_everywhere(client, user, mcp_on):
     assert result["isError"] is False
     assert f'"id": "{task_id}"' in payload(result)
     assert '"title": "Weg"' in payload(result)
+    # The field is always present; null is the honest value for a one-off task.
+    assert '"recurrence": null' in payload(result)
 
     listed = call(client, key, "list_tasks", {"workspace_id": ws, "status": "all"})
     assert '"count": 0' in payload(listed)
@@ -319,15 +321,81 @@ def test_delete_task_removes_it_everywhere(client, user, mcp_on):
     assert "task not found" in payload(gone)
 
 
-def test_delete_task_twice_is_a_tool_error_not_a_protocol_error(client, user, mcp_on):
+def test_a_delete_task_retry_says_already_deleted_not_not_found(client, user, mcp_on):
     key = mcp_key(client, user)
     ws = user["workspace_id"]
     task_id = task_id_of(call(client, key, "create_task", {"workspace_id": ws, "title": "X"}))
     call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
 
-    again = call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+    # Still a tool error on a 200 JSON-RPC result, never a protocol error.
+    resp = rpc(
+        client,
+        key,
+        "tools/call",
+        {"name": "delete_task", "arguments": {"workspace_id": ws, "task_id": task_id}},
+    )
+    assert resp.status_code == 200
+    assert "error" not in resp.json()
+    again = resp.json()["result"]
     assert again["isError"] is True
-    assert "task not found" in payload(again)
+    assert "task already deleted" in payload(again)
+
+
+def test_delete_task_of_a_never_created_id_stays_generic(client, user, mcp_on):
+    """A missing id must not be reported as already-deleted: the distinction is
+    what tells an agent a retry is safe, and inverting it would let the message
+    be used to probe for rows the caller cannot see."""
+    import uuid as uuidlib
+
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    never = str(uuidlib.uuid4())
+
+    missing = call(client, key, "delete_task", {"workspace_id": ws, "task_id": never})
+    assert missing["isError"] is True
+    assert "task not found" in payload(missing)
+    assert "already deleted" not in payload(missing)
+
+
+def test_delete_task_of_a_foreign_deleted_row_stays_generic(client, user, mcp_on):
+    """Same distinction across workspaces: a soft-deleted row the caller is not a
+    member of must not answer "already deleted" (that would be a probe oracle)."""
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    task_id = task_id_of(call(client, key, "create_task", {"workspace_id": ws, "title": "Fremd"}))
+    call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+
+    other = register_user(client)
+    other_headers = auth_headers(other["access_token"])
+    me = client.get("/api/v1/me", headers=other_headers).json()
+    other_ws = me["memberships"][0]["workspace"]["id"]
+    other_key = mcp_key(client, {"headers": other_headers})
+
+    probe = call(client, other_key, "delete_task", {"workspace_id": other_ws, "task_id": task_id})
+    assert probe["isError"] is True
+    assert "task not found" in payload(probe)
+    assert "already deleted" not in payload(probe)
+
+
+def test_delete_task_ends_a_recurring_series(client, user, mcp_on):
+    """A recurring row is the whole series, so deleting it must not look like
+    skipping one occurrence - and the payload must name what was killed."""
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    created = sync(
+        client,
+        user,
+        "*",
+        [cmd("task_add", temp_id="r1", title="Muell rausbringen", recurrence="FREQ=WEEKLY")],
+    )
+    task_id = created["temp_id_mapping"]["r1"]
+
+    result = call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+    assert result["isError"] is False
+    assert '"recurrence": "FREQ=WEEKLY"' in payload(result)
+
+    full = sync(client, user, "*")
+    assert full["tasks"] == []
 
 
 def test_viewer_cannot_delete(client, user, mcp_on):
