@@ -235,6 +235,7 @@ def test_tools_list_advertises_schemas(client, user, mcp_on):
         "update_task",
         "complete_task",
         "reopen_task",
+        "delete_task",
         "add_comment",
     }
     for tool in tools:
@@ -299,6 +300,69 @@ def test_task_lifecycle_over_mcp(client, user, mcp_on):
     assert '"count": 1' in payload(open_tasks)
     completed_only = call(client, key, "list_tasks", {"workspace_id": ws, "status": "completed"})
     assert '"count": 0' in payload(completed_only)
+
+
+def test_delete_task_removes_it_everywhere(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    task_id = task_id_of(call(client, key, "create_task", {"workspace_id": ws, "title": "Weg"}))
+
+    result = call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+    assert result["isError"] is False
+    assert f'"id": "{task_id}"' in payload(result)
+    assert '"title": "Weg"' in payload(result)
+
+    listed = call(client, key, "list_tasks", {"workspace_id": ws, "status": "all"})
+    assert '"count": 0' in payload(listed)
+    gone = call(client, key, "get_task", {"workspace_id": ws, "task_id": task_id})
+    assert gone["isError"] is True
+    assert "task not found" in payload(gone)
+
+
+def test_delete_task_twice_is_a_tool_error_not_a_protocol_error(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    task_id = task_id_of(call(client, key, "create_task", {"workspace_id": ws, "title": "X"}))
+    call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+
+    again = call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+    assert again["isError"] is True
+    assert "task not found" in payload(again)
+
+
+def test_viewer_cannot_delete(client, user, mcp_on):
+    viewer = _join(client, user, role="viewer")
+    key = mcp_key(client, viewer)
+    ws = user["workspace_id"]
+    created = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="Bleibt")])
+    task_id = created["temp_id_mapping"]["t1"]
+
+    blocked = call(client, key, "delete_task", {"workspace_id": ws, "task_id": task_id})
+    assert blocked["isError"] is True
+    assert "viewer role is read-only" in payload(blocked)
+    still = call(client, key, "get_task", {"workspace_id": ws, "task_id": task_id})
+    assert still["isError"] is False
+
+
+def test_delete_task_cascades_to_subtasks_and_comments(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    parent = task_id_of(call(client, key, "create_task", {"workspace_id": ws, "title": "Eltern"}))
+    created = sync(
+        client, user, "*", [cmd("task_add", temp_id="s1", title="Kind", parent_task_id=parent)]
+    )
+    subtask_id = created["temp_id_mapping"]["s1"]
+    call(client, key, "add_comment", {"workspace_id": ws, "task_id": parent, "body": "weg damit"})
+
+    result = call(client, key, "delete_task", {"workspace_id": ws, "task_id": parent})
+    assert result["isError"] is False
+
+    sub = call(client, key, "get_task", {"workspace_id": ws, "task_id": subtask_id})
+    assert sub["isError"] is True
+    # Full sync delivers live objects only, so both rows and the comment are gone.
+    full = sync(client, user, "*")
+    assert full["tasks"] == []
+    assert full["comments"] == []
 
 
 def test_update_task_moves_project_and_section(client, user, mcp_on):

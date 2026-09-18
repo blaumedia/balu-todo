@@ -509,6 +509,22 @@ def t_reopen_task(ctx: ToolContext, args: dict) -> dict:
     return _completion(ctx, args, "task_uncomplete")
 
 
+def t_delete_task(ctx: ToolContext, args: dict) -> dict:
+    ws_id, role = _workspace(ctx, args)
+    task_id = _uuid_arg(args, "task_id")
+    task = _get_task(ctx, ws_id, task_id)
+    # Captured before the command applies: `_get_task` treats a soft-deleted row
+    # as not found, so the task cannot be re-read afterwards (unlike _completion).
+    title = task.title
+    _apply(
+        ctx,
+        ws_id,
+        role,
+        [Command(type="task_delete", uuid=str(uuid.uuid4()), args={"id": str(task_id)})],
+    )
+    return {"deleted": {"id": str(task_id), "title": title}}
+
+
 def t_add_comment(ctx: ToolContext, args: dict) -> dict:
     ws_id, role = _workspace(ctx, args)
     task_id = _uuid_arg(args, "task_id")
@@ -741,6 +757,19 @@ TOOLS: tuple[Tool, ...] = (
             ["workspace_id", "task_id"],
         ),
         handler=t_reopen_task,
+    ),
+    Tool(
+        name="delete_task",
+        description=(
+            "Delete a task. Its subtasks and their comments and attachments are "
+            "deleted with it. There is no undo over MCP - if the task is merely "
+            "finished, use complete_task instead."
+        ),
+        input_schema=_schema(
+            {"workspace_id": _WORKSPACE_ID, "task_id": _TASK_ID},
+            ["workspace_id", "task_id"],
+        ),
+        handler=t_delete_task,
     ),
     Tool(
         name="add_comment",
