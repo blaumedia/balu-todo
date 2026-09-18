@@ -224,9 +224,12 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
     setNotes(task?.notes ?? "");
   }, [task?.id, task?.title, task?.notes]);
 
+  // Self-heal a dangling selection - but only once the replica has hydrated
+  // (syncToken "*" = still empty), or a deep-linked ?task= would be cleared
+  // before the data it points at ever arrives.
   useEffect(() => {
-    if (selectedTaskId && !task) selectTask(null);
-  }, [selectedTaskId, task, selectTask]);
+    if (selectedTaskId && !task && snapshot.syncToken !== "*") selectTask(null);
+  }, [selectedTaskId, task, selectTask, snapshot.syncToken]);
 
   if (!task) return null;
 

@@ -4,6 +4,7 @@ import { todayLocalISO, type Priority } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
 import { applyMoveDrop, dragKind, getDragResolver, makeAnnouncements } from "../lib/drag.js";
 import { useT } from "../lib/useT.js";
+import { markReplaceNext, useUrlSync } from "../lib/useUrlSync.js";
 import { useApp } from "../store/app.js";
 import { useSnapshot } from "../store/useSync.js";
 import { Sidebar } from "./Sidebar.js";
@@ -29,6 +30,7 @@ export function Shell() {
   const view = useApp((s) => s.view);
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const { t } = useT();
+  useUrlSync();
 
   // The one DndContext for the whole app (DESIGN §5). Surfaces stay dumb: they
   // register a per-kind resolver and the handlers below decide whether a drop
@@ -129,6 +131,20 @@ export function Shell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Deep-linked project that does not exist in this workspace's replica
+  // (deleted, or the link came from another workspace): fall back to Today
+  // once the replica has actually loaded - syncToken "*" means "not yet
+  // hydrated" (sync-client), and bailing earlier would discard every deep
+  // link on a cold start. replaceState: self-healing must not pollute Back.
+  useEffect(() => {
+    if (view.kind !== "project" || snapshot.syncToken === "*") return;
+    const exists = snapshot.projects.some((p) => p.id === view.projectId && !p.is_deleted);
+    if (!exists) {
+      markReplaceNext();
+      useApp.getState().setView({ kind: "list", list: "today" });
+    }
+  }, [view, snapshot]);
 
   let content: React.ReactNode;
   if (view.kind === "settings") content = <SettingsView snapshot={snapshot} />;
