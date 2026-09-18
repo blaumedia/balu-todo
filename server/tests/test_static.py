@@ -82,3 +82,12 @@ def test_spa_fallback_real_files_keep_default_caching(spa):
     # Only the SPA shell gets the header; hashed assets stay cacheable.
     resp = spa.get("/app.js")
     assert resp.headers.get("cache-control") != "no-cache"
+
+
+def test_spa_fallback_direct_index_request_is_also_no_cache(spa):
+    # /index.html is the same document as the SPA shell, just reached through the
+    # real-file branch, so it must not get a different cache policy - a stale
+    # shell is exactly what makes a deploy blank the app.
+    resp = spa.get("/index.html")
+    assert resp.status_code == 200
+    assert resp.headers["cache-control"] == "no-cache"

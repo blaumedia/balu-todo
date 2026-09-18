@@ -176,6 +176,12 @@ def _mount_static(app: FastAPI) -> None:
             try:
                 candidate = (root / full_path).resolve()
                 if candidate.is_relative_to(root) and candidate.is_file():
+                    # The shell is also reachable directly as /index.html, and it
+                    # must carry the same no-cache policy however it is requested -
+                    # a stale shell is what blanks the app after a deploy. Hashed
+                    # assets under /assets keep default caching.
+                    if candidate == root / "index.html":
+                        return FileResponse(str(index), headers={"cache-control": "no-cache"})
                     return FileResponse(str(candidate))
             except (OSError, ValueError):
                 # A `%00` in the path makes resolve() raise ValueError, and a path

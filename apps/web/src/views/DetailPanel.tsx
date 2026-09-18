@@ -226,7 +226,7 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
 
   // Self-heal a dangling selection - but only once the server has confirmed
   // the replica (`status === "synced"`). Do NOT gate on syncToken: hydrate()
-  // restores it from localStorage before the network round-trip, so "!== '*"
+  // restores it from localStorage before the network round-trip, so "!== '*'
   // only proves a local cache was loaded, and a RETURNING user's stale replica
   // would clear a deep-linked ?task= a frame before its data arrives. While
   // offline the dangling link is deliberately kept - never discard a link on
