@@ -568,7 +568,7 @@ answered with one `application/json` response. No session id, no SSE, no batchin
   `tools/call` with `isError: true`, not a protocol error.
 
 **Tools** - `list_workspaces`, `list_projects`, `list_tasks`, `get_task`, `create_task`,
-`update_task`, `complete_task`, `reopen_task`, `add_comment`. Results are
+`update_task`, `complete_task`, `reopen_task`, `delete_task`, `add_comment`. Results are
 `content: [{type: "text", text: "<JSON>"}]`.
 
 Every mutation is expressed as a §5.4 command and applied through the same command

@@ -163,7 +163,7 @@ expire - treat it like a password, and use **Generate a new key** in settings if
 leaks (every client using the old one loses access immediately). Read-only viewers stay
 read-only over MCP too, and anything Claude changes syncs to web and mobile like any
 other client. Tools: `list_workspaces`, `list_projects`, `list_tasks`, `get_task`,
-`create_task`, `update_task`, `complete_task`, `reopen_task`, `add_comment`.
+`create_task`, `update_task`, `complete_task`, `reopen_task`, `delete_task`, `add_comment`.
 
 ## Repo layout
 

@@ -509,6 +509,34 @@ def t_reopen_task(ctx: ToolContext, args: dict) -> dict:
     return _completion(ctx, args, "task_uncomplete")
 
 
+def t_delete_task(ctx: ToolContext, args: dict) -> dict:
+    ws_id, role = _workspace(ctx, args)
+    task_id = _uuid_arg(args, "task_id")
+    try:
+        task = _get_task(ctx, ws_id, task_id)
+    except ToolError:
+        # A retry after a lost response lands here: the row is soft-deleted, so
+        # _get_task reports it as missing. Say which case it is - an agent that
+        # cannot tell "already gone" from "a bad id" may delete the wrong task
+        # on its second attempt. A foreign or never-existing id keeps the
+        # generic message so this cannot be used to probe another workspace.
+        row = ctx.db.get(Task, task_id)
+        if row is not None and row.is_deleted and row.workspace_id == ws_id:
+            raise ToolError("task already deleted") from None
+        raise
+    # Captured before the command applies: `_get_task` treats a soft-deleted row
+    # as not found, so the task cannot be re-read afterwards (unlike _completion).
+    title = task.title
+    recurrence = task.recurrence
+    _apply(
+        ctx,
+        ws_id,
+        role,
+        [Command(type="task_delete", uuid=str(uuid.uuid4()), args={"id": str(task_id)})],
+    )
+    return {"deleted": {"id": str(task_id), "title": title, "recurrence": recurrence}}
+
+
 def t_add_comment(ctx: ToolContext, args: dict) -> dict:
     ws_id, role = _workspace(ctx, args)
     task_id = _uuid_arg(args, "task_id")
@@ -741,6 +769,20 @@ TOOLS: tuple[Tool, ...] = (
             ["workspace_id", "task_id"],
         ),
         handler=t_reopen_task,
+    ),
+    Tool(
+        name="delete_task",
+        description=(
+            "Delete a task. Its subtasks and their comments and attachments are "
+            "deleted with it. There is no undo over MCP. Deleting a recurring "
+            "task ends the whole series, not just one occurrence - to skip a "
+            "single occurrence use complete_task instead."
+        ),
+        input_schema=_schema(
+            {"workspace_id": _WORKSPACE_ID, "task_id": _TASK_ID},
+            ["workspace_id", "task_id"],
+        ),
+        handler=t_delete_task,
     ),
     Tool(
         name="add_comment",
