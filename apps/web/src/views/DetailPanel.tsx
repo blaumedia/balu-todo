@@ -211,6 +211,7 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const focusDeadline = useApp((s) => s.focusDeadline);
   const selectTask = useApp((s) => s.selectTask);
+  const setFullscreen = useApp((s) => s.setFullscreen);
   const currentUserId = useApp((s) => s.user?.id) ?? null;
   const writable = canWrite(useMyRole());
   const today = todayLocalISO();
@@ -286,7 +287,10 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
             <Icon name="users" size={13} /> {t("members.readonlyHint")}
           </span>
         )}
-        <IconButton icon="x" label={t("common.cancel")} onClick={() => selectTask(null)} />
+        <div style={{ display: "flex", gap: 4 }}>
+          <IconButton icon="maximize-2" label={t("detail.fullscreen")} onClick={() => setFullscreen(task.id)} />
+          <IconButton icon="x" label={t("common.cancel")} onClick={() => selectTask(null)} />
+        </div>
       </div>
 
       <div style={{ padding: "0 20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>

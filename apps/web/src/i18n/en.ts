@@ -57,6 +57,11 @@ export const en = {
   "detail.metaChanged": "Changed",
   "detail.metaCompleted": "Completed",
 
+  "detail.fullscreen": "Open full screen",
+
+  "fullscreen.close": "Close full screen",
+  "fullscreen.noNotes": "No notes.",
+
   "assign.me": "Me",
 
   "comments.title": "Comments",

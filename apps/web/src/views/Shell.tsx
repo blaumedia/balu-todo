@@ -16,6 +16,7 @@ import { LogbookView } from "./LogbookView.js";
 import { ProjectView } from "./ProjectView.js";
 import { SettingsView } from "./SettingsView.js";
 import { DetailPanel } from "./DetailPanel.js";
+import { FullscreenTask } from "./FullscreenTask.js";
 import { QuickAdd } from "../quickadd/QuickAdd.js";
 import { CommandPalette } from "../palette/CommandPalette.js";
 import { Toast } from "../components/Toast.js";
@@ -62,6 +63,16 @@ export function Shell() {
         return;
       }
       if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
+
+      // The full-screen task view owns its keys too - but stays below Cmd-K/Cmd-N
+      // (checked above), so QuickAdd and the palette can open on top of it.
+      if (st.fullscreenTaskId) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          st.setFullscreen(null);
+        }
+        return;
+      }
 
       if (isTyping(e.target)) {
         if (e.key === "Escape") (e.target as HTMLElement).blur();
@@ -171,6 +182,7 @@ export function Shell() {
             {selectedTaskId && view.kind !== "settings" && <DetailPanel snapshot={snapshot} />}
           </div>
         </div>
+        <FullscreenTask />
         <QuickAdd />
         <CommandPalette />
         <Toast />

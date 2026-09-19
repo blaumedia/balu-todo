@@ -5,22 +5,40 @@ const LISTS = ["inbox", "today", "upcoming", "anytime", "someday", "logbook", "a
 
 describe("parseAppUrl", () => {
   it("maps / to today with no selection", () => {
-    expect(parseAppUrl("/", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: null });
+    expect(parseAppUrl("/", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: null, fullscreenTaskId: null });
   });
 
   it("parses every smart list path", () => {
     for (const l of LISTS) {
-      expect(parseAppUrl(`/${l}`, "")).toEqual({ view: { kind: "list", list: l }, taskId: null });
+      expect(parseAppUrl(`/${l}`, "")).toEqual({ view: { kind: "list", list: l }, taskId: null, fullscreenTaskId: null });
     }
   });
 
   it("parses /settings and ignores a task param there", () => {
-    expect(parseAppUrl("/settings", "?task=t1")).toEqual({ view: { kind: "settings" }, taskId: null });
+    expect(parseAppUrl("/settings", "?task=t1")).toEqual({ view: { kind: "settings" }, taskId: null, fullscreenTaskId: null });
   });
 
   it("parses /project/:id and decodes the id", () => {
-    expect(parseAppUrl("/project/p1", "")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: null });
-    expect(parseAppUrl("/project/a%2Fb", "")).toEqual({ view: { kind: "project", projectId: "a/b" }, taskId: null });
+    expect(parseAppUrl("/project/p1", "")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: null, fullscreenTaskId: null });
+    expect(parseAppUrl("/project/a%2Fb", "")).toEqual({ view: { kind: "project", projectId: "a/b" }, taskId: null, fullscreenTaskId: null });
+  });
+
+  it("parses /task/:id as fullscreen with the task also selected", () => {
+    expect(parseAppUrl("/task/t1", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1", fullscreenTaskId: "t1" });
+    expect(parseAppUrl("/task/a%2Fb", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: "a/b", fullscreenTaskId: "a/b" });
+  });
+
+  it("tolerates a trailing slash on /task/:id", () => {
+    expect(parseAppUrl("/task/t1/", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1", fullscreenTaskId: "t1" });
+  });
+
+  it("ignores a ?task= param on /task/:id - the path id wins", () => {
+    expect(parseAppUrl("/task/t1", "?task=t2")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1", fullscreenTaskId: "t1" });
+  });
+
+  it("returns null instead of throwing on malformed /task/:id encoding", () => {
+    expect(parseAppUrl("/task/100%", "")).toBeNull();
+    expect(parseAppUrl("/task/%zz", "")).toBeNull();
   });
 
   it("returns null instead of throwing on malformed percent-encoding", () => {
@@ -29,37 +47,37 @@ describe("parseAppUrl", () => {
   });
 
   it("extracts ?task= on lists and projects", () => {
-    expect(parseAppUrl("/today", "?task=t9")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t9" });
-    expect(parseAppUrl("/project/p1", "?task=t9")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: "t9" });
+    expect(parseAppUrl("/today", "?task=t9")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t9", fullscreenTaskId: null });
+    expect(parseAppUrl("/project/p1", "?task=t9")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: "t9", fullscreenTaskId: null });
   });
 
   it("treats an empty task param as no selection", () => {
-    expect(parseAppUrl("/today", "?task=")).toEqual({ view: { kind: "list", list: "today" }, taskId: null });
+    expect(parseAppUrl("/today", "?task=")).toEqual({ view: { kind: "list", list: "today" }, taskId: null, fullscreenTaskId: null });
   });
 
   it("treats an empty pathname as today", () => {
-    expect(parseAppUrl("", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: null });
+    expect(parseAppUrl("", "")).toEqual({ view: { kind: "list", list: "today" }, taskId: null, fullscreenTaskId: null });
   });
 
   it("accepts a search string without the leading ?", () => {
-    expect(parseAppUrl("/today", "task=t1")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1" });
+    expect(parseAppUrl("/today", "task=t1")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1", fullscreenTaskId: null });
   });
 
   it("takes the first task param when it is repeated", () => {
-    expect(parseAppUrl("/today", "?task=a&task=b")).toEqual({ view: { kind: "list", list: "today" }, taskId: "a" });
+    expect(parseAppUrl("/today", "?task=a&task=b")).toEqual({ view: { kind: "list", list: "today" }, taskId: "a", fullscreenTaskId: null });
   });
 
   it("tolerates trailing slashes", () => {
-    expect(parseAppUrl("/inbox/", "")).toEqual({ view: { kind: "list", list: "inbox" }, taskId: null });
-    expect(parseAppUrl("/project/p1/", "")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: null });
+    expect(parseAppUrl("/inbox/", "")).toEqual({ view: { kind: "list", list: "inbox" }, taskId: null, fullscreenTaskId: null });
+    expect(parseAppUrl("/project/p1/", "")).toEqual({ view: { kind: "project", projectId: "p1" }, taskId: null, fullscreenTaskId: null });
   });
 
   it("keeps the task param with a trailing slash", () => {
-    expect(parseAppUrl("/today/", "?task=t1")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1" });
+    expect(parseAppUrl("/today/", "?task=t1")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1", fullscreenTaskId: null });
   });
 
   it("returns null for paths it does not own", () => {
-    for (const p of ["/nope", "/project", "/project/a/b", "/invite/tok123", "/list/today", "/settings/x"]) {
+    for (const p of ["/nope", "/project", "/project/a/b", "/task", "/task/a/b", "/invite/tok123", "/list/today", "/settings/x"]) {
       expect(parseAppUrl(p, "")).toBeNull();
     }
   });
@@ -82,6 +100,13 @@ describe("buildAppUrl", () => {
     expect(buildAppUrl({ kind: "project", projectId: "p1" }, "t1")).toBe("/project/p1?task=t1");
     expect(buildAppUrl({ kind: "settings" }, "t1")).toBe("/settings");
   });
+
+  it("builds /task/:id when fullscreen is set, overriding view and task param", () => {
+    expect(buildAppUrl({ kind: "list", list: "today" }, null, "t1")).toBe("/task/t1");
+    expect(buildAppUrl({ kind: "list", list: "inbox" }, "t2", "t1")).toBe("/task/t1");
+    expect(buildAppUrl({ kind: "settings" }, null, "t1")).toBe("/task/t1");
+    expect(buildAppUrl({ kind: "project", projectId: "p1" }, null, "a/b")).toBe("/task/a%2Fb");
+  });
 });
 
 describe("roundtrip", () => {
@@ -92,7 +117,7 @@ describe("roundtrip", () => {
         const url = buildAppUrl(view, taskId);
         const q = url.indexOf("?");
         const [pathname, search] = q === -1 ? [url, ""] : [url.slice(0, q), url.slice(q)];
-        expect(parseAppUrl(pathname, search)).toEqual({ view, taskId: view.kind === "settings" ? null : taskId });
+        expect(parseAppUrl(pathname, search)).toEqual({ view, taskId: view.kind === "settings" ? null : taskId, fullscreenTaskId: null });
       }
     }
   });
@@ -112,6 +137,18 @@ describe("roundtrip", () => {
   it("round-trips a project id containing a literal %", () => {
     const url = buildAppUrl({ kind: "project", projectId: "100%" }, null);
     expect(url).toBe("/project/100%25");
-    expect(parseAppUrl(url, "")).toEqual({ view: { kind: "project", projectId: "100%" }, taskId: null });
+    expect(parseAppUrl(url, "")).toEqual({ view: { kind: "project", projectId: "100%" }, taskId: null, fullscreenTaskId: null });
+  });
+
+  it("round-trips fullscreen, losing the underlying view to today by design", () => {
+    const url = buildAppUrl({ kind: "project", projectId: "p1" }, "t1", "t1");
+    expect(url).toBe("/task/t1");
+    expect(parseAppUrl(url, "")).toEqual({ view: { kind: "list", list: "today" }, taskId: "t1", fullscreenTaskId: "t1" });
+  });
+
+  it("round-trips a fullscreen task id containing a literal %", () => {
+    const url = buildAppUrl({ kind: "list", list: "today" }, null, "100%");
+    expect(url).toBe("/task/100%25");
+    expect(parseAppUrl(url, "")).toEqual({ view: { kind: "list", list: "today" }, taskId: "100%", fullscreenTaskId: "100%" });
   });
 });
