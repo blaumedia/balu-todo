@@ -32,9 +32,11 @@ function Chip({ children }: { children: React.ReactNode }) {
 export function FullscreenTask() {
   const fullscreenTaskId = useApp((s) => s.fullscreenTaskId);
   const setFullscreen = useApp((s) => s.setFullscreen);
+  const showToast = useApp((s) => s.showToast);
   const { t, locale } = useT();
   const snapshot = useSnapshot();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const task: Task | undefined = snapshot.tasks.find((tk) => tk.id === fullscreenTaskId && !tk.is_deleted);
 
@@ -42,18 +44,24 @@ export function FullscreenTask() {
   // the replica (status === "synced"), same rule and same reasoning as
   // DetailPanel's selection heal: syncToken only proves a local cache loaded.
   // markReplaceNext: healing must not pollute Back (closing is a path change
-  // and would otherwise push).
+  // and would otherwise push). The toast is not optional: a /task/:id link is
+  // the shareable artifact of this feature, so "silently shows Today" is
+  // indistinguishable from "the link did nothing".
   useEffect(() => {
     if (fullscreenTaskId && !task && snapshot.status === "synced") {
+      showToast(t("fullscreen.notFound"));
       markReplaceNext();
       setFullscreen(null);
     }
-  }, [fullscreenTaskId, task, snapshot.status, setFullscreen]);
+  }, [fullscreenTaskId, task, snapshot.status, setFullscreen, showToast, t]);
 
-  // Initial focus on the dialog so screen readers announce it; Escape is
-  // handled by Shell's window-level key map, so focus is not required for it.
+  // Initial focus goes to the SCROLLER, not the dialog box. Browsers scroll the
+  // nearest scrollable ancestor of the focused node; every ancestor here is
+  // unscrollable (fixed backdrop, Shell root and body both overflow:hidden), so
+  // focusing the box left a long description unreadable by keyboard and screen
+  // reader. Escape is handled by Shell's window-level key map either way.
   useEffect(() => {
-    if (fullscreenTaskId && task) dialogRef.current?.focus();
+    if (fullscreenTaskId && task) scrollRef.current?.focus();
   }, [fullscreenTaskId, task?.id]);
 
   if (!task) return null;
@@ -88,7 +96,11 @@ export function FullscreenTask() {
         <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 12px 0" }}>
           <IconButton icon="x" label={t("fullscreen.close")} onClick={() => setFullscreen(null)} />
         </div>
-        <div style={{ overflowY: "auto", padding: "0 32px 32px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div
+          ref={scrollRef}
+          tabIndex={0}
+          style={{ overflowY: "auto", padding: "0 32px 32px", display: "flex", flexDirection: "column", gap: 16, outline: "none" }}
+        >
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600, color: "var(--text-primary)", fontFamily: "var(--font-sans)", overflowWrap: "break-word" }}>
             {task.title}
           </h1>

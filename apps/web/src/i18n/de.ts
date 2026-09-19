@@ -64,6 +64,7 @@ export const de: Record<TranslationKey, string> = {
 
   "fullscreen.close": "Vollbild schließen",
   "fullscreen.noNotes": "Keine Notizen.",
+  "fullscreen.notFound": "Diese Aufgabe ist hier nicht vorhanden.",
 
   "assign.me": "Ich",
 

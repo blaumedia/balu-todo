@@ -61,6 +61,7 @@ export const en = {
 
   "fullscreen.close": "Close full screen",
   "fullscreen.noNotes": "No notes.",
+  "fullscreen.notFound": "This task isn't in this workspace.",
 
   "assign.me": "Me",
 
