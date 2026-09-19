@@ -35,7 +35,6 @@ export function FullscreenTask() {
   const showToast = useApp((s) => s.showToast);
   const { t, locale } = useT();
   const snapshot = useSnapshot();
-  const dialogRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const task: Task | undefined = snapshot.tasks.find((tk) => tk.id === fullscreenTaskId && !tk.is_deleted);
@@ -80,7 +79,6 @@ export function FullscreenTask() {
       }}
     >
       <div
-        ref={dialogRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
