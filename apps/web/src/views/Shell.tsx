@@ -4,6 +4,7 @@ import { todayLocalISO, type Priority } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
 import { applyMoveDrop, dragKind, getDragResolver, makeAnnouncements } from "../lib/drag.js";
 import { useT } from "../lib/useT.js";
+import { markReplaceNext, useUrlSync } from "../lib/useUrlSync.js";
 import { useApp } from "../store/app.js";
 import { useSnapshot } from "../store/useSync.js";
 import { Sidebar } from "./Sidebar.js";
@@ -15,6 +16,7 @@ import { LogbookView } from "./LogbookView.js";
 import { ProjectView } from "./ProjectView.js";
 import { SettingsView } from "./SettingsView.js";
 import { DetailPanel } from "./DetailPanel.js";
+import { FullscreenTask } from "./FullscreenTask.js";
 import { QuickAdd } from "../quickadd/QuickAdd.js";
 import { CommandPalette } from "../palette/CommandPalette.js";
 import { Toast } from "../components/Toast.js";
@@ -29,6 +31,7 @@ export function Shell() {
   const view = useApp((s) => s.view);
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const { t } = useT();
+  useUrlSync();
 
   // The one DndContext for the whole app (DESIGN §5). Surfaces stay dumb: they
   // register a per-kind resolver and the handlers below decide whether a drop
@@ -60,6 +63,24 @@ export function Shell() {
         return;
       }
       if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
+
+      // The full-screen task view owns its keys too - but stays below Cmd-K/Cmd-N
+      // (checked above), so QuickAdd and the palette can open on top of it - and
+      // only while it is actually on screen. A dangling /task/:id whose task has
+      // not arrived yet keeps its URL (the heals wait for status === "synced"),
+      // and swallowing every key in that window would silently deaden the whole
+      // global shortcut map behind an overlay that is not rendered.
+      if (st.fullscreenTaskId) {
+        const snap = getSync()?.getSnapshot();
+        const shown = !!snap?.tasks.some((t) => t.id === st.fullscreenTaskId && !t.is_deleted);
+        if (shown) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            st.setFullscreen(null);
+          }
+          return;
+        }
+      }
 
       if (isTyping(e.target)) {
         if (e.key === "Escape") (e.target as HTMLElement).blur();
@@ -130,6 +151,26 @@ export function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // Deep-linked project that does not exist in this workspace's replica
+  // (deleted, or the link came from another workspace): fall back to Today once
+  // the server has confirmed the replica - `status === "synced"` is the only
+  // such signal. Do NOT gate on syncToken: hydrate() restores it from
+  // localStorage before the network round-trip, so "!== '*'" only proves a
+  // local cache was loaded, and a RETURNING user's stale replica would discard
+  // the deep link a frame before the delta carrying its data arrives.
+  // replaceState: self-healing must not pollute Back. While offline
+  // ("offline"/"error") a dangling link is deliberately kept rather than
+  // healed - never discard a link on unconfirmed data; this self-heals once a
+  // sync succeeds.
+  useEffect(() => {
+    if (view.kind !== "project" || snapshot.status !== "synced") return;
+    const exists = snapshot.projects.some((p) => p.id === view.projectId && !p.is_deleted);
+    if (!exists) {
+      markReplaceNext();
+      useApp.getState().setView({ kind: "list", list: "today" });
+    }
+  }, [view, snapshot]);
+
   let content: React.ReactNode;
   if (view.kind === "settings") content = <SettingsView snapshot={snapshot} />;
   else if (view.kind === "project") content = <ProjectView snapshot={snapshot} projectId={view.projectId} />;
@@ -149,6 +190,7 @@ export function Shell() {
             {selectedTaskId && view.kind !== "settings" && <DetailPanel snapshot={snapshot} />}
           </div>
         </div>
+        <FullscreenTask />
         <QuickAdd />
         <CommandPalette />
         <Toast />

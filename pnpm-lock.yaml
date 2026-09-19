@@ -186,6 +186,9 @@ importers:
       vite:
         specifier: ^6.0.5
         version: 6.4.3(@types/node@26.1.1)(lightningcss@1.33.0)(terser@5.49.0)(yaml@2.9.0)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@26.1.1)(lightningcss@1.33.0)(supports-color@8.1.1)(terser@5.49.0)
 
   packages/api-client:
     dependencies:

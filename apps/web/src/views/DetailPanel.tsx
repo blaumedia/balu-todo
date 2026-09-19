@@ -211,6 +211,7 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const focusDeadline = useApp((s) => s.focusDeadline);
   const selectTask = useApp((s) => s.selectTask);
+  const setFullscreen = useApp((s) => s.setFullscreen);
   const currentUserId = useApp((s) => s.user?.id) ?? null;
   const writable = canWrite(useMyRole());
   const today = todayLocalISO();
@@ -224,9 +225,16 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
     setNotes(task?.notes ?? "");
   }, [task?.id, task?.title, task?.notes]);
 
+  // Self-heal a dangling selection - but only once the server has confirmed
+  // the replica (`status === "synced"`). Do NOT gate on syncToken: hydrate()
+  // restores it from localStorage before the network round-trip, so "!== '*'
+  // only proves a local cache was loaded, and a RETURNING user's stale replica
+  // would clear a deep-linked ?task= a frame before its data arrives. While
+  // offline the dangling link is deliberately kept - never discard a link on
+  // unconfirmed data; this self-heals once a sync succeeds.
   useEffect(() => {
-    if (selectedTaskId && !task) selectTask(null);
-  }, [selectedTaskId, task, selectTask]);
+    if (selectedTaskId && !task && snapshot.status === "synced") selectTask(null);
+  }, [selectedTaskId, task, selectTask, snapshot.status]);
 
   if (!task) return null;
 
@@ -279,7 +287,10 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
             <Icon name="users" size={13} /> {t("members.readonlyHint")}
           </span>
         )}
-        <IconButton icon="x" label={t("common.cancel")} onClick={() => selectTask(null)} />
+        <div style={{ display: "flex", gap: 4 }}>
+          <IconButton icon="maximize-2" label={t("detail.fullscreen")} onClick={() => setFullscreen(task.id)} />
+          <IconButton icon="x" label={t("common.cancel")} onClick={() => selectTask(null)} />
+        </div>
       </div>
 
       <div style={{ padding: "0 20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>

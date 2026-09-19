@@ -1,10 +1,8 @@
-import type { Locale, Membership, SmartList, Theme, User, Workspace } from "@balu/domain";
+import type { Locale, Membership, Theme, User, Workspace } from "@balu/domain";
 import { create } from "zustand";
+import { parseAppUrl, type ViewSel } from "../lib/url.js";
 
-export type ViewSel =
-  | { kind: "list"; list: SmartList }
-  | { kind: "project"; projectId: string }
-  | { kind: "settings" };
+export type { ViewSel };
 
 type Boot = "loading" | "login" | "ready";
 
@@ -15,6 +13,11 @@ function initialTheme(): Theme {
   const v = globalThis.localStorage?.getItem(THEME_KEY);
   return v === "light" || v === "dark" || v === "system" ? v : "system";
 }
+
+/** Deep-link seed: parsed once at module init so a reload or a link opened
+ * before login restores the same view after boot. `/invite/:token` and
+ * garbage parse to null and fall back to today. */
+const initialRoute = parseAppUrl(globalThis.location?.pathname ?? "/", globalThis.location?.search ?? "");
 
 /** Last-used workspace id (contract §7 multi-workspace), persisted locally. */
 export function lastWorkspaceId(): string | null {
@@ -31,6 +34,7 @@ export interface AppState {
   memberships: Membership[];
   view: ViewSel;
   selectedTaskId: string | null;
+  fullscreenTaskId: string | null;
   focusDeadline: boolean;
   quickAddOpen: boolean;
   paletteOpen: boolean;
@@ -52,6 +56,7 @@ export interface AppState {
   setWorkspace(workspace: Workspace): void;
   setView(view: ViewSel): void;
   selectTask(id: string | null, focusDeadline?: boolean): void;
+  setFullscreen(id: string | null): void;
   setQuickAdd(open: boolean): void;
   setPalette(open: boolean): void;
   setTheme(theme: Theme): void;
@@ -67,8 +72,9 @@ export const useApp = create<AppState>((set, get) => ({
   user: null,
   workspace: null,
   memberships: [],
-  view: { kind: "list", list: "today" },
-  selectedTaskId: null,
+  view: initialRoute?.view ?? { kind: "list", list: "today" },
+  selectedTaskId: initialRoute?.taskId ?? null,
+  fullscreenTaskId: initialRoute?.fullscreenTaskId ?? null,
   focusDeadline: false,
   quickAddOpen: false,
   paletteOpen: false,
@@ -95,10 +101,11 @@ export const useApp = create<AppState>((set, get) => ({
   setMemberships: (memberships) => set({ memberships }),
   setWorkspace: (workspace) => {
     rememberWorkspaceId(workspace.id);
-    set({ workspace, view: { kind: "list", list: "today" }, selectedTaskId: null, focusedIndex: -1 });
+    set({ workspace, view: { kind: "list", list: "today" }, selectedTaskId: null, fullscreenTaskId: null, focusedIndex: -1 });
   },
-  setView: (view) => set({ view, selectedTaskId: null, focusedIndex: -1 }),
+  setView: (view) => set({ view, selectedTaskId: null, fullscreenTaskId: null, focusedIndex: -1 }),
   selectTask: (selectedTaskId, focusDeadline = false) => set({ selectedTaskId, focusDeadline }),
+  setFullscreen: (fullscreenTaskId) => set({ fullscreenTaskId }),
   setQuickAdd: (quickAddOpen) => set({ quickAddOpen }),
   setPalette: (paletteOpen) => set({ paletteOpen }),
   setTheme: (theme) => {
@@ -125,6 +132,7 @@ export const useApp = create<AppState>((set, get) => ({
       memberships: [],
       view: { kind: "list", list: "today" },
       selectedTaskId: null,
+      fullscreenTaskId: null,
       quickAddOpen: false,
       paletteOpen: false,
     }),
