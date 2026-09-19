@@ -34,6 +34,7 @@ export interface AppState {
   memberships: Membership[];
   view: ViewSel;
   selectedTaskId: string | null;
+  fullscreenTaskId: string | null;
   focusDeadline: boolean;
   quickAddOpen: boolean;
   paletteOpen: boolean;
@@ -55,6 +56,7 @@ export interface AppState {
   setWorkspace(workspace: Workspace): void;
   setView(view: ViewSel): void;
   selectTask(id: string | null, focusDeadline?: boolean): void;
+  setFullscreen(id: string | null): void;
   setQuickAdd(open: boolean): void;
   setPalette(open: boolean): void;
   setTheme(theme: Theme): void;
@@ -72,6 +74,7 @@ export const useApp = create<AppState>((set, get) => ({
   memberships: [],
   view: initialRoute?.view ?? { kind: "list", list: "today" },
   selectedTaskId: initialRoute?.taskId ?? null,
+  fullscreenTaskId: initialRoute?.fullscreenTaskId ?? null,
   focusDeadline: false,
   quickAddOpen: false,
   paletteOpen: false,
@@ -98,10 +101,11 @@ export const useApp = create<AppState>((set, get) => ({
   setMemberships: (memberships) => set({ memberships }),
   setWorkspace: (workspace) => {
     rememberWorkspaceId(workspace.id);
-    set({ workspace, view: { kind: "list", list: "today" }, selectedTaskId: null, focusedIndex: -1 });
+    set({ workspace, view: { kind: "list", list: "today" }, selectedTaskId: null, fullscreenTaskId: null, focusedIndex: -1 });
   },
-  setView: (view) => set({ view, selectedTaskId: null, focusedIndex: -1 }),
+  setView: (view) => set({ view, selectedTaskId: null, fullscreenTaskId: null, focusedIndex: -1 }),
   selectTask: (selectedTaskId, focusDeadline = false) => set({ selectedTaskId, focusDeadline }),
+  setFullscreen: (fullscreenTaskId) => set({ fullscreenTaskId }),
   setQuickAdd: (quickAddOpen) => set({ quickAddOpen }),
   setPalette: (paletteOpen) => set({ paletteOpen }),
   setTheme: (theme) => {
@@ -128,6 +132,7 @@ export const useApp = create<AppState>((set, get) => ({
       memberships: [],
       view: { kind: "list", list: "today" },
       selectedTaskId: null,
+      fullscreenTaskId: null,
       quickAddOpen: false,
       paletteOpen: false,
     }),

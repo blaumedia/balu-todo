@@ -16,6 +16,7 @@ import { LogbookView } from "./LogbookView.js";
 import { ProjectView } from "./ProjectView.js";
 import { SettingsView } from "./SettingsView.js";
 import { DetailPanel } from "./DetailPanel.js";
+import { FullscreenTask } from "./FullscreenTask.js";
 import { QuickAdd } from "../quickadd/QuickAdd.js";
 import { CommandPalette } from "../palette/CommandPalette.js";
 import { Toast } from "../components/Toast.js";
@@ -62,6 +63,24 @@ export function Shell() {
         return;
       }
       if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
+
+      // The full-screen task view owns its keys too - but stays below Cmd-K/Cmd-N
+      // (checked above), so QuickAdd and the palette can open on top of it - and
+      // only while it is actually on screen. A dangling /task/:id whose task has
+      // not arrived yet keeps its URL (the heals wait for status === "synced"),
+      // and swallowing every key in that window would silently deaden the whole
+      // global shortcut map behind an overlay that is not rendered.
+      if (st.fullscreenTaskId) {
+        const snap = getSync()?.getSnapshot();
+        const shown = !!snap?.tasks.some((t) => t.id === st.fullscreenTaskId && !t.is_deleted);
+        if (shown) {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            st.setFullscreen(null);
+          }
+          return;
+        }
+      }
 
       if (isTyping(e.target)) {
         if (e.key === "Escape") (e.target as HTMLElement).blur();
@@ -171,6 +190,7 @@ export function Shell() {
             {selectedTaskId && view.kind !== "settings" && <DetailPanel snapshot={snapshot} />}
           </div>
         </div>
+        <FullscreenTask />
         <QuickAdd />
         <CommandPalette />
         <Toast />

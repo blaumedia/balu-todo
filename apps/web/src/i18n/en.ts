@@ -57,6 +57,12 @@ export const en = {
   "detail.metaChanged": "Changed",
   "detail.metaCompleted": "Completed",
 
+  "detail.fullscreen": "Open full screen",
+
+  "fullscreen.close": "Close full screen",
+  "fullscreen.noNotes": "No notes.",
+  "fullscreen.notFound": "This task isn't in this workspace.",
+
   "assign.me": "Me",
 
   "comments.title": "Comments",

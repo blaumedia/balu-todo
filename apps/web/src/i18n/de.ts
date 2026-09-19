@@ -60,6 +60,12 @@ export const de: Record<TranslationKey, string> = {
   "detail.metaChanged": "Geändert",
   "detail.metaCompleted": "Erledigt",
 
+  "detail.fullscreen": "Vollbild öffnen",
+
+  "fullscreen.close": "Vollbild schließen",
+  "fullscreen.noNotes": "Keine Notizen.",
+  "fullscreen.notFound": "Diese Aufgabe ist hier nicht vorhanden.",
+
   "assign.me": "Ich",
 
   "comments.title": "Kommentare",
