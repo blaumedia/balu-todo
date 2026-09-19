@@ -1,10 +1,8 @@
-import type { Locale, Membership, SmartList, Theme, User, Workspace } from "@balu/domain";
+import type { Locale, Membership, Theme, User, Workspace } from "@balu/domain";
 import { create } from "zustand";
+import { parseAppUrl, type ViewSel } from "../lib/url.js";
 
-export type ViewSel =
-  | { kind: "list"; list: SmartList }
-  | { kind: "project"; projectId: string }
-  | { kind: "settings" };
+export type { ViewSel };
 
 type Boot = "loading" | "login" | "ready";
 
@@ -15,6 +13,11 @@ function initialTheme(): Theme {
   const v = globalThis.localStorage?.getItem(THEME_KEY);
   return v === "light" || v === "dark" || v === "system" ? v : "system";
 }
+
+/** Deep-link seed: parsed once at module init so a reload or a link opened
+ * before login restores the same view after boot. `/invite/:token` and
+ * garbage parse to null and fall back to today. */
+const initialRoute = parseAppUrl(globalThis.location?.pathname ?? "/", globalThis.location?.search ?? "");
 
 /** Last-used workspace id (contract §7 multi-workspace), persisted locally. */
 export function lastWorkspaceId(): string | null {
@@ -67,8 +70,8 @@ export const useApp = create<AppState>((set, get) => ({
   user: null,
   workspace: null,
   memberships: [],
-  view: { kind: "list", list: "today" },
-  selectedTaskId: null,
+  view: initialRoute?.view ?? { kind: "list", list: "today" },
+  selectedTaskId: initialRoute?.taskId ?? null,
   focusDeadline: false,
   quickAddOpen: false,
   paletteOpen: false,

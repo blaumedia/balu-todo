@@ -173,10 +173,24 @@ def _mount_static(app: FastAPI) -> None:
         # (`%2e%2e%2f`, `..%2f`, …). Resolve and require containment under the
         # static root before serving anything off disk.
         if full_path:
-            candidate = (root / full_path).resolve()
-            if candidate.is_relative_to(root) and candidate.is_file():
-                return FileResponse(str(candidate))
-        return FileResponse(str(index))
+            try:
+                candidate = (root / full_path).resolve()
+                if candidate.is_relative_to(root) and candidate.is_file():
+                    # The shell is also reachable directly as /index.html, and it
+                    # must carry the same no-cache policy however it is requested -
+                    # a stale shell is what blanks the app after a deploy. Hashed
+                    # assets under /assets keep default caching.
+                    if candidate == root / "index.html":
+                        return FileResponse(str(index), headers={"cache-control": "no-cache"})
+                    return FileResponse(str(candidate))
+            except (OSError, ValueError):
+                # A `%00` in the path makes resolve() raise ValueError, and a path
+                # past the platform's limit makes is_file() raise OSError
+                # (pathlib does not ignore ENAMETOOLONG). Both are ordinary junk
+                # from a scanner or a mangled shared link - they must fall
+                # through to the SPA shell, not 500 with a traceback.
+                pass
+        return FileResponse(str(index), headers={"cache-control": "no-cache"})
 
 
 app = create_app()

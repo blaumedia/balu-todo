@@ -38,4 +38,8 @@ export async function logout(): Promise<void> {
   }
   purgeLocalData();
   useApp.getState().reset();
+  // The address bar must not keep the previous account's project/task ids on
+  // screen. Shell unmounts with `reset()`, so useUrlSync's effect never runs to
+  // rewrite it - do it here. replaceState, not assign(): no new history entry.
+  globalThis.history?.replaceState(null, "", "/");
 }
