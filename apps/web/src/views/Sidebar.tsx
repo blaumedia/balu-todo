@@ -37,7 +37,7 @@ const SMART: Array<[SmartList, string, TranslationKey]> = [
 const NO_HOVER = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(hover: none)").matches;
 
 /** A project row with its hover-revealed "..." trigger and right-click menu. "..." toggles the menu and right-click opens it; `menu` is absent for viewers. */
-function ProjectItem({ project, active, onClick, menu }: { project: Project; active: boolean; onClick: () => void; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor): void } }) {
+function ProjectItem({ project, active, onClick, menu }: { project: Project; active: boolean; onClick: () => void; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor, opener: HTMLElement): void } }) {
   const { t } = useT();
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -67,8 +67,10 @@ function ProjectItem({ project, active, onClick, menu }: { project: Project; act
             const anchor = { x: r.left, y: r.bottom + 4 };
             // Left-click toggles (the menu's outside-mousedown close fires
             // before this click, so a plain open would immediately reopen);
-            // right-click always opens.
-            menu.toggle(anchor);
+            // right-click always opens. Pass the button itself as the return
+            // focus target: Safari and Firefox on macOS do not focus buttons
+            // on mousedown, so the menu cannot recover it from activeElement.
+            menu.toggle(anchor, e.currentTarget);
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -85,7 +87,7 @@ function ProjectItem({ project, active, onClick, menu }: { project: Project; act
   );
 }
 
-function SortableProject({ project, active, onClick, draggable, menu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor): void } }) {
+function SortableProject({ project, active, onClick, draggable, menu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor, opener: HTMLElement): void } }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active: dragActive } = useSortable({
     id: project.id,
     disabled: !draggable,
@@ -122,7 +124,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-  const [menu, setMenu] = useState<{ projectId: string; anchor: MenuAnchor } | null>(null);
+  const [menu, setMenu] = useState<{ projectId: string; anchor: MenuAnchor; returnFocus?: HTMLElement | null } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   // Guards against the unmount blur re-committing a rename that Enter or
@@ -182,9 +184,25 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const menuFor = writable
     ? (p: Project) => ({
         open: (anchor: MenuAnchor) => setMenu({ projectId: p.id, anchor }),
-        toggle: (anchor: MenuAnchor) => setMenu((m) => (m?.projectId === p.id ? null : { projectId: p.id, anchor })),
+        toggle: (anchor: MenuAnchor, opener: HTMLElement) => setMenu((m) => (m?.projectId === p.id ? null : { projectId: p.id, anchor, returnFocus: opener })),
       })
     : undefined;
+
+  // A viewer (role revoked while the menu or a rename is live) must not keep a
+  // menu full of write actions or an editable rename input. renameDone is set
+  // first so the unmounting input's blur does not re-send the rename.
+  useEffect(() => {
+    if (writable) return;
+    renameDone.current = true;
+    setMenu(null);
+    setRenamingId(null);
+  }, [writable]);
+
+  // The menu's project can vanish underneath it (deleted elsewhere in the
+  // snapshot); drop the dangling state instead of silently rendering nothing.
+  useEffect(() => {
+    if (menu && !snapshot.projects.some((p) => p.id === menu.projectId && !p.is_deleted)) setMenu(null);
+  }, [menu, snapshot.projects]);
 
   // Project reorder → per-project `project_update` sort_order (contract §5.4 has
   // no project_reorder command; sort_order patches are the sanctioned path).
@@ -404,9 +422,9 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
         )}
         <WorkspaceSwitcher />
       </div>
-      {menu && (() => {
+      {menu && writable && (() => {
         const p = snapshot.projects.find((x) => x.id === menu.projectId && !x.is_deleted);
-        return p ? <ProjectMenu key={p.id} project={p} anchor={menu.anchor} onClose={closeMenu} onRename={() => startRename(p)} /> : null;
+        return p ? <ProjectMenu key={p.id} project={p} anchor={menu.anchor} returnFocus={menu.returnFocus} onClose={closeMenu} onRename={() => startRename(p)} /> : null;
       })()}
     </aside>
   );

@@ -25,17 +25,22 @@ const WIDTH = 220;
  * the items (used for the project color swatches). A trigger that toggles its
  * own menu marks itself with `data-menu-trigger`: the outside-mousedown close
  * ignores mousedown on such an element, so the trigger's own click can decide
- * open/close instead of the close instantly reopening it. On close, focus
- * returns to the element focused when the menu opened, but only if focus has
+ * open/close instead of the close instantly reopening it. A click-opened menu
+ * passes its trigger as `returnFocus` (Safari and Firefox on macOS do not focus
+ * buttons on mousedown, so `document.activeElement` is not the trigger there);
+ * without it (the right-click path) the opener is the element focused when the
+ * menu opened. On close, focus returns to the opener, but only if focus has
  * since fallen to <body>; focus taken deliberately elsewhere is left alone.
  */
-export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor; items: MenuItem[]; onClose: () => void; children?: ReactNode }) {
+export function Menu({ anchor, items, onClose, returnFocus, children }: { anchor: MenuAnchor; items: MenuItem[]; onClose: () => void; returnFocus?: HTMLElement | null; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MenuAnchor>(anchor);
-  // Capture the opener at first render, not inside the effect: StrictMode
+  // Fallback opener, captured at first render, not inside the effect: StrictMode
   // double-invokes effects, and the second run would otherwise capture the
   // first run's focused menuitem as the opener, making the restore inert in dev.
-  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+  const [fallbackOpener] = useState(() => document.activeElement as HTMLElement | null);
+  // The opener to restore focus to on close; resolved once in the mount effect below.
+  const openerRef = useRef<HTMLElement | null>(null);
   // Callers often pass a fresh closure each render; keep it in a ref so the
   // listeners below are bound once instead of being re-bound (and re-focusing)
   // on every parent re-render.
@@ -53,6 +58,7 @@ export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor;
   }, [anchor]);
 
   useEffect(() => {
+    openerRef.current = returnFocus ?? fallbackOpener;
     // Focus the first item once on open (not on every parent re-render).
     ref.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
     return () => {
@@ -60,9 +66,13 @@ export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor;
       // selection dropping focus). If focus moved elsewhere on its own - e.g.
       // a rename input mounting in the same commit this menu unmounts - leave
       // it where it is.
+      const opener = openerRef.current;
       if (opener?.isConnected && (document.activeElement ?? document.body) === document.body) opener.focus();
     };
-  }, [opener]);
+    // Run once on mount: returnFocus and fallbackOpener are fixed for this
+    // mount (the menu unmounts and remounts per open).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {

@@ -4,7 +4,7 @@ import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { Menu, type MenuAnchor, type MenuItem } from "../components/Menu.js";
 
-export function ProjectMenu({ project, anchor, onClose, onRename }: { project: Project; anchor: MenuAnchor; onClose: () => void; onRename: () => void }) {
+export function ProjectMenu({ project, anchor, onClose, onRename, returnFocus }: { project: Project; anchor: MenuAnchor; onClose: () => void; onRename: () => void; returnFocus?: HTMLElement | null }) {
   const { t } = useT();
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
@@ -33,7 +33,7 @@ export function ProjectMenu({ project, anchor, onClose, onRename }: { project: P
   ];
 
   return (
-    <Menu anchor={anchor} items={items} onClose={onClose}>
+    <Menu anchor={anchor} items={items} onClose={onClose} returnFocus={returnFocus}>
       <div role="group" aria-label={t("project.color")} style={{ display: "grid", gridTemplateColumns: "repeat(6, 24px)", gap: 6, padding: "6px 10px 8px" }}>
         {PROJECT_COLORS.map((c) => {
           const selected = c === project.color;
