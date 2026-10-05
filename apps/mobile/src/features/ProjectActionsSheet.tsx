@@ -35,6 +35,12 @@ export function ProjectActionsSheet() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // The project can vanish remotely (deleted on another client) while the
+  // sheet is open; close and clear the store id so it does not dangle.
+  useEffect(() => {
+    if (projectId && !project) close();
+  }, [projectId, project, close]);
+
   const visible = projectId != null && project != null && writable;
 
   let body: ReactNode = null;

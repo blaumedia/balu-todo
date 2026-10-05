@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type DragEndEvent } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -37,7 +37,7 @@ const SMART: Array<[SmartList, string, TranslationKey]> = [
 const NO_HOVER = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(hover: none)").matches;
 
 /** A project row with its hover-revealed "..." trigger and right-click menu. `onMenu` is absent for viewers. */
-function ProjectItem({ project, active, onClick, onMenu }: { project: Project; active: boolean; onClick: () => void; onMenu?: (anchor: MenuAnchor) => void }) {
+function ProjectItem({ project, active, onClick, onMenu, onToggleMenu }: { project: Project; active: boolean; onClick: () => void; onMenu?: (anchor: MenuAnchor) => void; onToggleMenu?: (anchor: MenuAnchor) => void }) {
   const { t } = useT();
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -60,10 +60,16 @@ function ProjectItem({ project, active, onClick, onMenu }: { project: Project; a
           icon="ellipsis"
           size="sm"
           label={t("project.actions")}
+          data-menu-trigger=""
           onClick={(e) => {
             e.stopPropagation();
             const r = e.currentTarget.getBoundingClientRect();
-            onMenu({ x: r.left, y: r.bottom + 4 });
+            const anchor = { x: r.left, y: r.bottom + 4 };
+            // Left-click toggles (the menu's outside-mousedown close fires
+            // before this click, so a plain open would immediately reopen);
+            // right-click always opens.
+            if (onToggleMenu) onToggleMenu(anchor);
+            else onMenu?.(anchor);
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -80,7 +86,7 @@ function ProjectItem({ project, active, onClick, onMenu }: { project: Project; a
   );
 }
 
-function SortableProject({ project, active, onClick, draggable, onMenu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; onMenu?: (anchor: MenuAnchor) => void }) {
+function SortableProject({ project, active, onClick, draggable, onMenu, onToggleMenu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; onMenu?: (anchor: MenuAnchor) => void; onToggleMenu?: (anchor: MenuAnchor) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active: dragActive } = useSortable({
     id: project.id,
     disabled: !draggable,
@@ -102,7 +108,7 @@ function SortableProject({ project, active, onClick, draggable, onMenu }: { proj
       }}
       {...(draggable ? { ...attributes, ...listeners } : {})}
     >
-      <ProjectItem project={project} active={active} onClick={onClick} onMenu={onMenu} />
+      <ProjectItem project={project} active={active} onClick={onClick} onMenu={onMenu} onToggleMenu={onToggleMenu} />
     </div>
   );
 }
@@ -120,6 +126,9 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const [menu, setMenu] = useState<{ projectId: string; anchor: MenuAnchor } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // Guards against the unmount blur re-committing a rename that Enter or
+  // Escape already settled (unmounting the focused input fires blur).
+  const renameDone = useRef(false);
 
   const user = useApp((s) => s.user);
   const today = todayLocalISO();
@@ -147,17 +156,22 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   }
 
   function startRename(p: Project) {
+    renameDone.current = false;
     setRenameValue(p.name);
     setRenamingId(p.id);
   }
 
-  function commitRename(p: Project) {
+  function finishRename(p: Project, save: boolean) {
+    if (renameDone.current) return;
+    renameDone.current = true;
     const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
+    if (save && trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
     setRenamingId(null);
   }
 
+  const closeMenu = useCallback(() => setMenu(null), []);
   const openMenu = writable ? (p: Project) => (anchor: MenuAnchor) => setMenu({ projectId: p.id, anchor }) : undefined;
+  const toggleMenu = writable ? (p: Project) => (anchor: MenuAnchor) => setMenu((m) => (m?.projectId === p.id ? null : { projectId: p.id, anchor })) : undefined;
 
   // Project reorder → per-project `project_update` sort_order (contract §5.4 has
   // no project_reorder command; sort_order patches are the sanctioned path).
@@ -195,10 +209,10 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
         value={renameValue}
         onChange={(e) => setRenameValue(e.target.value)}
         onFocus={(e) => e.currentTarget.select()}
-        onBlur={() => commitRename(p)}
+        onBlur={() => finishRename(p, true)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") commitRename(p);
-          if (e.key === "Escape") setRenamingId(null);
+          if (e.key === "Enter") finishRename(p, true);
+          if (e.key === "Escape") finishRename(p, false);
         }}
         style={{
           height: 34,
@@ -293,6 +307,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
                   onClick={() => setView({ kind: "project", projectId: p.id })}
                   draggable
                   onMenu={openMenu?.(p)}
+                  onToggleMenu={toggleMenu?.(p)}
                 />
               ),
             )}
@@ -364,6 +379,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
                     active={view.kind === "project" && view.projectId === p.id}
                     onClick={() => setView({ kind: "project", projectId: p.id })}
                     onMenu={openMenu?.(p)}
+                    onToggleMenu={toggleMenu?.(p)}
                   />
                 ),
               )}
@@ -382,7 +398,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       </div>
       {menu && (() => {
         const p = snapshot.projects.find((x) => x.id === menu.projectId && !x.is_deleted);
-        return p ? <ProjectMenu project={p} anchor={menu.anchor} onClose={() => setMenu(null)} onRename={() => startRename(p)} /> : null;
+        return p ? <ProjectMenu project={p} anchor={menu.anchor} onClose={closeMenu} onRename={() => startRename(p)} /> : null;
       })()}
     </aside>
   );

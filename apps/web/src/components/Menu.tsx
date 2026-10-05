@@ -27,6 +27,11 @@ const WIDTH = 220;
 export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor; items: MenuItem[]; onClose: () => void; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MenuAnchor>(anchor);
+  // Callers often pass a fresh closure each render; keep it in a ref so the
+  // listeners below are bound once instead of being re-bound (and re-focusing)
+  // on every parent re-render.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   // Keep the menu inside the viewport (a row near the bottom of the sidebar
   // would otherwise open off-screen).
@@ -39,13 +44,31 @@ export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor;
   }, [anchor]);
 
   useEffect(() => {
+    // Focus the first item once on open (not on every parent re-render), and
+    // remember what held focus so it can be reclaimed on close.
+    const opener = document.activeElement as HTMLElement | null;
     ref.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
+    return () => {
+      // Restore focus to the opener only if it fell to <body> (Escape or item
+      // selection dropping focus). If focus moved elsewhere on its own - e.g.
+      // a rename input mounting in the same commit this menu unmounts - leave
+      // it where it is.
+      if (opener?.isConnected && (document.activeElement ?? document.body) === document.body) opener.focus();
+    };
+  }, []);
+
+  useEffect(() => {
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as HTMLElement;
+      if (ref.current?.contains(target)) return;
+      // The "..." trigger toggles its own menu; ignoring its mousedown keeps
+      // the outside-close from immediately reopening it.
+      if (target?.closest?.("[data-menu-trigger]")) return;
+      onCloseRef.current();
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [onClose]);
+  }, []);
 
   function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.key === "Escape") {
