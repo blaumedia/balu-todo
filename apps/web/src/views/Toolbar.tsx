@@ -2,9 +2,12 @@ import type { Theme } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
-import { api } from "../lib/clients.js";
+import { api, getSync } from "../lib/clients.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { syncLabelKey } from "../components/SyncIndicator.js";
 import { SyncIndicator } from "../components/SyncIndicator.js";
+import { Badge } from "../components/Badge.js";
+import { Button } from "../components/Button.js";
 import { IconButton } from "../components/IconButton.js";
 import { Icon } from "../components/Icon.js";
 import { ProgressRing } from "../components/ProgressRing.js";
@@ -23,12 +26,15 @@ export function Toolbar({ snapshot }: { snapshot: Snapshot }) {
 
   let title = "Balu";
   let progress: { value: number; total: number } | null = null;
+  let archivedId: string | null = null;
+  const writable = canWrite(useMyRole());
 
   if (view.kind === "list") title = t(`nav.${view.list}` as TranslationKey);
   else if (view.kind === "settings") title = t("settings.title");
   else if (view.kind === "project") {
     const project = snapshot.projects.find((p) => p.id === view.projectId);
     title = project?.name ?? "Balu";
+    if (project?.archived_at != null) archivedId = project.id;
     const inProject = snapshot.tasks.filter((tk) => !tk.is_deleted && tk.project_id === view.projectId && tk.parent_task_id == null);
     const done = inProject.filter((tk) => tk.completed_at != null).length;
     if (inProject.length > 0) progress = { value: done, total: inProject.length };
@@ -57,6 +63,12 @@ export function Toolbar({ snapshot }: { snapshot: Snapshot }) {
         {title}
       </h1>
       {progress && <ProgressRing value={progress.value} total={progress.total} showLabel />}
+      {archivedId && <Badge tone="neutral">{t("project.archived")}</Badge>}
+      {archivedId && writable && (
+        <Button variant="secondary" size="sm" icon="archive-restore" onClick={() => getSync()?.mutate({ type: "project_update", args: { id: archivedId, archived_at: null } })}>
+          {t("project.unarchive")}
+        </Button>
+      )}
       <div style={{ flex: 1 }} />
       <button
         type="button"

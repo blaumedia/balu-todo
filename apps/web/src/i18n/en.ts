@@ -216,6 +216,15 @@ export const en = {
   "project.sectionName": "Section name",
   "project.deleteSection": "Delete section",
   "project.deleteSectionConfirm": "Delete this section? Its tasks are kept and moved out of the section.",
+  "project.actions": "Project actions",
+  "project.rename": "Rename",
+  "project.color": "Color",
+  "project.archive": "Archive",
+  "project.unarchive": "Unarchive",
+  "project.archived": "Archived",
+  "project.archivedProjects": "Archived projects",
+  "project.delete": "Delete project",
+  "project.deleteConfirm": "Delete this project? All tasks in it are deleted too. This cannot be undone.",
 
   // Screen-reader announcements for drag & drop; a successful move stays
   // silent otherwise (rejections are reported by sync.rejected).

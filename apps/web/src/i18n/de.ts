@@ -219,6 +219,15 @@ export const de: Record<TranslationKey, string> = {
   "project.sectionName": "Abschnittsname",
   "project.deleteSection": "Abschnitt löschen",
   "project.deleteSectionConfirm": "Diesen Abschnitt löschen? Die Aufgaben bleiben erhalten und werden aus dem Abschnitt gelöst.",
+  "project.actions": "Projektaktionen",
+  "project.rename": "Umbenennen",
+  "project.color": "Farbe",
+  "project.archive": "Archivieren",
+  "project.unarchive": "Archivierung aufheben",
+  "project.archived": "Archiviert",
+  "project.archivedProjects": "Archivierte Projekte",
+  "project.delete": "Projekt löschen",
+  "project.deleteConfirm": "Dieses Projekt löschen? Alle Aufgaben darin werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.",
 
   // Screenreader-Ankündigungen für Drag & Drop; ein erfolgreicher Move bleibt
   // sonst still (Ablehnungen meldet sync.rejected).

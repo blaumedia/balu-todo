@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { todayLocalISO } from "@balu/domain";
+import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
 import { composeTaskArgs } from "../lib/quickadd.js";
@@ -98,7 +98,7 @@ export function QuickAdd() {
     if (!text.trim()) return;
     const args = composeTaskArgs(text, parsed, {
       view,
-      projects: snapshot.projects,
+      projects: activeProjects(snapshot.projects),
       labels: snapshot.labels,
       today,
     });

@@ -64,6 +64,18 @@ export function addProject(args: { name: string; color?: string; sort_order?: nu
   return mutate('project_add', args);
 }
 
+export function updateProject(
+  id: string,
+  args: { name?: string; color?: string; sort_order?: number; archived_at?: string | null },
+) {
+  return mutate('project_update', { id, ...args });
+}
+
+/** Soft-deletes the project and everything in it (contract §5.4 cascade). */
+export function deleteProject(id: string) {
+  return mutate('project_delete', { id });
+}
+
 // ── Comments (contract §5.4, v1.2) ────────────────────────────────────────
 export function addComment(taskId: string, body: string) {
   return mutate('comment_add', { task_id: taskId, body });

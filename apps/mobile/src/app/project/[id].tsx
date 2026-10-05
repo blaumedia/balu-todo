@@ -1,19 +1,20 @@
 import { canWrite, isOpen, todayLocalISO, type Task } from '@balu/domain';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
+import { MoreButton } from '../../components/MoreButton';
 import { ProgressRing } from '../../components/ProgressRing';
 import { StackHeader } from '../../components/StackHeader';
 import { TaskItems } from '../../components/TaskList';
 import { EmptyState, SectionHeader } from '../../components/ui';
 import { useT } from '../../i18n';
-import { deleteSection } from '../../lib/actions';
+import { deleteSection, updateProject } from '../../lib/actions';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
-import { gutter, projectHex, space } from '../../theme/tokens';
+import { font, gutter, projectHex, space } from '../../theme/tokens';
 
 export default function ProjectScreen() {
   const theme = useTheme();
@@ -25,6 +26,7 @@ export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
+  const openProjectActions = useApp((s) => s.openProjectActions);
 
   useFocusEffect(useCallback(() => setContext({ kind: 'project', projectId: id }), [setContext, id]));
 
@@ -46,6 +48,16 @@ export default function ProjectScreen() {
   const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined;
   const writable = canWrite(myRole);
 
+  // The project was deleted (here via the sheet, or remotely and the delta just
+  // arrived): leave the screen rather than render an empty, unnamed project.
+  // Only a present-and-deleted record counts; an id that is simply not in the
+  // replica yet must keep the screen until data arrives.
+  useEffect(() => {
+    if (!project?.is_deleted) return;
+    if (router.canGoBack()) router.back();
+    else router.replace('/browse');
+  }, [project?.is_deleted]);
+
   const confirmDeleteSection = (sectionId: string) =>
     Alert.alert(t('project.deleteSection'), t('project.deleteSectionConfirm'), [
       { text: t('common.cancel'), style: 'cancel' },
@@ -57,8 +69,24 @@ export default function ProjectScreen() {
       <StackHeader
         title={project?.name ?? ''}
         colorDot={projectHex(project?.color)}
-        right={<ProgressRing done={doneCount} total={projectTasks.length} />}
+        right={
+          <>
+            <ProgressRing done={doneCount} total={projectTasks.length} />
+            {writable ? <MoreButton label={t('project.actions')} onPress={() => openProjectActions(id)} /> : null}
+          </>
+        }
       />
+      {project?.archived_at != null ? (
+        <View style={[styles.archivedBanner, { borderBottomColor: theme.border }]}>
+          <Icon name="archive" size={16} color={theme.textTertiary} strokeWidth={2} />
+          <Text style={[styles.archivedText, { color: theme.textSecondary }]}>{t('project.archived')}</Text>
+          {writable ? (
+            <Pressable onPress={() => updateProject(id, { archived_at: null })} hitSlop={10} accessibilityRole="button">
+              <Text style={[styles.unarchive, { color: theme.accent }]}>{t('project.unarchive')}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {openTasks.length === 0 && sections.length === 0 ? (
           <EmptyState text={t('empty.project')} />
@@ -102,4 +130,7 @@ const styles = StyleSheet.create({
   // Shrinkable so a long section name truncates instead of shoving the icon out.
   sectionTitle: { flex: 1, minWidth: 0 },
   sectionDelete: { paddingTop: space.s5, paddingBottom: space.s2, paddingRight: gutter },
+  archivedBanner: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingHorizontal: gutter, paddingVertical: space.s2, borderBottomWidth: StyleSheet.hairlineWidth },
+  archivedText: { flex: 1, fontSize: font.secondary },
+  unarchive: { fontSize: font.secondary, fontWeight: font.weightMedium },
 });

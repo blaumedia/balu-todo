@@ -185,6 +185,15 @@ export const de: Record<TranslationKey, string> = {
   'project.addTask': 'Aufgabe hinzufügen',
   'project.deleteSection': 'Abschnitt löschen',
   'project.deleteSectionConfirm': 'Diesen Abschnitt löschen? Die Aufgaben bleiben erhalten und werden aus dem Abschnitt gelöst.',
+  'project.actions': 'Projektaktionen',
+  'project.rename': 'Umbenennen',
+  'project.color': 'Farbe',
+  'project.archive': 'Archivieren',
+  'project.unarchive': 'Archivierung aufheben',
+  'project.archived': 'Archiviert',
+  'project.archivedProjects': 'Archivierte Projekte',
+  'project.delete': 'Projekt löschen',
+  'project.deleteConfirm': 'Dieses Projekt löschen? Alle Aufgaben darin werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.',
 
   'date.today': 'Heute',
   'date.tomorrow': 'Morgen',
@@ -195,4 +204,5 @@ export const de: Record<TranslationKey, string> = {
   'common.copy': 'Kopieren',
   'common.done': 'Fertig',
   'common.delete': 'Löschen',
+  'common.save': 'Speichern',
 };

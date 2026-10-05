@@ -180,6 +180,15 @@ export const en = {
   'project.addTask': 'Add task',
   'project.deleteSection': 'Delete section',
   'project.deleteSectionConfirm': 'Delete this section? Its tasks are kept and moved out of the section.',
+  'project.actions': 'Project actions',
+  'project.rename': 'Rename',
+  'project.color': 'Color',
+  'project.archive': 'Archive',
+  'project.unarchive': 'Unarchive',
+  'project.archived': 'Archived',
+  'project.archivedProjects': 'Archived projects',
+  'project.delete': 'Delete project',
+  'project.deleteConfirm': 'Delete this project? All tasks in it are deleted too. This cannot be undone.',
 
   'date.today': 'Today',
   'date.tomorrow': 'Tomorrow',
@@ -190,6 +199,7 @@ export const en = {
   'common.copy': 'Copy',
   'common.done': 'Done',
   'common.delete': 'Delete',
+  'common.save': 'Save',
 } as const;
 
 export type TranslationKey = keyof typeof en;

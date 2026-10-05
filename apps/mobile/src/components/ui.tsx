@@ -46,16 +46,18 @@ export interface ListRowProps {
   count?: number;
   badge?: number;
   onPress?: () => void;
+  onLongPress?: () => void;
   right?: ReactNode;
   chevron?: boolean;
 }
 
 /** A Browse / navigation row (the web sidebar item, as a screen row). */
-export function ListRow({ label, icon, colorDot, count, badge, onPress, right, chevron }: ListRowProps) {
+export function ListRow({ label, icon, colorDot, count, badge, onPress, onLongPress, right, chevron }: ListRowProps) {
   const theme = useTheme();
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       style={({ pressed }) => [styles.listRow, pressed && { backgroundColor: theme.accentWash }]}
     >
       {icon ? <Icon name={icon} size={20} color={theme.accent} strokeWidth={2} /> : null}

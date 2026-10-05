@@ -1,7 +1,6 @@
-import { selectList, todayLocalISO, type Project, type SmartList, type Task } from "@balu/domain";
+import { selectList, spacedOrders, todayLocalISO, type Project, type SmartList, type Task } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
-import { spacedOrders } from "../lib/reorder.js";
 import { useMaps } from "../lib/maps.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
