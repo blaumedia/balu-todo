@@ -22,11 +22,20 @@ const WIDTH = 220;
  * Fixed-position popover menu (the WorkspaceSwitcher idiom, generalised).
  * Closes on Escape and on any mousedown outside; ArrowUp/ArrowDown move focus
  * between items; the first item is focused on open. `children` render above
- * the items (used for the project color swatches).
+ * the items (used for the project color swatches). A trigger that toggles its
+ * own menu marks itself with `data-menu-trigger`: the outside-mousedown close
+ * ignores mousedown on such an element, so the trigger's own click can decide
+ * open/close instead of the close instantly reopening it. On close, focus
+ * returns to the element focused when the menu opened, but only if focus has
+ * since fallen to <body>; focus taken deliberately elsewhere is left alone.
  */
 export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor; items: MenuItem[]; onClose: () => void; children?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<MenuAnchor>(anchor);
+  // Capture the opener at first render, not inside the effect: StrictMode
+  // double-invokes effects, and the second run would otherwise capture the
+  // first run's focused menuitem as the opener, making the restore inert in dev.
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
   // Callers often pass a fresh closure each render; keep it in a ref so the
   // listeners below are bound once instead of being re-bound (and re-focusing)
   // on every parent re-render.
@@ -44,9 +53,7 @@ export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor;
   }, [anchor]);
 
   useEffect(() => {
-    // Focus the first item once on open (not on every parent re-render), and
-    // remember what held focus so it can be reclaimed on close.
-    const opener = document.activeElement as HTMLElement | null;
+    // Focus the first item once on open (not on every parent re-render).
     ref.current?.querySelector<HTMLButtonElement>("[role=menuitem]")?.focus();
     return () => {
       // Restore focus to the opener only if it fell to <body> (Escape or item
@@ -55,7 +62,7 @@ export function Menu({ anchor, items, onClose, children }: { anchor: MenuAnchor;
       // it where it is.
       if (opener?.isConnected && (document.activeElement ?? document.body) === document.body) opener.focus();
     };
-  }, []);
+  }, [opener]);
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {

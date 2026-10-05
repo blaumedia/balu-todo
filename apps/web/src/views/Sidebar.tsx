@@ -36,8 +36,8 @@ const SMART: Array<[SmartList, string, TranslationKey]> = [
  *  while still being tappable. Evaluated once - the input type does not change. */
 const NO_HOVER = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(hover: none)").matches;
 
-/** A project row with its hover-revealed "..." trigger and right-click menu. `onMenu` is absent for viewers. */
-function ProjectItem({ project, active, onClick, onMenu, onToggleMenu }: { project: Project; active: boolean; onClick: () => void; onMenu?: (anchor: MenuAnchor) => void; onToggleMenu?: (anchor: MenuAnchor) => void }) {
+/** A project row with its hover-revealed "..." trigger and right-click menu. "..." toggles the menu and right-click opens it; `menu` is absent for viewers. */
+function ProjectItem({ project, active, onClick, menu }: { project: Project; active: boolean; onClick: () => void; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor): void } }) {
   const { t } = useT();
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -46,16 +46,16 @@ function ProjectItem({ project, active, onClick, onMenu, onToggleMenu }: { proje
       style={{ position: "relative" }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu({ x: e.clientX, y: e.clientY }); } : undefined}
+      onContextMenu={menu ? (e) => { e.preventDefault(); menu.open({ x: e.clientX, y: e.clientY }); } : undefined}
     >
       <SidebarItem
         projectColor={`var(--project-${project.color})`}
         label={project.name}
         active={active}
         onClick={onClick}
-        style={onMenu ? { paddingRight: 36 } : undefined}
+        style={menu ? { paddingRight: 36 } : undefined}
       />
-      {onMenu && (
+      {menu && (
         <IconButton
           icon="ellipsis"
           size="sm"
@@ -68,8 +68,7 @@ function ProjectItem({ project, active, onClick, onMenu, onToggleMenu }: { proje
             // Left-click toggles (the menu's outside-mousedown close fires
             // before this click, so a plain open would immediately reopen);
             // right-click always opens.
-            if (onToggleMenu) onToggleMenu(anchor);
-            else onMenu?.(anchor);
+            menu.toggle(anchor);
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
@@ -86,7 +85,7 @@ function ProjectItem({ project, active, onClick, onMenu, onToggleMenu }: { proje
   );
 }
 
-function SortableProject({ project, active, onClick, draggable, onMenu, onToggleMenu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; onMenu?: (anchor: MenuAnchor) => void; onToggleMenu?: (anchor: MenuAnchor) => void }) {
+function SortableProject({ project, active, onClick, draggable, menu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor): void } }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active: dragActive } = useSortable({
     id: project.id,
     disabled: !draggable,
@@ -108,7 +107,7 @@ function SortableProject({ project, active, onClick, draggable, onMenu, onToggle
       }}
       {...(draggable ? { ...attributes, ...listeners } : {})}
     >
-      <ProjectItem project={project} active={active} onClick={onClick} onMenu={onMenu} onToggleMenu={onToggleMenu} />
+      <ProjectItem project={project} active={active} onClick={onClick} menu={menu} />
     </div>
   );
 }
@@ -129,6 +128,9 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   // Guards against the unmount blur re-committing a rename that Enter or
   // Escape already settled (unmounting the focused input fires blur).
   const renameDone = useRef(false);
+  // Same guard for the new-project input: Enter creates, then the unmount
+  // blur would create a second copy; Escape would create what it discards.
+  const createDone = useRef(false);
 
   const user = useApp((s) => s.user);
   const today = todayLocalISO();
@@ -144,9 +146,16 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const projects = activeProjects(snapshot.projects);
   const archived = archivedProjects(snapshot.projects);
 
-  function createProject() {
+  function startAdding() {
+    createDone.current = false;
+    setAdding(true);
+  }
+
+  function finishCreate(save: boolean) {
+    if (createDone.current) return;
+    createDone.current = true;
     const trimmed = name.trim();
-    if (trimmed) {
+    if (save && trimmed) {
       const colors = ["blue", "violet", "green", "amber", "rose", "teal", "indigo", "orange"] as const;
       const color = colors[projects.length % colors.length]!;
       getSync()?.mutate({ type: "project_add", args: { name: trimmed, color } });
@@ -170,8 +179,12 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   }
 
   const closeMenu = useCallback(() => setMenu(null), []);
-  const openMenu = writable ? (p: Project) => (anchor: MenuAnchor) => setMenu({ projectId: p.id, anchor }) : undefined;
-  const toggleMenu = writable ? (p: Project) => (anchor: MenuAnchor) => setMenu((m) => (m?.projectId === p.id ? null : { projectId: p.id, anchor })) : undefined;
+  const menuFor = writable
+    ? (p: Project) => ({
+        open: (anchor: MenuAnchor) => setMenu({ projectId: p.id, anchor }),
+        toggle: (anchor: MenuAnchor) => setMenu((m) => (m?.projectId === p.id ? null : { projectId: p.id, anchor })),
+      })
+    : undefined;
 
   // Project reorder → per-project `project_update` sort_order (contract §5.4 has
   // no project_reorder command; sort_order patches are the sanctioned path).
@@ -306,8 +319,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
                   active={view.kind === "project" && view.projectId === p.id}
                   onClick={() => setView({ kind: "project", projectId: p.id })}
                   draggable
-                  onMenu={openMenu?.(p)}
-                  onToggleMenu={toggleMenu?.(p)}
+                  menu={menuFor?.(p)}
                 />
               ),
             )}
@@ -329,13 +341,10 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
               value={name}
               placeholder={t("project.newProjectName")}
               onChange={(e) => setName(e.target.value)}
-              onBlur={createProject}
+              onBlur={() => finishCreate(true)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") createProject();
-                if (e.key === "Escape") {
-                  setName("");
-                  setAdding(false);
-                }
+                if (e.key === "Enter") finishCreate(true);
+                if (e.key === "Escape") finishCreate(false);
               }}
               style={{
                 height: 34,
@@ -350,7 +359,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
               }}
             />
           ) : (
-            <SidebarItem icon="plus" label={t("project.newProject")} onClick={() => setAdding(true)} />
+            <SidebarItem icon="plus" label={t("project.newProject")} onClick={startAdding} />
           ))}
         {archived.length > 0 && (
           <>
@@ -378,8 +387,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
                     project={p}
                     active={view.kind === "project" && view.projectId === p.id}
                     onClick={() => setView({ kind: "project", projectId: p.id })}
-                    onMenu={openMenu?.(p)}
-                    onToggleMenu={toggleMenu?.(p)}
+                    menu={menuFor?.(p)}
                   />
                 ),
               )}
@@ -398,7 +406,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       </div>
       {menu && (() => {
         const p = snapshot.projects.find((x) => x.id === menu.projectId && !x.is_deleted);
-        return p ? <ProjectMenu project={p} anchor={menu.anchor} onClose={closeMenu} onRename={() => startRename(p)} /> : null;
+        return p ? <ProjectMenu key={p.id} project={p} anchor={menu.anchor} onClose={closeMenu} onRename={() => startRename(p)} /> : null;
       })()}
     </aside>
   );
