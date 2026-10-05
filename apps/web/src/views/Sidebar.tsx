@@ -121,6 +121,12 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const setQuickAdd = useApp((s) => s.setQuickAdd);
   const role = useMyRole();
   const writable = canWrite(role);
+  // A role downgrade unmounts the inline inputs *during* the commit, before
+  // effects run, so their blur handlers fire while the closure still holds the
+  // stale writable=true. This ref is updated in the render body, so finishRename
+  // and finishCreate see the current value even on an unmount blur.
+  const writableRef = useRef(writable);
+  writableRef.current = writable;
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -157,7 +163,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     if (createDone.current) return;
     createDone.current = true;
     const trimmed = name.trim();
-    if (save && trimmed) {
+    if (save && writableRef.current && trimmed) {
       const colors = ["blue", "violet", "green", "amber", "rose", "teal", "indigo", "orange"] as const;
       const color = colors[projects.length % colors.length]!;
       getSync()?.mutate({ type: "project_add", args: { name: trimmed, color } });
@@ -176,7 +182,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     if (renameDone.current) return;
     renameDone.current = true;
     const trimmed = renameValue.trim();
-    if (save && trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
+    if (save && writableRef.current && trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
     setRenamingId(null);
   }
 
@@ -188,21 +194,28 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       })
     : undefined;
 
-  // A viewer (role revoked while the menu or a rename is live) must not keep a
-  // menu full of write actions or an editable rename input. renameDone is set
-  // first so the unmounting input's blur does not re-send the rename.
+  // A viewer (role revoked while the menu or an inline edit is live) must not
+  // keep a menu full of write actions or an editable input. renameDone is set
+  // first so the unmounting input's blur does not re-send the rename; the
+  // render-time writableRef is what actually blocks the blur mutation (the
+  // input unmounts during the commit, before this effect runs), so this effect
+  // only clears UI state.
   useEffect(() => {
     if (writable) return;
     renameDone.current = true;
     setMenu(null);
     setRenamingId(null);
+    setAdding(false);
+    setName("");
   }, [writable]);
+
+  const menuProject = menu ? snapshot.projects.find((x) => x.id === menu.projectId && !x.is_deleted) : undefined;
 
   // The menu's project can vanish underneath it (deleted elsewhere in the
   // snapshot); drop the dangling state instead of silently rendering nothing.
   useEffect(() => {
-    if (menu && !snapshot.projects.some((p) => p.id === menu.projectId && !p.is_deleted)) setMenu(null);
-  }, [menu, snapshot.projects]);
+    if (menu && !menuProject) setMenu(null);
+  }, [menu, menuProject]);
 
   // Project reorder → per-project `project_update` sort_order (contract §5.4 has
   // no project_reorder command; sort_order patches are the sanctioned path).
@@ -422,10 +435,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
         )}
         <WorkspaceSwitcher />
       </div>
-      {menu && writable && (() => {
-        const p = snapshot.projects.find((x) => x.id === menu.projectId && !x.is_deleted);
-        return p ? <ProjectMenu key={p.id} project={p} anchor={menu.anchor} returnFocus={menu.returnFocus} onClose={closeMenu} onRename={() => startRename(p)} /> : null;
-      })()}
+      {menu && menuProject && writable && <ProjectMenu key={menuProject.id} project={menuProject} anchor={menu.anchor} returnFocus={menu.returnFocus} onClose={closeMenu} onRename={() => startRename(menuProject)} />}
     </aside>
   );
 }
