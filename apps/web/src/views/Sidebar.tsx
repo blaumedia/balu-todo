@@ -195,14 +195,11 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     : undefined;
 
   // A viewer (role revoked while the menu or an inline edit is live) must not
-  // keep a menu full of write actions or an editable input. renameDone is set
-  // first so the unmounting input's blur does not re-send the rename; the
-  // render-time writableRef is what actually blocks the blur mutation (the
-  // input unmounts during the commit, before this effect runs), so this effect
-  // only clears UI state.
+  // keep a menu full of write actions or an editable input. The render-time
+  // writableRef blocks the blur mutation (the input unmounts during the
+  // commit, before this effect runs); this effect only clears UI state.
   useEffect(() => {
     if (writable) return;
-    renameDone.current = true;
     setMenu(null);
     setRenamingId(null);
     setAdding(false);
@@ -410,7 +407,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
             </button>
             {showArchived &&
               archived.map((p) =>
-                renamingId === p.id ? (
+                writable && renamingId === p.id ? (
                   renameInput(p)
                 ) : (
                   <ProjectItem
