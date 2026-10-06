@@ -227,8 +227,9 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     if (menu && !menuProject) setMenu(null);
   }, [menu, menuProject]);
 
-  // The renamed row vanished without a blur: clear the state so the input
-  // cannot reappear with a stale value if the project comes back.
+  // The renamed row left the spot it was renamed in without a blur (deleted,
+  // archived, or the archive list was hidden): clear the state so the input
+  // cannot reappear with a stale value.
   useEffect(() => {
     if (renamingId && rowHome.current.get(renamingId) !== renameHome.current) {
       renameDone.current = true;

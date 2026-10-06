@@ -63,11 +63,11 @@ export default function ProjectScreen() {
   // project) would pop that screen instead of leaving this one.
   const [focused, setFocused] = useState(() => navigation.isFocused());
   useEffect(() => {
-    const off = navigation.addListener('focus', () => setFocused(true));
-    const on = navigation.addListener('blur', () => setFocused(false));
+    const unsubFocus = navigation.addListener('focus', () => setFocused(true));
+    const unsubBlur = navigation.addListener('blur', () => setFocused(false));
     return () => {
-      off();
-      on();
+      unsubFocus();
+      unsubBlur();
     };
   }, [navigation]);
   useEffect(() => {
