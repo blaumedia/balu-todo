@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..errors import ApiError
 from ..events import EventSender
 from ..models import Comment, Label, Membership, Project, Section, Task, User, Workspace
+from ..projects import archived_project_ids, outside_archived_projects
 from ..routers.workspaces import get_membership
 from ..schemas.sync import Command
 from ..sync.commands import process_commands
@@ -318,6 +319,12 @@ def t_list_tasks(ctx: ToolContext, args: dict) -> dict:
     project_id = _uuid_arg(args, "project_id", required=False)
     if project_id is not None:
         stmt = stmt.where(Task.project_id == project_id)
+    else:
+        # Archived = out of sight (same rule as `selectList` in @balu/domain): an
+        # archived project's tasks only show up when that project is asked for.
+        archived = archived_project_ids(ctx.db, ws_id)
+        if archived:
+            stmt = stmt.where(outside_archived_projects(archived))
     if args.get("assigned_to_me"):
         stmt = stmt.where(Task.assigned_to == ctx.user.id)
 
@@ -426,7 +433,12 @@ def _placement_args(
     if "project_id" in args:
         pid = _uuid_arg(args, "project_id", required=False)
         if pid is not None:
-            _get_project(ctx, ws_id, pid)
+            project = _get_project(ctx, ws_id, pid)
+            # Only a move INTO an archived project is refused; re-sending the project a
+            # task already sits in (echo, or a section move that names it) must pass,
+            # or editing anything inside an archived project becomes impossible.
+            if project.archived_at is not None and pid != current_project_id:
+                raise ToolError("project is archived; unarchive it first or pick another project")
         project_id = pid
         out["project_id"] = None if pid is None else str(pid)
     if "section_id" in args:
@@ -657,7 +669,8 @@ TOOLS: tuple[Tool, ...] = (
         name="list_tasks",
         description=(
             "List tasks in a workspace. Open tasks only unless `status` says otherwise. "
-            "Filters combine with AND. `truncated` says whether more rows matched than "
+            "Filters combine with AND. Tasks of archived projects are hidden unless "
+            "`project_id` names that project. `truncated` says whether more rows matched than "
             "the limit returned."
         ),
         input_schema=_schema(
@@ -720,7 +733,8 @@ TOOLS: tuple[Tool, ...] = (
         name="create_task",
         description=(
             "Create a task. Only `title` is required; every other field is optional and "
-            "unset fields stay empty. Returns the created task."
+            "unset fields stay empty. Returns the created task. "
+            "Archived projects are refused as a target."
         ),
         input_schema=_schema(
             {

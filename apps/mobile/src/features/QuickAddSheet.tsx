@@ -1,4 +1,4 @@
-import { todayLocalISO } from '@balu/domain';
+import { activeProjects, todayLocalISO } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -58,7 +58,7 @@ export function QuickAddSheet() {
     const result = parseQuickAdd(trimmed, { locale, referenceDate: today });
     const args = composeTaskArgs(trimmed, result, {
       context,
-      projects: snap.projects,
+      projects: activeProjects(snap.projects),
       labels: snap.labels,
       today,
     });

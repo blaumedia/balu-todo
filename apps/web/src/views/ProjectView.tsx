@@ -1,8 +1,7 @@
 import { useState } from "react";
-import { todayLocalISO, type Task } from "@balu/domain";
+import { spacedOrders, todayLocalISO, type Task } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
-import { spacedOrders } from "../lib/reorder.js";
 import { useMaps } from "../lib/maps.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";

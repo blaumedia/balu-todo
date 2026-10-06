@@ -27,7 +27,7 @@ export default function AssignedScreen() {
     if (user == null || memberCount <= 1) router.back();
   }, [user, memberCount]);
 
-  const tasks = user ? selectList(snap.tasks, 'assigned', today, user.id) : [];
+  const tasks = user ? selectList(snap.tasks, snap.projects, 'assigned', today, user.id) : [];
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>

@@ -34,7 +34,7 @@ export default function ListScreen() {
 
   const { list: raw } = useLocalSearchParams<{ list: string }>();
   const list: SmartList = VALID.includes(raw as SmartList) ? (raw as SmartList) : 'inbox';
-  const tasks = selectList(snap.tasks, list, today);
+  const tasks = selectList(snap.tasks, snap.projects, list, today);
 
   // Logbook groups by completion day (contract §4).
   const groups: { key: string; label: string; items: Task[] }[] = [];

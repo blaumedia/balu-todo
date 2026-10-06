@@ -3,6 +3,7 @@
 // shared so every client ranks results identically.
 
 import { isOpen } from "./taskLists.js";
+import { excludeArchivedProjectTasks } from "./projects.js";
 import type { Label, Project, Task } from "./types.js";
 
 export type SearchKind = "task" | "project" | "label";
@@ -117,7 +118,7 @@ export interface ReplicaSearchInput extends SearchInput {
   query: string;
   /** Include completed tasks (default: open only). */
   includeCompleted?: boolean;
-  /** Include archived projects (default: hidden). */
+  /** Include archived projects and their tasks (default: both hidden). */
   includeArchivedProjects?: boolean;
   /** Max tasks returned (projects/labels are naturally small). */
   cap?: number;
@@ -142,7 +143,10 @@ export function searchReplica(input: ReplicaSearchInput): ReplicaSearchResults {
   const cap = input.cap ?? TASK_CAP;
 
   const scoredTasks: Array<{ task: Task; score: number }> = [];
-  for (const task of input.tasks) {
+  const pool = input.includeArchivedProjects
+    ? input.tasks
+    : excludeArchivedProjectTasks(input.tasks, input.projects);
+  for (const task of pool) {
     if (task.is_deleted) continue;
     if (!input.includeCompleted && !isOpen(task)) continue;
     const titleScore = scoreText(q, task.title);

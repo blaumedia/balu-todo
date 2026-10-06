@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { type DragEndEvent } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -7,18 +7,20 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { selectList, todayLocalISO, type Project, type SmartList } from "@balu/domain";
+import { activeProjects, archivedProjects, reorderUpdates, selectList, todayLocalISO, type Project, type SmartList } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
 import { dragKind, projectRowData, setDragResolver } from "../lib/drag.js";
-import { spacedOrders } from "../lib/reorder.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import type { TranslationKey } from "../i18n/index.js";
 import { SidebarItem } from "../components/SidebarItem.js";
 import { Button } from "../components/Button.js";
+import { IconButton } from "../components/IconButton.js";
 import { Icon } from "../components/Icon.js";
+import type { MenuAnchor } from "../components/Menu.js";
+import { ProjectMenu } from "./ProjectMenu.js";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher.js";
 
 const SMART: Array<[SmartList, string, TranslationKey]> = [
@@ -30,7 +32,62 @@ const SMART: Array<[SmartList, string, TranslationKey]> = [
   ["logbook", "check-circle", "nav.logbook"],
 ];
 
-function SortableProject({ project, active, onClick, draggable }: { project: Project; active: boolean; onClick: () => void; draggable: boolean }) {
+/** Touch devices have no hover, so a reveal-on-hover control would stay invisible
+ *  while still being tappable. Evaluated once - the input type does not change. */
+const NO_HOVER = typeof globalThis.matchMedia === "function" && globalThis.matchMedia("(hover: none)").matches;
+
+/** A project row with its hover-revealed "..." trigger and right-click menu. "..." toggles the menu and right-click opens it; `menu` is absent for viewers. */
+function ProjectItem({ project, active, onClick, menu }: { project: Project; active: boolean; onClick: () => void; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor, opener: HTMLElement): void } }) {
+  const { t } = useT();
+  const [hover, setHover] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <div
+      style={{ position: "relative" }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onContextMenu={menu ? (e) => { e.preventDefault(); menu.open({ x: e.clientX, y: e.clientY }); } : undefined}
+    >
+      <SidebarItem
+        projectColor={`var(--project-${project.color})`}
+        label={project.name}
+        active={active}
+        onClick={onClick}
+        style={menu ? { paddingRight: 36 } : undefined}
+      />
+      {menu && (
+        <IconButton
+          icon="ellipsis"
+          size="sm"
+          label={t("project.actions")}
+          data-menu-trigger=""
+          onClick={(e) => {
+            e.stopPropagation();
+            const r = e.currentTarget.getBoundingClientRect();
+            const anchor = { x: r.left, y: r.bottom + 4 };
+            // Left-click toggles (the menu's outside-mousedown close fires
+            // before this click, so a plain open would immediately reopen);
+            // right-click always opens. Pass the button itself as the return
+            // focus target: Safari and Firefox on macOS do not focus buttons
+            // on mousedown, so the menu cannot recover it from activeElement.
+            menu.toggle(anchor, e.currentTarget);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            position: "absolute",
+            right: 4,
+            top: 3,
+            opacity: hover || focused || NO_HOVER ? 1 : 0,
+            transition: "opacity var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard)",
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SortableProject({ project, active, onClick, draggable, menu }: { project: Project; active: boolean; onClick: () => void; draggable: boolean; menu?: { open(anchor: MenuAnchor): void; toggle(anchor: MenuAnchor, opener: HTMLElement): void } }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active: dragActive } = useSortable({
     id: project.id,
     disabled: !draggable,
@@ -52,7 +109,7 @@ function SortableProject({ project, active, onClick, draggable }: { project: Pro
       }}
       {...(draggable ? { ...attributes, ...listeners } : {})}
     >
-      <SidebarItem projectColor={`var(--project-${project.color})`} label={project.name} active={active} onClick={onClick} />
+      <ProjectItem project={project} active={active} onClick={onClick} menu={menu} />
     </div>
   );
 }
@@ -64,27 +121,59 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const setQuickAdd = useApp((s) => s.setQuickAdd);
   const role = useMyRole();
   const writable = canWrite(role);
+  // A role downgrade unmounts the inline inputs *during* the commit, before
+  // effects run, so their blur handlers fire while the closure still holds the
+  // stale writable=true. This ref is updated in the render body, so finishRename
+  // and finishCreate see the current value even on an unmount blur.
+  const writableRef = useRef(writable);
+  writableRef.current = writable;
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [menu, setMenu] = useState<{ projectId: string; anchor: MenuAnchor; returnFocus?: HTMLElement | null } | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  // Guards against the unmount blur re-committing a rename that Enter or
+  // Escape already settled (unmounting the focused input fires blur).
+  const renameDone = useRef(false);
+  // Same guard for the new-project input: Enter creates, then the unmount
+  // blur would create a second copy; Escape would create what it discards.
+  const createDone = useRef(false);
 
   const user = useApp((s) => s.user);
   const today = todayLocalISO();
   const counts: Partial<Record<SmartList, number>> = {
-    inbox: selectList(snapshot.tasks, "inbox", today).length,
-    today: selectList(snapshot.tasks, "today", today).length,
+    inbox: selectList(snapshot.tasks, snapshot.projects, "inbox", today).length,
+    today: selectList(snapshot.tasks, snapshot.projects, "today", today).length,
   };
 
   // "Assigned to me" surfaces only in shared workspaces (contract §4).
   const shared = snapshot.members.filter((m) => !m.is_deleted).length > 1;
-  const assignedCount = shared && user ? selectList(snapshot.tasks, "assigned", today, user.id).length : 0;
+  const assignedCount = shared && user ? selectList(snapshot.tasks, snapshot.projects, "assigned", today, user.id).length : 0;
 
-  const projects = snapshot.projects
-    .filter((p) => !p.is_deleted && p.archived_at == null)
-    .sort((a, b) => a.sort_order - b.sort_order);
+  const projects = activeProjects(snapshot.projects);
+  const archived = archivedProjects(snapshot.projects);
+  // Where each project row is rendered right now. A rename input unmounts when
+  // its project leaves that spot (archived or deleted on another device); the
+  // unmount fires blur, which must cancel rather than commit a half-typed name.
+  // Render-body ref for the same reason as writableRef.
+  const rowHome = useRef(new Map<string, "live" | "archived">());
+  rowHome.current = new Map<string, "live" | "archived">([
+    ...projects.map((p) => [p.id, "live"] as const),
+    ...(showArchived ? archived.map((p) => [p.id, "archived"] as const) : []),
+  ]);
+  const renameHome = useRef<"live" | "archived" | null>(null);
 
-  function createProject() {
+  function startAdding() {
+    createDone.current = false;
+    setAdding(true);
+  }
+
+  function finishCreate(save: boolean) {
+    if (createDone.current) return;
+    createDone.current = true;
     const trimmed = name.trim();
-    if (trimmed) {
+    if (save && writableRef.current && trimmed) {
       const colors = ["blue", "violet", "green", "amber", "rose", "teal", "indigo", "orange"] as const;
       const color = colors[projects.length % colors.length]!;
       getSync()?.mutate({ type: "project_add", args: { name: trimmed, color } });
@@ -92,6 +181,61 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     setName("");
     setAdding(false);
   }
+
+  function startRename(p: Project) {
+    renameHome.current = rowHome.current.get(p.id) ?? null;
+    renameDone.current = false;
+    setRenameValue(p.name);
+    setRenamingId(p.id);
+  }
+
+  function finishRename(p: Project, save: boolean) {
+    if (renameDone.current) return;
+    renameDone.current = true;
+    const trimmed = renameValue.trim();
+    // The row left the spot it was renamed in: this blur is the unmount, not the user.
+    const stillThere = rowHome.current.get(p.id) === renameHome.current;
+    if (save && stillThere && writableRef.current && trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
+    setRenamingId(null);
+  }
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const menuFor = writable
+    ? (p: Project) => ({
+        open: (anchor: MenuAnchor) => setMenu({ projectId: p.id, anchor }),
+        toggle: (anchor: MenuAnchor, opener: HTMLElement) => setMenu((m) => (m?.projectId === p.id ? null : { projectId: p.id, anchor, returnFocus: opener })),
+      })
+    : undefined;
+
+  // A viewer (role revoked while the menu or an inline edit is live) must not
+  // keep a menu full of write actions or an editable input. The render-time
+  // writableRef blocks the blur mutation (the input unmounts during the
+  // commit, before this effect runs); this effect only clears UI state.
+  useEffect(() => {
+    if (writable) return;
+    setMenu(null);
+    setRenamingId(null);
+    setAdding(false);
+    setName("");
+  }, [writable]);
+
+  const menuProject = menu ? snapshot.projects.find((x) => x.id === menu.projectId && !x.is_deleted) : undefined;
+
+  // The menu's project can vanish underneath it (deleted elsewhere in the
+  // snapshot); drop the dangling state instead of silently rendering nothing.
+  useEffect(() => {
+    if (menu && !menuProject) setMenu(null);
+  }, [menu, menuProject]);
+
+  // The renamed row left the spot it was renamed in without a blur (deleted,
+  // archived, or the archive list was hidden): clear the state so the input
+  // cannot reappear with a stale value.
+  useEffect(() => {
+    if (renamingId && rowHome.current.get(renamingId) !== renameHome.current) {
+      renameDone.current = true;
+      setRenamingId(null);
+    }
+  }, [renamingId, snapshot.projects, showArchived]);
 
   // Project reorder → per-project `project_update` sort_order (contract §5.4 has
   // no project_reorder command; sort_order patches are the sanctioned path).
@@ -106,11 +250,8 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     const ordered = arrayMove(ids, from, to);
     const sync = getSync();
     if (!sync) return;
-    for (const { id, sort_order } of spacedOrders(ordered)) {
-      const current = projects.find((p) => p.id === id);
-      if (current && current.sort_order !== sort_order) {
-        sync.mutate({ type: "project_update", args: { id, sort_order } });
-      }
+    for (const { id, sort_order } of reorderUpdates(projects, ordered)) {
+      sync.mutate({ type: "project_update", args: { id, sort_order } });
     }
   }
 
@@ -120,6 +261,38 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     setDragResolver("project", onProjectDragEnd);
     return () => setDragResolver("project", null);
   });
+
+  // Same input as "new project", reused for an inline rename. Rendered outside
+  // the sortable wrapper on purpose: text selection inside an element carrying
+  // dnd-kit listeners would start a drag.
+  function renameInput(p: Project) {
+    return (
+      <input
+        key={p.id}
+        autoFocus
+        value={renameValue}
+        onChange={(e) => setRenameValue(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onBlur={() => finishRename(p, true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") finishRename(p, true);
+          if (e.key === "Escape") finishRename(p, false);
+        }}
+        maxLength={200}
+        style={{
+          height: 34,
+          margin: "0 2px",
+          padding: "0 10px",
+          borderRadius: "var(--radius-control)",
+          border: "1px solid var(--accent)",
+          background: "var(--surface)",
+          color: "var(--text-primary)",
+          fontSize: 15,
+          outline: "none",
+        }}
+      />
+    );
+  }
 
   return (
     <aside
@@ -188,22 +361,26 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       <nav style={{ padding: "0 8px", display: "flex", flexDirection: "column", gap: 1, overflowY: "auto" }}>
         {writable ? (
           <SortableContext items={projects.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-            {projects.map((p) => (
-              <SortableProject
-                key={p.id}
-                project={p}
-                active={view.kind === "project" && view.projectId === p.id}
-                onClick={() => setView({ kind: "project", projectId: p.id })}
-                draggable
-              />
-            ))}
+            {projects.map((p) =>
+              renamingId === p.id ? (
+                renameInput(p)
+              ) : (
+                <SortableProject
+                  key={p.id}
+                  project={p}
+                  active={view.kind === "project" && view.projectId === p.id}
+                  onClick={() => setView({ kind: "project", projectId: p.id })}
+                  draggable
+                  menu={menuFor?.(p)}
+                />
+              ),
+            )}
           </SortableContext>
         ) : (
           projects.map((p) => (
-            <SidebarItem
+            <ProjectItem
               key={p.id}
-              projectColor={`var(--project-${p.color})`}
-              label={p.name}
+              project={p}
               active={view.kind === "project" && view.projectId === p.id}
               onClick={() => setView({ kind: "project", projectId: p.id })}
             />
@@ -216,14 +393,12 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
               value={name}
               placeholder={t("project.newProjectName")}
               onChange={(e) => setName(e.target.value)}
-              onBlur={createProject}
+              onBlur={() => finishCreate(true)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") createProject();
-                if (e.key === "Escape") {
-                  setName("");
-                  setAdding(false);
-                }
+                if (e.key === "Enter") finishCreate(true);
+                if (e.key === "Escape") finishCreate(false);
               }}
+              maxLength={200}
               style={{
                 height: 34,
                 margin: "0 2px",
@@ -237,8 +412,40 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
               }}
             />
           ) : (
-            <SidebarItem icon="plus" label={t("project.newProject")} onClick={() => setAdding(true)} />
+            <SidebarItem icon="plus" label={t("project.newProject")} onClick={startAdding} />
           ))}
+        {archived.length > 0 && (
+          <>
+            <button
+              type="button"
+              aria-expanded={showArchived}
+              onClick={() => setShowArchived((v) => !v)}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "14px 12px 4px", background: "none", border: "none", cursor: "pointer",
+                fontFamily: "var(--font-sans)", fontSize: 11, fontWeight: 500, letterSpacing: "0.4px",
+                textTransform: "uppercase", color: "var(--text-tertiary)", textAlign: "left",
+              }}
+            >
+              <Icon name={showArchived ? "chevron-down" : "chevron-right"} size={12} />
+              {t("project.archivedProjects")} ({archived.length})
+            </button>
+            {showArchived &&
+              archived.map((p) =>
+                writable && renamingId === p.id ? (
+                  renameInput(p)
+                ) : (
+                  <ProjectItem
+                    key={p.id}
+                    project={p}
+                    active={view.kind === "project" && view.projectId === p.id}
+                    onClick={() => setView({ kind: "project", projectId: p.id })}
+                    menu={menuFor?.(p)}
+                  />
+                ),
+              )}
+          </>
+        )}
       </nav>
 
       <div style={{ marginTop: "auto", padding: 12, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -250,6 +457,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
         )}
         <WorkspaceSwitcher />
       </div>
+      {menu && menuProject && writable && <ProjectMenu key={menuProject.id} project={menuProject} anchor={menu.anchor} returnFocus={menu.returnFocus} onClose={closeMenu} onRename={() => startRename(menuProject)} />}
     </aside>
   );
 }

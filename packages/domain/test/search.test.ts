@@ -173,6 +173,17 @@ describe("searchReplica (grouped; shared with mobile — D2/I6)", () => {
     ).toEqual([live.id, archived.id]);
   });
 
+  it("hides tasks of archived projects unless asked", () => {
+    const archived = project({ name: "Finance old", archived_at: "2026-01-01T00:00:00Z" });
+    const inArchived = task({ title: "Finance report", project_id: archived.id });
+    expect(searchReplica({ ...EMPTY, tasks: [inArchived], projects: [archived], query: "finance" }).tasks).toEqual([]);
+    expect(
+      searchReplica({
+        ...EMPTY, tasks: [inArchived], projects: [archived], query: "finance", includeArchivedProjects: true,
+      }).tasks.map((t) => t.id),
+    ).toEqual([inArchived.id]);
+  });
+
   it("caps tasks and returns nothing for a blank query", () => {
     const many = Array.from({ length: 10 }, (_, i) => task({ title: `find me ${i}` }));
     expect(searchReplica({ ...EMPTY, tasks: many, query: "find me", cap: 3 }).tasks).toHaveLength(3);

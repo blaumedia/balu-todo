@@ -8,7 +8,7 @@ export function TodayView({ snapshot }: { snapshot: Snapshot }) {
   const { t, locale } = useT();
   const maps = useMaps(snapshot);
   const today = todayLocalISO();
-  const list = selectList(snapshot.tasks, "today", today);
+  const list = selectList(snapshot.tasks, snapshot.projects, "today", today);
   const day = list.filter((tk) => !tk.evening);
   const evening = list.filter((tk) => tk.evening);
 

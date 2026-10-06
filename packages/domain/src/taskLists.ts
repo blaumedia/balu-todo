@@ -1,8 +1,9 @@
 // Smart-list predicates + orderings — the shared client/server truth from
 // contract §4. Every client renders lists through `selectList`.
 
-import type { IsoDate, SmartList, Task } from "./types.js";
+import type { IsoDate, Project, SmartList, Task } from "./types.js";
 import { compareISO } from "./dates.js";
+import { excludeArchivedProjectTasks } from "./projects.js";
 
 /** open = not completed and not deleted (contract §4). */
 export function isOpen(t: Task): boolean {
@@ -146,14 +147,20 @@ function compareAnytime(a: Task, b: Task): number {
  * Filter `tasks` to `list` and return them sorted per contract §4.
  * Grouped lists (Upcoming, Logbook) are returned flat but pre-sorted so the
  * view only has to slice on the grouping key.
+ * Tasks of archived projects are excluded from every list except Logbook.
  */
 export function selectList(
   tasks: ReadonlyArray<Task>,
+  projects: ReadonlyArray<Project>,
   list: SmartList,
   today: IsoDate,
   userId?: string | null,
 ): Task[] {
-  const filtered = tasks.filter((t) => matchesList(t, list, today, userId));
+  // Logbook is history: a task completed while its project was live stays on
+  // record after the project is archived (deleting the project removes it).
+  // To hide those too, drop the `list === "logbook"` branch.
+  const pool = list === "logbook" ? tasks : excludeArchivedProjectTasks(tasks, projects);
+  const filtered = pool.filter((t) => matchesList(t, list, today, userId));
   switch (list) {
     case "today":
       filtered.sort((a, b) => compareToday(a, b, today));

@@ -23,7 +23,7 @@ export default function UpcomingScreen() {
 
   useFocusEffect(useCallback(() => setContext({ kind: 'list', list: 'upcoming' }), [setContext]));
 
-  const tasks = selectList(snap.tasks, 'upcoming', today);
+  const tasks = selectList(snap.tasks, snap.projects, 'upcoming', today);
 
   // Preserve the contract ordering; bucket into consecutive date groups.
   const groups: { date: IsoDate; items: Task[] }[] = [];

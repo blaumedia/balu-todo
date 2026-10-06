@@ -2,6 +2,7 @@
 // A small explicit map keeps icon names typed and the bundle tree-shakeable.
 import {
   Archive,
+  ArchiveRestore,
   ArrowLeft,
   Bell,
   Calendar,
@@ -26,6 +27,7 @@ import {
   MessageSquare,
   Moon,
   MoreHorizontal,
+  Palette,
   Paperclip,
   Pencil,
   Plus,
@@ -50,6 +52,7 @@ import type { ComponentType } from 'react';
 
 const MAP = {
   archive: Archive,
+  'archive-restore': ArchiveRestore,
   'arrow-left': ArrowLeft,
   bell: Bell,
   calendar: Calendar,
@@ -74,6 +77,7 @@ const MAP = {
   'message-square': MessageSquare,
   moon: Moon,
   'more-horizontal': MoreHorizontal,
+  palette: Palette,
   paperclip: Paperclip,
   pencil: Pencil,
   plus: Plus,

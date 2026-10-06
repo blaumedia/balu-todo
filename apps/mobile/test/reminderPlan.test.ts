@@ -1,4 +1,4 @@
-import type { Task } from '@balu/domain';
+import type { Project, Task } from '@balu/domain';
 import { describe, expect, it } from 'vitest';
 import { REMINDER_CAP, reconcileReminders } from '../src/lib/reminderPlan';
 
@@ -35,7 +35,24 @@ function task(over: Partial<Task>): Task {
   };
 }
 
-const plain = { nowMs: NOW, renderBody: () => '' };
+let pseq = 0;
+function project(over: Partial<Project> = {}): Project {
+  pseq += 1;
+  return {
+    id: `p${pseq}`,
+    workspace_id: 'w1',
+    name: `Project ${pseq}`,
+    color: 'blue',
+    sort_order: pseq * 1000,
+    archived_at: null,
+    created_at: '2026-07-01T00:00:00Z',
+    updated_at: '2026-07-01T00:00:00Z',
+    is_deleted: false,
+    ...over,
+  };
+}
+
+const plain = { nowMs: NOW, projects: [], renderBody: () => '' };
 
 describe('reconcileReminders', () => {
   it('schedules only open tasks with a future reminder_at', () => {
@@ -89,10 +106,25 @@ describe('reconcileReminders', () => {
     expect(reconcileReminders({ ...plain, tasks: [bad] })).toHaveLength(0);
   });
 
+  it('skips tasks inside archived projects', () => {
+    const archived = project({ archived_at: '2026-07-20T00:00:00Z' });
+    const live = project();
+    const inArchived = task({ project_id: archived.id, reminder_at: '2026-07-24T09:00:00Z' });
+    const inLive = task({ project_id: live.id, reminder_at: '2026-07-24T10:00:00Z' });
+
+    const out = reconcileReminders({
+      ...plain,
+      tasks: [inArchived, inLive],
+      projects: [archived, live],
+    });
+    expect(out.map((r) => r.taskId)).toEqual([inLive.id]);
+  });
+
   it('builds the body via the injected renderBody', () => {
     const t = task({ reminder_at: '2026-07-24T09:00:00Z', deadline: '2026-07-31' });
     const out = reconcileReminders({
       nowMs: NOW,
+      projects: [],
       tasks: [t],
       renderBody: (task) => `Body:${task.deadline}`,
     });

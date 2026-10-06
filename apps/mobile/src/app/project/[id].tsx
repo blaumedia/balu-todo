@@ -1,19 +1,20 @@
-import { canWrite, isOpen, todayLocalISO, type Task } from '@balu/domain';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { canWrite, isOpen, nextProjectSortOrder, todayLocalISO, type Task } from '@balu/domain';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
+import { MoreButton } from '../../components/MoreButton';
 import { ProgressRing } from '../../components/ProgressRing';
 import { StackHeader } from '../../components/StackHeader';
 import { TaskItems } from '../../components/TaskList';
 import { EmptyState, SectionHeader } from '../../components/ui';
 import { useT } from '../../i18n';
-import { deleteSection } from '../../lib/actions';
+import { deleteSection, updateProject } from '../../lib/actions';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
-import { gutter, projectHex, space } from '../../theme/tokens';
+import { font, gutter, projectHex, space } from '../../theme/tokens';
 
 export default function ProjectScreen() {
   const theme = useTheme();
@@ -23,8 +24,10 @@ export default function ProjectScreen() {
   const maps = useMaps(snap);
   const today = todayLocalISO();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const navigation = useNavigation();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
+  const openProjectActions = useApp((s) => s.openProjectActions);
 
   useFocusEffect(useCallback(() => setContext({ kind: 'project', projectId: id }), [setContext, id]));
 
@@ -46,6 +49,41 @@ export default function ProjectScreen() {
   const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined;
   const writable = canWrite(myRole);
 
+  // Leave the screen once the project is gone: deleted here (the optimistic
+  // record stays, flagged is_deleted) or deleted elsewhere (a synced delete is
+  // dropped from the replica entirely, so there is no flagged record to see -
+  // the project simply stops being found). `seen` remembers the id this screen
+  // has actually shown, so a project that has not loaded yet is not gone; the
+  // status gate mirrors the web Shell (never act on unconfirmed data);
+  // `healed` makes the pop fire once.
+  const seen = useRef<string | null>(null);
+  const healed = useRef(false);
+  // Screen-scoped focus in state so the heal effect re-runs when focus returns:
+  // going back while another screen sits on top (Settings pushed over the
+  // project) would pop that screen instead of leaving this one.
+  const [focused, setFocused] = useState(() => navigation.isFocused());
+  useEffect(() => {
+    const unsubFocus = navigation.addListener('focus', () => setFocused(true));
+    const unsubBlur = navigation.addListener('blur', () => setFocused(false));
+    return () => {
+      unsubFocus();
+      unsubBlur();
+    };
+  }, [navigation]);
+  useEffect(() => {
+    if (project && !project.is_deleted) {
+      seen.current = id;
+      return;
+    }
+    const gone = project?.is_deleted === true || (seen.current === id && project == null && snap.status === 'synced');
+    if (!gone || healed.current || !focused) return;
+    healed.current = true;
+    // The screen's own navigation, not the global router: back must pop this
+    // screen, never whatever happens to be on top of it.
+    if (navigation.canGoBack()) navigation.goBack();
+    else router.replace('/browse');
+  }, [project, snap.status, focused, id, navigation]);
+
   const confirmDeleteSection = (sectionId: string) =>
     Alert.alert(t('project.deleteSection'), t('project.deleteSectionConfirm'), [
       { text: t('common.cancel'), style: 'cancel' },
@@ -57,8 +95,24 @@ export default function ProjectScreen() {
       <StackHeader
         title={project?.name ?? ''}
         colorDot={projectHex(project?.color)}
-        right={<ProgressRing done={doneCount} total={projectTasks.length} />}
+        right={
+          <>
+            <ProgressRing done={doneCount} total={projectTasks.length} />
+            {writable ? <MoreButton label={t('project.actions')} onPress={() => openProjectActions(id)} /> : null}
+          </>
+        }
       />
+      {project?.archived_at != null ? (
+        <View style={[styles.archivedBanner, { borderBottomColor: theme.border }]}>
+          <Icon name="archive" size={16} color={theme.textTertiary} strokeWidth={2} />
+          <Text style={[styles.archivedText, { color: theme.textSecondary }]}>{t('project.archived')}</Text>
+          {writable ? (
+            <Pressable onPress={() => updateProject(id, { archived_at: null, sort_order: nextProjectSortOrder(snap.projects) })} hitSlop={10} accessibilityRole="button">
+              <Text style={[styles.unarchive, { color: theme.accent }]}>{t('project.unarchive')}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {openTasks.length === 0 && sections.length === 0 ? (
           <EmptyState text={t('empty.project')} />
@@ -102,4 +156,7 @@ const styles = StyleSheet.create({
   // Shrinkable so a long section name truncates instead of shoving the icon out.
   sectionTitle: { flex: 1, minWidth: 0 },
   sectionDelete: { paddingTop: space.s5, paddingBottom: space.s2, paddingRight: gutter },
+  archivedBanner: { flexDirection: 'row', alignItems: 'center', gap: space.s2, paddingHorizontal: gutter, paddingVertical: space.s2, borderBottomWidth: StyleSheet.hairlineWidth },
+  archivedText: { flex: 1, fontSize: font.secondary },
+  unarchive: { fontSize: font.secondary, fontWeight: font.weightMedium },
 });

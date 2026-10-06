@@ -2,7 +2,7 @@
 // a plain node (vitest) environment. Maps a replica task snapshot to the set of
 // local notifications that *should* be scheduled; `notifications.ts` performs
 // the impure scheduling against expo-notifications.
-import { isOpen, type Task } from '@balu/domain';
+import { excludeArchivedProjectTasks, isOpen, type Project, type Task } from '@balu/domain';
 
 /** iOS caps pending local notifications at 64; we stay well under (contract §8). */
 export const REMINDER_CAP = 50;
@@ -20,6 +20,8 @@ export interface DesiredReminder {
 
 export interface ReconcileInput {
   tasks: readonly Task[];
+  /** Replica projects; an archived project's tasks get no reminder (same rule as every list). */
+  projects: readonly Project[];
   /** "now" in epoch ms; injected so the selection is deterministic in tests. */
   nowMs: number;
   /** Renders the notification body for a task (project · deadline, localized). */
@@ -30,14 +32,16 @@ export interface ReconcileInput {
 
 /**
  * The desired local-notification set for a replica snapshot: open, non-deleted
- * tasks whose `reminder_at` is strictly in the future, soonest first, capped.
- * Pure and total — same input always yields the same output.
+ * tasks outside archived projects whose `reminder_at` is strictly in the future,
+ * soonest first, capped. Pure and total - same input always yields the same
+ * output.
  */
 export function reconcileReminders(input: ReconcileInput): DesiredReminder[] {
   const cap = input.cap ?? REMINDER_CAP;
   const desired: DesiredReminder[] = [];
 
-  for (const task of input.tasks) {
+  const tasks = excludeArchivedProjectTasks(input.tasks, input.projects);
+  for (const task of tasks) {
     if (!isOpen(task) || task.reminder_at == null) continue;
     const fireAtMs = Date.parse(task.reminder_at);
     if (Number.isNaN(fireAtMs) || fireAtMs <= input.nowMs) continue;

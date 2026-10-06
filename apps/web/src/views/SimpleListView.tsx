@@ -1,7 +1,6 @@
-import { selectList, todayLocalISO, type Project, type SmartList, type Task } from "@balu/domain";
+import { selectList, spacedOrders, todayLocalISO, type Project, type SmartList, type Task } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
-import { spacedOrders } from "../lib/reorder.js";
 import { useMaps } from "../lib/maps.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
@@ -19,7 +18,7 @@ export function SimpleListView({ snapshot, list }: { snapshot: Snapshot; list: S
   const maps = useMaps(snapshot);
   const userId = useApp((s) => s.user?.id);
   const today = todayLocalISO();
-  const tasks = selectList(snapshot.tasks, list, today, userId);
+  const tasks = selectList(snapshot.tasks, snapshot.projects, list, today, userId);
 
   // Anytime is grouped by project (each project is its own reorder container,
   // contract §4 "project order, then sort_order").

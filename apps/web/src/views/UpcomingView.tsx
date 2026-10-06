@@ -16,7 +16,7 @@ export function UpcomingView({ snapshot }: { snapshot: Snapshot }) {
   const { t, locale } = useT();
   const maps = useMaps(snapshot);
   const today = todayLocalISO();
-  const list = selectList(snapshot.tasks, "upcoming", today);
+  const list = selectList(snapshot.tasks, snapshot.projects, "upcoming", today);
 
   // Bucket by group-date: the next 7 days individually, then weekly buckets.
   const byDate = new Map<string, Task[]>();

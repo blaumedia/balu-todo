@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  excludeArchivedProjectTasks,
   matchesList,
   searchItems,
   todayLocalISO,
@@ -89,7 +90,7 @@ export function CommandPalette() {
       const results = searchItems(
         q,
         {
-          tasks: snapshot.tasks.filter((tk) => !tk.is_deleted),
+          tasks: excludeArchivedProjectTasks(snapshot.tasks.filter((tk) => !tk.is_deleted), snapshot.projects),
           projects: snapshot.projects.filter((p) => !p.is_deleted && p.archived_at == null),
           labels: snapshot.labels.filter((l) => !l.is_deleted),
         },

@@ -27,6 +27,7 @@ export interface AppState {
   quickAddOpen: boolean;
   detailTaskId: string | null;
   scheduleTaskId: string | null;
+  projectActionsId: string | null;
 
   setBoot(b: Boot): void;
   setServerUrl(url: string | null): void;
@@ -43,6 +44,8 @@ export interface AppState {
   closeDetail(): void;
   openSchedule(taskId: string): void;
   closeSchedule(): void;
+  openProjectActions(projectId: string): void;
+  closeProjectActions(): void;
 
   reset(): void;
 }
@@ -61,6 +64,7 @@ export const useApp = create<AppState>((set) => ({
   quickAddOpen: false,
   detailTaskId: null,
   scheduleTaskId: null,
+  projectActionsId: null,
 
   setBoot: (boot) => set({ boot }),
   setServerUrl: (serverUrl) => {
@@ -95,6 +99,8 @@ export const useApp = create<AppState>((set) => ({
   closeDetail: () => set({ detailTaskId: null }),
   openSchedule: (scheduleTaskId) => set({ scheduleTaskId }),
   closeSchedule: () => set({ scheduleTaskId: null }),
+  openProjectActions: (projectActionsId) => set({ projectActionsId }),
+  closeProjectActions: () => set({ projectActionsId: null }),
 
   reset: () =>
     set({
@@ -106,5 +112,6 @@ export const useApp = create<AppState>((set) => ({
       quickAddOpen: false,
       detailTaskId: null,
       scheduleTaskId: null,
+      projectActionsId: null,
     }),
 }));

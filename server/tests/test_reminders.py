@@ -139,3 +139,78 @@ def test_reminder_sent_at_not_in_sync_payload(client, user):
     assert full["tasks"]
     for task in full["tasks"]:
         assert "reminder_sent_at" not in task
+
+
+def test_reminder_in_live_project_still_delivered(client, user):
+    _configure_ntfy(client, user)
+    sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="p1", name="Live"),
+            cmd("task_add", temp_id="t1", title="Sichtbar", project_id="p1", reminder_at=PAST),
+        ],
+    )
+    rec = Recorder()
+    assert _run_tick(rec) == 1
+    assert len(rec.calls) == 1
+
+
+def test_reminder_in_archived_project_is_consumed_silently(client, user):
+    _configure_ntfy(client, user)
+    added = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="p1", name="Alt"),
+            cmd("task_add", temp_id="t1", title="Hidden", project_id="p1", reminder_at=PAST),
+        ],
+    )
+    project_id = added["temp_id_mapping"]["p1"]
+    archived = sync(
+        client,
+        user,
+        added["sync_token"],
+        [cmd("project_update", id=project_id, archived_at="2026-01-01T00:00:00Z")],
+    )
+
+    # Consumed like the no-channel case: processed, but nothing delivered.
+    rec = Recorder()
+    assert _run_tick(rec) == 1
+    assert rec.calls == []
+
+    # Unarchiving must not replay the stale reminder: it was already stamped.
+    sync(
+        client,
+        user,
+        archived["sync_token"],
+        [cmd("project_update", id=project_id, archived_at=None)],
+    )
+    assert _run_tick(Recorder()) == 0
+
+
+def test_reminder_of_subtask_follows_parents_archived_project(client, user):
+    _configure_ntfy(client, user)
+    added = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="p1", name="Alt"),
+            cmd("task_add", temp_id="t1", title="Parent", project_id="p1"),
+            cmd("task_add", temp_id="t2", title="Child", parent_task_id="t1", reminder_at=PAST),
+        ],
+    )
+    project_id = added["temp_id_mapping"]["p1"]
+    sync(
+        client,
+        user,
+        added["sync_token"],
+        [cmd("project_update", id=project_id, archived_at="2026-01-01T00:00:00Z")],
+    )
+
+    rec = Recorder()
+    assert _run_tick(rec) == 1
+    assert rec.calls == []

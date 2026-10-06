@@ -68,6 +68,7 @@ async function reconcile(): Promise<void> {
 
   const desired = reconcileReminders({
     tasks: snap.tasks,
+    projects: snap.projects,
     nowMs: Date.now(),
     renderBody: (task) => buildBody(task, projects, locale, t),
   });
