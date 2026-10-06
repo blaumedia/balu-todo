@@ -145,7 +145,7 @@ describe("selectList Today ordering", () => {
     const p1 = task({ start_date: TODAY, priority: 1, sort_order: 4000 });
     const p3 = task({ start_date: TODAY, priority: 3, sort_order: 300 });
     const none = task({ start_date: TODAY, priority: 0, sort_order: 200 });
-    const ordered = selectList([none, eveningTask, p3, p1, overdue], "today", TODAY);
+    const ordered = selectList([none, eveningTask, p3, p1, overdue], [], "today", TODAY);
     expect(ordered.map((t) => t.id)).toEqual([
       overdue.id, // overdue deadline first
       p1.id, // then day tasks by priority
@@ -161,7 +161,7 @@ describe("selectList Upcoming ordering", () => {
     const far = task({ start_date: "2026-08-10" });
     const near = task({ start_date: "2026-07-25" });
     const mid = task({ deadline: "2026-07-28" });
-    const out = selectList([far, mid, near], "upcoming", TODAY);
+    const out = selectList([far, mid, near], [], "upcoming", TODAY);
     expect(out.map((t) => t.id)).toEqual([near.id, mid.id, far.id]);
   });
   it("upcomingGroupDate picks earlier future date", () => {
@@ -175,7 +175,7 @@ describe("selectList Logbook ordering", () => {
     const a = task({ completed_at: "2026-07-22T09:00:00Z" });
     const b = task({ completed_at: "2026-07-23T09:00:00Z" });
     const c = task({ completed_at: "2026-07-21T09:00:00Z" });
-    const out = selectList([a, b, c], "logbook", TODAY);
+    const out = selectList([a, b, c], [], "logbook", TODAY);
     expect(out.map((t) => t.id)).toEqual([b.id, a.id, c.id]);
   });
 });
@@ -208,7 +208,7 @@ describe("selectList Assigned ordering", () => {
     const early = task({ assigned_to: "u1", deadline: "2026-07-25", sort_order: 9000 });
     const late = task({ assigned_to: "u1", deadline: "2026-08-10", sort_order: 10 });
     const other = task({ assigned_to: "u2", deadline: "2026-07-24" });
-    const out = selectList([noDeadlineP1, other, late, noDeadlineP3, early], "assigned", TODAY, "u1");
+    const out = selectList([noDeadlineP1, other, late, noDeadlineP3, early], [], "assigned", TODAY, "u1");
     expect(out.map((t) => t.id)).toEqual([
       early.id, // earliest deadline
       late.id, // later deadline
@@ -224,5 +224,32 @@ describe("nextSortOrder", () => {
   });
   it("returns max + 1000", () => {
     expect(nextSortOrder([{ sort_order: 1000 }, { sort_order: 3000 }])).toBe(4000);
+  });
+});
+
+describe("selectList and archived projects", () => {
+  const live = { id: "live", sort_order: 1000 };
+  const archived = { id: "archived", sort_order: 2000 };
+  // Minimal Project stand-ins: selectList only reads the archived flags.
+  const projects = [
+    { ...live, workspace_id: "w1", name: "Live", color: "blue", archived_at: null, created_at: "", updated_at: "", is_deleted: false },
+    { ...archived, workspace_id: "w1", name: "Archived", color: "blue", archived_at: "2026-01-01T00:00:00Z", created_at: "", updated_at: "", is_deleted: false },
+  ] satisfies import("../src/index.js").Project[];
+
+  const inArchived = task({ project_id: "archived" });
+  const inLive = task({ project_id: "live" });
+  const todayArchived = task({ project_id: "archived", start_date: TODAY });
+  const completedArchived = task({ project_id: "archived", completed_at: "2026-07-22T10:00:00Z" });
+
+  it("hides archived-project tasks from anytime", () => {
+    const out = selectList([inArchived, inLive], projects, "anytime", TODAY);
+    expect(out.map((t) => t.id)).toEqual([inLive.id]);
+  });
+  it("hides archived-project tasks from today", () => {
+    expect(selectList([todayArchived], projects, "today", TODAY)).toEqual([]);
+  });
+  it("keeps completed archived-project tasks in logbook", () => {
+    const out = selectList([completedArchived], projects, "logbook", TODAY);
+    expect(out.map((t) => t.id)).toEqual([completedArchived.id]);
   });
 });

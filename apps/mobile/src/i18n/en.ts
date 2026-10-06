@@ -186,6 +186,7 @@ export const en = {
   'project.archive': 'Archive',
   'project.unarchive': 'Unarchive',
   'project.archived': 'Archived',
+  'project.archivedSuffix': '(archived)',
   'project.archivedProjects': 'Archived projects',
   'project.delete': 'Delete project',
   'project.deleteConfirm': 'Delete this project? All tasks in it are deleted too. This cannot be undone.',

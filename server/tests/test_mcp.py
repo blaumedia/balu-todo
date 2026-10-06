@@ -473,6 +473,65 @@ def test_update_task_moves_project_and_section(client, user, mcp_on):
     assert '"project_id": null' in payload(cleared)
 
 
+def test_list_tasks_hides_archived_projects_unless_asked_for_by_id(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    first = sync(client, user, "*", [cmd("project_add", temp_id="p1", name="Archiv")])
+    project_id = first["temp_id_mapping"]["p1"]
+    call(
+        client,
+        key,
+        "create_task",
+        {"workspace_id": ws, "title": "Im Archiv", "project_id": project_id},
+    )
+    call(client, key, "create_task", {"workspace_id": ws, "title": "Sichtbar"})
+    sync(
+        client,
+        user,
+        first["sync_token"],
+        [cmd("project_update", id=project_id, archived_at="2026-01-01T00:00:00Z")],
+    )
+
+    listed = call(client, key, "list_tasks", {"workspace_id": ws})
+    assert "Sichtbar" in payload(listed)
+    assert "Im Archiv" not in payload(listed)
+
+    # Asking for the archived project by id still surfaces its tasks.
+    in_project = call(client, key, "list_tasks", {"workspace_id": ws, "project_id": project_id})
+    assert "Im Archiv" in payload(in_project)
+
+
+def test_archived_project_is_refused_as_a_target(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    first = sync(client, user, "*", [cmd("project_add", temp_id="p1", name="Archiv")])
+    project_id = first["temp_id_mapping"]["p1"]
+    sync(
+        client,
+        user,
+        first["sync_token"],
+        [cmd("project_update", id=project_id, archived_at="2026-01-01T00:00:00Z")],
+    )
+
+    created = call(
+        client, key, "create_task", {"workspace_id": ws, "title": "Nein", "project_id": project_id}
+    )
+    assert created["isError"] is True
+    assert "archived" in payload(created)
+
+    task_id = task_id_of(call(client, key, "create_task", {"workspace_id": ws, "title": "Inbox"}))
+    moved = call(
+        client,
+        key,
+        "update_task",
+        {"workspace_id": ws, "task_id": task_id, "project_id": project_id},
+    )
+    assert moved["isError"] is True
+    # The refusal happened before anything applied: the task is still in the inbox.
+    got = call(client, key, "get_task", {"workspace_id": ws, "task_id": task_id})
+    assert '"project_id": null' in payload(got)
+
+
 def test_a_rejected_move_is_refused_before_anything_is_applied(client, user, mcp_on):
     """The two halves of update_task commit separately, so a bad reference in the
     second must not let the first through."""

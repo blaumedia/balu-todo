@@ -17,7 +17,7 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const openQuickAdd = useApp((s) => s.openQuickAdd);
   const snap = useSnapshot();
-  const inboxCount = selectList(snap.tasks, 'inbox', todayLocalISO()).length;
+  const inboxCount = selectList(snap.tasks, snap.projects, 'inbox', todayLocalISO()).length;
 
   const icon = (name: IconName) => ({ color, size }: { color: ColorValue; size: number }) => (
     <Icon name={name} size={size} color={color as string} strokeWidth={2} />

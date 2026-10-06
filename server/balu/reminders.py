@@ -22,6 +22,7 @@ from .db import get_sessionmaker
 from .delivery import Sender, deliver_to_user, task_context
 from .models import Task
 from .notifications import send_to_channel
+from .projects import is_in_archived_project
 
 logger = logging.getLogger("balu.reminders")
 
@@ -65,7 +66,10 @@ def reminder_tick(
         .all()
     )
     for task in tasks:
-        deliver_reminder(session, task, sender)
+        # Archived = out of sight: consumed without delivery, like the no-channel
+        # case, so unarchiving months later does not replay a backlog.
+        if not is_in_archived_project(session, task):
+            deliver_reminder(session, task, sender)
         task.reminder_sent_at = now
     if tasks:
         session.commit()

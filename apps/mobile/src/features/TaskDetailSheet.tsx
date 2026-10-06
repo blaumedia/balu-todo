@@ -211,11 +211,12 @@ function DetailBody({
             theme={theme}
           />
           {snap.projects
-            .filter((p) => !p.is_deleted && p.archived_at == null)
+            // The task's own project stays listed even when archived (see web DetailPanel).
+            .filter((p) => !p.is_deleted && (p.archived_at == null || p.id === task.project_id))
             .map((p) => (
               <SubOption
                 key={p.id}
-                label={p.name}
+                label={p.archived_at != null ? `${p.name} ${t('project.archivedSuffix')}` : p.name}
                 dot={projectHex(p.color)}
                 active={task.project_id === p.id}
                 onPress={() => {

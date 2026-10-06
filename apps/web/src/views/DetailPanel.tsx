@@ -244,8 +244,10 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
     sync?.mutate({ type: "task_update", args: { id: task.id, ...args } });
   };
 
+  // The task's own project stays listed even when archived, otherwise the
+  // select would silently show "Inbox" for a task that is not in the inbox.
   const projects = snapshot.projects
-    .filter((p) => !p.is_deleted && p.archived_at == null)
+    .filter((p) => !p.is_deleted && (p.archived_at == null || p.id === task.project_id))
     .sort((a, b) => a.sort_order - b.sort_order);
   const sections = snapshot.sections
     .filter((s) => !s.is_deleted && s.project_id === task.project_id)
@@ -402,7 +404,7 @@ export function DetailPanel({ snapshot }: { snapshot: Snapshot }) {
               <option value="">{t("detail.noProject")}</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name}
+                  {p.archived_at != null ? `${p.name} ${t("project.archivedSuffix")}` : p.name}
                 </option>
               ))}
             </select>

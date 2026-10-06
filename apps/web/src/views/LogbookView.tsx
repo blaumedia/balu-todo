@@ -9,7 +9,7 @@ export function LogbookView({ snapshot }: { snapshot: Snapshot }) {
   const { t, locale } = useT();
   const maps = useMaps(snapshot);
   const today = todayLocalISO();
-  const list = selectList(snapshot.tasks, "logbook", today);
+  const list = selectList(snapshot.tasks, snapshot.projects, "logbook", today);
 
   // Grouped by completion day, newest first (selectList already sorted desc).
   const byDay = new Map<string, Task[]>();

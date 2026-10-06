@@ -191,6 +191,7 @@ export const de: Record<TranslationKey, string> = {
   'project.archive': 'Archivieren',
   'project.unarchive': 'Archivierung aufheben',
   'project.archived': 'Archiviert',
+  'project.archivedSuffix': '(archiviert)',
   'project.archivedProjects': 'Archivierte Projekte',
   'project.delete': 'Projekt löschen',
   'project.deleteConfirm': 'Dieses Projekt löschen? Alle Aufgaben darin werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.',

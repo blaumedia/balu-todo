@@ -18,7 +18,7 @@ export function SimpleListView({ snapshot, list }: { snapshot: Snapshot; list: S
   const maps = useMaps(snapshot);
   const userId = useApp((s) => s.user?.id);
   const today = todayLocalISO();
-  const tasks = selectList(snapshot.tasks, list, today, userId);
+  const tasks = selectList(snapshot.tasks, snapshot.projects, list, today, userId);
 
   // Anytime is grouped by project (each project is its own reorder container,
   // contract §4 "project order, then sort_order").

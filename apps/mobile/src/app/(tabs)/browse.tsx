@@ -40,12 +40,12 @@ export default function BrowseScreen() {
     return counts;
   }, [snap.tasks]);
 
-  const inboxCount = selectList(snap.tasks, 'inbox', today).length;
+  const inboxCount = selectList(snap.tasks, snap.projects, 'inbox', today).length;
   // "Assigned to me" is only meaningful in a shared workspace (contract §4).
   const members = snap.members.filter((m) => !m.is_deleted);
   const memberCount = members.length;
   const showAssigned = memberCount > 1 && user != null;
-  const assignedCount = user ? selectList(snap.tasks, 'assigned', today, user.id).length : 0;
+  const assignedCount = user ? selectList(snap.tasks, snap.projects, 'assigned', today, user.id).length : 0;
   const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined;
   const writable = canWrite(myRole);
   const projects = activeProjects(snap.projects);

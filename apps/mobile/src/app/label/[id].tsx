@@ -1,4 +1,4 @@
-import { isOpen, todayLocalISO } from '@balu/domain';
+import { excludeArchivedProjectTasks, isOpen, todayLocalISO } from '@balu/domain';
 import { useLocalSearchParams } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +18,7 @@ export default function LabelScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const label = snap.labels.find((l) => l.id === id);
-  const tasks = snap.tasks
+  const tasks = excludeArchivedProjectTasks(snap.tasks, snap.projects)
     .filter((x) => isOpen(x) && x.parent_task_id == null && x.label_ids.includes(id))
     .sort((a, b) => a.sort_order - b.sort_order);
 

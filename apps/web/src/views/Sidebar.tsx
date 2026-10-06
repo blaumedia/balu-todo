@@ -143,13 +143,13 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   const user = useApp((s) => s.user);
   const today = todayLocalISO();
   const counts: Partial<Record<SmartList, number>> = {
-    inbox: selectList(snapshot.tasks, "inbox", today).length,
-    today: selectList(snapshot.tasks, "today", today).length,
+    inbox: selectList(snapshot.tasks, snapshot.projects, "inbox", today).length,
+    today: selectList(snapshot.tasks, snapshot.projects, "today", today).length,
   };
 
   // "Assigned to me" surfaces only in shared workspaces (contract §4).
   const shared = snapshot.members.filter((m) => !m.is_deleted).length > 1;
-  const assignedCount = shared && user ? selectList(snapshot.tasks, "assigned", today, user.id).length : 0;
+  const assignedCount = shared && user ? selectList(snapshot.tasks, snapshot.projects, "assigned", today, user.id).length : 0;
 
   const projects = activeProjects(snapshot.projects);
   const archived = archivedProjects(snapshot.projects);

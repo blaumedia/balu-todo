@@ -22,7 +22,7 @@ export default function TodayScreen() {
 
   useFocusEffect(useCallback(() => setContext({ kind: 'list', list: 'today' }), [setContext]));
 
-  const all = selectList(snap.tasks, 'today', today);
+  const all = selectList(snap.tasks, snap.projects, 'today', today);
   const day = all.filter((x) => !x.evening);
   const evening = all.filter((x) => x.evening);
 
