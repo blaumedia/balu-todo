@@ -189,7 +189,9 @@ export const en = {
   'project.archivedSuffix': '(archived)',
   'project.archivedProjects': 'Archived projects',
   'project.delete': 'Delete project',
-  'project.deleteConfirm': 'Delete this project? All tasks in it are deleted too. This cannot be undone.',
+  'project.deleteConfirm': 'Delete “{name}” and its {count} open tasks? This cannot be undone.',
+  'project.deleteConfirmOne': 'Delete “{name}” and its 1 open task? This cannot be undone.',
+  'project.deleteConfirmEmpty': 'Delete “{name}”? This cannot be undone.',
 
   'date.today': 'Today',
   'date.tomorrow': 'Tomorrow',

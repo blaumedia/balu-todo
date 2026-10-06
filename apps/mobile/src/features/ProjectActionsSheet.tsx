@@ -1,4 +1,4 @@
-import { PROJECT_COLORS, canWrite, type Project } from '@balu/domain';
+import { isOpen, nextProjectSortOrder, PROJECT_COLORS, canWrite, type Project } from '@balu/domain';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
@@ -13,6 +13,13 @@ import { useTheme } from '../theme/ThemeProvider';
 import { font, hit, projectHex, radius, space } from '../theme/tokens';
 
 type Mode = 'menu' | 'rename' | 'color';
+
+/** Confirm text naming the project and its open top-level task count (0 / 1 / n wording). */
+function deleteConfirmText(t: (k: TranslationKey) => string, name: string, count: number): string {
+  const key: TranslationKey =
+    count === 0 ? 'project.deleteConfirmEmpty' : count === 1 ? 'project.deleteConfirmOne' : 'project.deleteConfirm';
+  return t(key).replace('{name}', () => name).replace('{count}', () => String(count));
+}
 
 export function ProjectActionsSheet() {
   const theme = useTheme();
@@ -61,6 +68,7 @@ export function ProjectActionsSheet() {
             onChangeText={setName}
             onSubmitEditing={saveRename}
             returnKeyType="done"
+            maxLength={200}
             placeholder={t('project.newProjectName')}
             placeholderTextColor={theme.textTertiary}
             style={[styles.input, { color: theme.textPrimary, borderColor: theme.border, backgroundColor: theme.surface }]}
@@ -93,8 +101,9 @@ export function ProjectActionsSheet() {
       );
     } else {
       const archived = project.archived_at != null;
+      const openCount = snap.tasks.filter((x) => isOpen(x) && x.project_id === project.id && x.parent_task_id == null).length;
       const confirmDelete = () =>
-        Alert.alert(t('project.delete'), t('project.deleteConfirm'), [
+        Alert.alert(t('project.delete'), deleteConfirmText(t, project.name, openCount), [
           { text: t('common.cancel'), style: 'cancel' },
           { text: t('common.delete'), style: 'destructive', onPress: () => { deleteProject(project.id); close(); } },
         ]);
@@ -102,7 +111,7 @@ export function ProjectActionsSheet() {
         { key: 'project.rename', icon: 'pencil', run: () => setMode('rename') },
         { key: 'project.color', icon: 'palette', run: () => setMode('color') },
         archived
-          ? { key: 'project.unarchive', icon: 'archive-restore', run: () => { updateProject(project.id, { archived_at: null }); close(); } }
+          ? { key: 'project.unarchive', icon: 'archive-restore', run: () => { updateProject(project.id, { archived_at: null, sort_order: nextProjectSortOrder(snap.projects) }); close(); } }
           : { key: 'project.archive', icon: 'archive', run: () => { updateProject(project.id, { archived_at: new Date().toISOString() }); close(); } },
         { key: 'project.delete', icon: 'trash-2', run: confirmDelete, tint: theme.danger },
       ];

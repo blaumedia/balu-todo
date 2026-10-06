@@ -1,4 +1,4 @@
-import type { Theme } from "@balu/domain";
+import { nextProjectSortOrder, type Theme } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
@@ -59,13 +59,13 @@ export function Toolbar({ snapshot }: { snapshot: Snapshot }) {
         background: "var(--surface)",
       }}
     >
-      <h1 style={{ margin: 0, fontSize: 24, fontWeight: "var(--weight-semibold)", color: "var(--text-primary)", letterSpacing: "-0.5px" }}>
+      <h1 title={title} style={{ margin: 0, fontSize: 24, fontWeight: "var(--weight-semibold)", color: "var(--text-primary)", letterSpacing: "-0.5px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {title}
       </h1>
       {progress && <ProgressRing value={progress.value} total={progress.total} showLabel />}
       {archivedId && <Badge tone="neutral">{t("project.archived")}</Badge>}
       {archivedId && writable && (
-        <Button variant="secondary" size="sm" icon="archive-restore" onClick={() => getSync()?.mutate({ type: "project_update", args: { id: archivedId, archived_at: null } })}>
+        <Button variant="secondary" size="sm" icon="archive-restore" onClick={() => getSync()?.mutate({ type: "project_update", args: { id: archivedId, archived_at: null, sort_order: nextProjectSortOrder(snapshot.projects) } })}>
           {t("project.unarchive")}
         </Button>
       )}

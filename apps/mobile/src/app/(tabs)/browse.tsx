@@ -1,6 +1,6 @@
-import { activeProjects, archivedProjects, canWrite, isOpen, nextSortOrder, reorderUpdates, selectList, todayLocalISO, type Project } from '@balu/domain';
+import { activeProjects, archivedProjects, canWrite, isOpen, nextProjectSortOrder, reorderUpdates, selectList, todayLocalISO, type Project } from '@balu/domain';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import DraggableFlatList, { type DragEndParams, type RenderItemParams } from 'react-native-draggable-flatlist';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -52,9 +52,18 @@ export default function BrowseScreen() {
   const archived = archivedProjects(snap.projects);
   const labels = snap.labels.filter((l) => !l.is_deleted).sort((a, b) => a.sort_order - b.sort_order);
 
+  // Enter (onSubmitEditing) and the unmount blur both land here; without the
+  // guard the second call creates a copy. Same settle-once guard as the web sidebar.
+  const createDone = useRef(false);
+  const startAdding = () => {
+    createDone.current = false;
+    setAdding(true);
+  };
   const createProject = () => {
+    if (createDone.current) return;
+    createDone.current = true;
     const name = newName.trim();
-    if (name) addProject({ name, color: 'blue', sort_order: nextSortOrder(projects) });
+    if (name) addProject({ name, color: 'blue', sort_order: nextProjectSortOrder(snap.projects) });
     setNewName('');
     setAdding(false);
   };
@@ -109,6 +118,7 @@ export default function BrowseScreen() {
               onChangeText={setNewName}
               onSubmitEditing={createProject}
               onBlur={createProject}
+              maxLength={200}
               placeholder={t('project.newProjectName')}
               placeholderTextColor={theme.textTertiary}
               style={[styles.newInput, { color: theme.textPrimary }]}
@@ -116,7 +126,7 @@ export default function BrowseScreen() {
             />
           </View>
         ) : (
-          <Pressable onPress={() => setAdding(true)} style={styles.newProject}>
+          <Pressable onPress={startAdding} style={styles.newProject}>
             <Icon name="plus" size={18} color={theme.accent} strokeWidth={2} />
             <Text style={[styles.newProjectText, { color: theme.accent }]}>{t('project.newProject')}</Text>
           </Pressable>

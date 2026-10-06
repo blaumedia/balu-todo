@@ -228,7 +228,9 @@ export const de: Record<TranslationKey, string> = {
   "project.archivedSuffix": "(archiviert)",
   "project.archivedProjects": "Archivierte Projekte",
   "project.delete": "Projekt löschen",
-  "project.deleteConfirm": "Dieses Projekt löschen? Alle Aufgaben darin werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.",
+  "project.deleteConfirm": "„{name}“ und die {count} offenen Aufgaben darin löschen? Das lässt sich nicht rückgängig machen.",
+  "project.deleteConfirmOne": "„{name}“ und die eine offene Aufgabe darin löschen? Das lässt sich nicht rückgängig machen.",
+  "project.deleteConfirmEmpty": "„{name}“ löschen? Das lässt sich nicht rückgängig machen.",
 
   // Screenreader-Ankündigungen für Drag & Drop; ein erfolgreicher Move bleibt
   // sonst still (Ablehnungen meldet sync.rejected).

@@ -1,6 +1,6 @@
-import { canWrite, isOpen, todayLocalISO, type Task } from '@balu/domain';
+import { canWrite, isOpen, nextProjectSortOrder, todayLocalISO, type Task } from '@balu/domain';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
@@ -48,15 +48,25 @@ export default function ProjectScreen() {
   const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined;
   const writable = canWrite(myRole);
 
-  // The project was deleted (here via the sheet, or remotely and the delta just
-  // arrived): leave the screen rather than render an empty, unnamed project.
-  // Only a present-and-deleted record counts; an id that is simply not in the
-  // replica yet must keep the screen until data arrives.
+  // Leave the screen once the project is gone: deleted here (the optimistic
+  // record stays, flagged is_deleted) or deleted elsewhere (a synced delete is
+  // dropped from the replica entirely, so there is no flagged record to see -
+  // the project simply stops being found). `seen` keeps an id that has not
+  // loaded yet on screen; the status gate mirrors the web Shell (never act on
+  // unconfirmed data); `healed` makes the pop fire once.
+  const seen = useRef(false);
+  const healed = useRef(false);
   useEffect(() => {
-    if (!project?.is_deleted) return;
+    if (project && !project.is_deleted) {
+      seen.current = true;
+      return;
+    }
+    const gone = project?.is_deleted === true || (seen.current && project == null && snap.status === 'synced');
+    if (!gone || healed.current) return;
+    healed.current = true;
     if (router.canGoBack()) router.back();
     else router.replace('/browse');
-  }, [project?.is_deleted]);
+  }, [project, snap.status]);
 
   const confirmDeleteSection = (sectionId: string) =>
     Alert.alert(t('project.deleteSection'), t('project.deleteSectionConfirm'), [
@@ -81,7 +91,7 @@ export default function ProjectScreen() {
           <Icon name="archive" size={16} color={theme.textTertiary} strokeWidth={2} />
           <Text style={[styles.archivedText, { color: theme.textSecondary }]}>{t('project.archived')}</Text>
           {writable ? (
-            <Pressable onPress={() => updateProject(id, { archived_at: null })} hitSlop={10} accessibilityRole="button">
+            <Pressable onPress={() => updateProject(id, { archived_at: null, sort_order: nextProjectSortOrder(snap.projects) })} hitSlop={10} accessibilityRole="button">
               <Text style={[styles.unarchive, { color: theme.accent }]}>{t('project.unarchive')}</Text>
             </Pressable>
           ) : null}

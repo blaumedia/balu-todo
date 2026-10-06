@@ -153,6 +153,16 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
 
   const projects = activeProjects(snapshot.projects);
   const archived = archivedProjects(snapshot.projects);
+  // Where each project row is rendered right now. A rename input unmounts when
+  // its project leaves that spot (archived or deleted on another device); the
+  // unmount fires blur, which must cancel rather than commit a half-typed name.
+  // Render-body ref for the same reason as writableRef.
+  const rowHome = useRef(new Map<string, "live" | "archived">());
+  rowHome.current = new Map<string, "live" | "archived">([
+    ...projects.map((p) => [p.id, "live"] as const),
+    ...(showArchived ? archived.map((p) => [p.id, "archived"] as const) : []),
+  ]);
+  const renameHome = useRef<"live" | "archived" | null>(null);
 
   function startAdding() {
     createDone.current = false;
@@ -173,6 +183,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   }
 
   function startRename(p: Project) {
+    renameHome.current = rowHome.current.get(p.id) ?? null;
     renameDone.current = false;
     setRenameValue(p.name);
     setRenamingId(p.id);
@@ -182,7 +193,9 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
     if (renameDone.current) return;
     renameDone.current = true;
     const trimmed = renameValue.trim();
-    if (save && writableRef.current && trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
+    // The row left the spot it was renamed in: this blur is the unmount, not the user.
+    const stillThere = rowHome.current.get(p.id) === renameHome.current;
+    if (save && stillThere && writableRef.current && trimmed && trimmed !== p.name) getSync()?.mutate({ type: "project_update", args: { id: p.id, name: trimmed } });
     setRenamingId(null);
   }
 
@@ -213,6 +226,15 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   useEffect(() => {
     if (menu && !menuProject) setMenu(null);
   }, [menu, menuProject]);
+
+  // The renamed row vanished without a blur: clear the state so the input
+  // cannot reappear with a stale value if the project comes back.
+  useEffect(() => {
+    if (renamingId && !rowHome.current.has(renamingId)) {
+      renameDone.current = true;
+      setRenamingId(null);
+    }
+  }, [renamingId, snapshot.projects, showArchived]);
 
   // Project reorder → per-project `project_update` sort_order (contract §5.4 has
   // no project_reorder command; sort_order patches are the sanctioned path).
@@ -255,6 +277,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
           if (e.key === "Enter") finishRename(p, true);
           if (e.key === "Escape") finishRename(p, false);
         }}
+        maxLength={200}
         style={{
           height: 34,
           margin: "0 2px",
@@ -374,6 +397,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
                 if (e.key === "Enter") finishCreate(true);
                 if (e.key === "Escape") finishCreate(false);
               }}
+              maxLength={200}
               style={{
                 height: 34,
                 margin: "0 2px",
