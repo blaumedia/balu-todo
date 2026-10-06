@@ -1,6 +1,6 @@
 import { canWrite, isOpen, nextProjectSortOrder, todayLocalISO, type Task } from '@balu/domain';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useRef } from 'react';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../../components/Icon';
@@ -24,6 +24,7 @@ export default function ProjectScreen() {
   const maps = useMaps(snap);
   const today = todayLocalISO();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const navigation = useNavigation();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
   const openProjectActions = useApp((s) => s.openProjectActions);
@@ -51,22 +52,37 @@ export default function ProjectScreen() {
   // Leave the screen once the project is gone: deleted here (the optimistic
   // record stays, flagged is_deleted) or deleted elsewhere (a synced delete is
   // dropped from the replica entirely, so there is no flagged record to see -
-  // the project simply stops being found). `seen` keeps an id that has not
-  // loaded yet on screen; the status gate mirrors the web Shell (never act on
-  // unconfirmed data); `healed` makes the pop fire once.
-  const seen = useRef(false);
+  // the project simply stops being found). `seen` remembers the id this screen
+  // has actually shown, so a project that has not loaded yet is not gone; the
+  // status gate mirrors the web Shell (never act on unconfirmed data);
+  // `healed` makes the pop fire once.
+  const seen = useRef<string | null>(null);
   const healed = useRef(false);
+  // Screen-scoped focus in state so the heal effect re-runs when focus returns:
+  // going back while another screen sits on top (Settings pushed over the
+  // project) would pop that screen instead of leaving this one.
+  const [focused, setFocused] = useState(() => navigation.isFocused());
+  useEffect(() => {
+    const off = navigation.addListener('focus', () => setFocused(true));
+    const on = navigation.addListener('blur', () => setFocused(false));
+    return () => {
+      off();
+      on();
+    };
+  }, [navigation]);
   useEffect(() => {
     if (project && !project.is_deleted) {
-      seen.current = true;
+      seen.current = id;
       return;
     }
-    const gone = project?.is_deleted === true || (seen.current && project == null && snap.status === 'synced');
-    if (!gone || healed.current) return;
+    const gone = project?.is_deleted === true || (seen.current === id && project == null && snap.status === 'synced');
+    if (!gone || healed.current || !focused) return;
     healed.current = true;
-    if (router.canGoBack()) router.back();
+    // The screen's own navigation, not the global router: back must pop this
+    // screen, never whatever happens to be on top of it.
+    if (navigation.canGoBack()) navigation.goBack();
     else router.replace('/browse');
-  }, [project, snap.status]);
+  }, [project, snap.status, focused, id, navigation]);
 
   const confirmDeleteSection = (sectionId: string) =>
     Alert.alert(t('project.deleteSection'), t('project.deleteSectionConfirm'), [

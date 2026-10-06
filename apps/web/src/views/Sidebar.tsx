@@ -230,7 +230,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
   // The renamed row vanished without a blur: clear the state so the input
   // cannot reappear with a stale value if the project comes back.
   useEffect(() => {
-    if (renamingId && !rowHome.current.has(renamingId)) {
+    if (renamingId && rowHome.current.get(renamingId) !== renameHome.current) {
       renameDone.current = true;
       setRenamingId(null);
     }

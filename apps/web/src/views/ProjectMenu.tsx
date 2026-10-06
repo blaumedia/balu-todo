@@ -19,7 +19,7 @@ export function ProjectMenu({ project, anchor, onClose, onRename, returnFocus }:
   const setView = useApp((s) => s.setView);
   const archived = project.archived_at != null;
   const snapshot = useSnapshot();
-  // Same count the sidebar/browse rows show: open, top-level, in this project.
+  // Same count the mobile Browse row shows: open, top-level, in this project.
   const openCount = snapshot.tasks.filter((tk) => isOpen(tk) && tk.project_id === project.id && tk.parent_task_id == null).length;
 
   function update(args: Record<string, unknown>) {

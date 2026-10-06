@@ -501,6 +501,42 @@ def test_list_tasks_hides_archived_projects_unless_asked_for_by_id(client, user,
     assert "Im Archiv" in payload(in_project)
 
 
+def test_archived_project_hides_subtasks_without_their_own_project(client, user, mcp_on):
+    """A subtask carries no project_id; its archived parent's project still hides it."""
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    first = sync(client, user, "*", [cmd("project_add", temp_id="p1", name="Archiv")])
+    project_id = first["temp_id_mapping"]["p1"]
+    created = sync(
+        client,
+        user,
+        first["sync_token"],
+        [
+            cmd("task_add", temp_id="pa", title="Im Archiv", project_id=project_id),
+            cmd("task_add", temp_id="pi", title="Sichtbar"),
+        ],
+    )
+    archived_parent = created["temp_id_mapping"]["pa"]
+    inbox_parent = created["temp_id_mapping"]["pi"]
+    sync(
+        client,
+        user,
+        created["sync_token"],
+        [
+            cmd("task_add", temp_id="sa", title="Archiv-Kind", parent_task_id=archived_parent),
+            cmd("task_add", temp_id="si", title="Inbox-Kind", parent_task_id=inbox_parent),
+            cmd("project_update", id=project_id, archived_at="2026-01-01T00:00:00Z"),
+        ],
+    )
+
+    listed = call(client, key, "list_tasks", {"workspace_id": ws})
+    assert "Sichtbar" in payload(listed)
+    # The subtask of an inbox parent stays visible even though it carries no project.
+    assert "Inbox-Kind" in payload(listed)
+    assert "Im Archiv" not in payload(listed)
+    assert "Archiv-Kind" not in payload(listed)
+
+
 def test_archived_project_is_refused_as_a_target(client, user, mcp_on):
     key = mcp_key(client, user)
     ws = user["workspace_id"]
@@ -530,6 +566,52 @@ def test_archived_project_is_refused_as_a_target(client, user, mcp_on):
     # The refusal happened before anything applied: the task is still in the inbox.
     got = call(client, key, "get_task", {"workspace_id": ws, "task_id": task_id})
     assert '"project_id": null' in payload(got)
+
+
+def test_update_task_may_keep_a_task_in_its_archived_project(client, user, mcp_on):
+    """Re-sending the project a task already sits in (section move naming it) is not a
+    move INTO an archive, so it must go through."""
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    first = sync(
+        client,
+        user,
+        "*",
+        [
+            cmd("project_add", temp_id="p1", name="Archiv"),
+            cmd("section_add", temp_id="s1", project_id="p1", name="Drin"),
+        ],
+    )
+    project_id = first["temp_id_mapping"]["p1"]
+    section_id = first["temp_id_mapping"]["s1"]
+    task_id = task_id_of(
+        call(
+            client,
+            key,
+            "create_task",
+            {"workspace_id": ws, "title": "Darin", "project_id": project_id},
+        )
+    )
+    sync(
+        client,
+        user,
+        first["sync_token"],
+        [cmd("project_update", id=project_id, archived_at="2026-01-01T00:00:00Z")],
+    )
+
+    moved = call(
+        client,
+        key,
+        "update_task",
+        {
+            "workspace_id": ws,
+            "task_id": task_id,
+            "project_id": project_id,
+            "section_id": section_id,
+        },
+    )
+    assert moved["isError"] is False
+    assert '"section": "Drin"' in payload(moved)
 
 
 def test_a_rejected_move_is_refused_before_anything_is_applied(client, user, mcp_on):

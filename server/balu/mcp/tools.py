@@ -434,7 +434,10 @@ def _placement_args(
         pid = _uuid_arg(args, "project_id", required=False)
         if pid is not None:
             project = _get_project(ctx, ws_id, pid)
-            if project.archived_at is not None:
+            # Only a move INTO an archived project is refused; re-sending the project a
+            # task already sits in (echo, or a section move that names it) must pass,
+            # or editing anything inside an archived project becomes impossible.
+            if project.archived_at is not None and pid != current_project_id:
                 raise ToolError("project is archived; unarchive it first or pick another project")
         project_id = pid
         out["project_id"] = None if pid is None else str(pid)
@@ -730,7 +733,8 @@ TOOLS: tuple[Tool, ...] = (
         name="create_task",
         description=(
             "Create a task. Only `title` is required; every other field is optional and "
-            "unset fields stay empty. Returns the created task."
+            "unset fields stay empty. Returns the created task. "
+            "Archived projects are refused as a target."
         ),
         input_schema=_schema(
             {
