@@ -407,6 +407,7 @@ def test_task_add_waits_for_an_uncommitted_project_delete_then_lands_in_inbox(cl
     assert outcome["result"]["relocated"] == ["project_deleted"]
     with sm() as session:
         task = session.get(Task, outcome["result"]["object_id"])
+        assert task is not None
         assert task.project_id is None
         assert task.is_deleted is False
 
@@ -542,9 +543,17 @@ def _integrity_error():
 def _statement_error():
     from sqlalchemy.exc import StatementError
 
-    return StatementError(
-        "msg", "INSERT ...", {}, Exception("Failing row contains (SECRET)")
+    # A plain StatementError's text is message + SQL (+ params), not the wrapped
+    # error, so SECRET goes into every part - otherwise the leak assertions
+    # below would pass vacuously.
+    err = StatementError(
+        "Failing row contains (SECRET)",
+        "INSERT SECRET",
+        {"title": "SECRET"},
+        Exception("SECRET"),
     )
+    assert "SECRET" in str(err)
+    return err
 
 
 _DB_ERRORS = pytest.mark.parametrize(
