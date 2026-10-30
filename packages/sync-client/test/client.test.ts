@@ -228,12 +228,33 @@ describe("temp_id rewrite", () => {
     const { temp_id: p } = c.mutate({ type: "project_add", args: { name: "Proj" } });
     expect(c.getSnapshot().idAliases).toEqual({});
     const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "x", project_id: p } });
+    const seen: ReturnType<typeof c.getSnapshot>[] = [];
+    c.subscribe(() => seen.push(c.getSnapshot()));
     await c.flush();
+
+    // Never a snapshot without the tmp project that also lacks its alias.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const s of seen) {
+      if (!s.projects.some((x) => x.id === p)) expect(s.idAliases[p!]).toBe("P1");
+    }
 
     const snap = c.getSnapshot();
     // The second response's merge keeps the alias from the first.
     expect(snap.idAliases).toEqual({ [p!]: "P1", [t!]: "T2" });
     expect(snap.projects.map((x) => x.id)).toEqual(["P1"]);
+  });
+
+  it("rewrites a temp project id passed to mutate after the ack", async () => {
+    const server = makeServer();
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    const { temp_id: p } = c.mutate({ type: "project_add", args: { name: "Proj" } });
+    await c.flush();
+    c.mutate({ type: "task_add", args: { title: "late", project_id: p } });
+    await c.flush();
+
+    const last = server.calls[server.calls.length - 1]!.commands[0]!;
+    expect(last.args.project_id).toBe("P1");
+    expect(c.getSnapshot().tasks.find((t) => t.title === "late")!.project_id).toBe("P1");
   });
 
   it("records the mapping from a full-sync response too", async () => {

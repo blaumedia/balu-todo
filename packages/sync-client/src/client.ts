@@ -254,8 +254,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
     // Before either branch: the full-sync branch drops temp records too, and the
     // snapshot built after this call must carry the replica and the aliases together.
-    if (hasMapping) idAliases = { ...idAliases, ...mapping };
-    if (hasMapping) rewriteCommandRefs(queue, mapping);
+    if (hasMapping) {
+      idAliases = { ...idAliases, ...mapping };
+      rewriteCommandRefs(queue, mapping);
+    }
 
     if (resp.full_sync) {
       replica = emptyReplica();
@@ -418,6 +420,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       args,
       ...(tempId ? { temp_id: tempId } : {}),
     };
+    // A flush may have rewritten the replica but not yet notified React, so the
+    // caller can still hold a temp id that no longer exists in the replica.
+    if (Object.keys(idAliases).length) rewriteCommandRefs([cmd], idAliases);
     applyCommand(replica, cmd, ctx);
     queue.push(cmd);
     void persistQueue();
