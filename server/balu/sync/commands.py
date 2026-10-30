@@ -252,7 +252,7 @@ def _get_attachment(ctx: Ctx, ref: Any) -> Attachment:
 # Deleted-tolerant getter (task_add placement fallback only)
 # ---------------------------------------------------------------------------
 def _get_including_deleted[M: (Project, Section, Task)](
-    ctx: Ctx, model: type[M], ref: Any, what: str, *, lock_shared: bool = False
+    ctx: Ctx, model: type[M], ref: Any, what: str
 ) -> M:
     """Like the getters above, but a soft-deleted row is returned instead of raising.
 
@@ -260,14 +260,10 @@ def _get_including_deleted[M: (Project, Section, Task)](
     keep treating a deleted object as not_found. Unknown ids and other workspaces
     are still not_found.
 
-    ``lock_shared`` takes a row lock (SELECT ... FOR SHARE) held until the command's
-    transaction ends: a concurrent project_delete updates the project row first, so
-    it waits for us and its cascade then sees the task we add. If the delete got
-    there first we wait for it and read the row as deleted.
+    Races with a concurrent project_delete are closed by the caller bumping the
+    workspace version before any lookup (see h_task_add), not by a row lock here.
     """
-    obj = ctx.session.get(
-        model, _as_uuid(ref), with_for_update={"read": True} if lock_shared else None
-    )
+    obj = ctx.session.get(model, _as_uuid(ref))
     if obj is None or obj.workspace_id != ctx.workspace_id:
         raise CommandError("not_found", f"{what} not found")
     return obj
@@ -507,6 +503,13 @@ def h_section_delete(ctx: Ctx, args: dict) -> dict:
 
 def h_task_add(ctx: Ctx, args: dict) -> dict:
     title = _require_str(args, "title", MAX_TITLE)
+    # Bump first: the UPDATE row-locks the workspace, which serialises this command
+    # against every other sync command in the workspace (project_delete bumps before
+    # its cascade too). Under READ COMMITTED the lookups below then see a committed
+    # delete, and a delete waiting on this lock sees our task in its cascade. Taking
+    # a project row lock before the bump instead deadlocks against project_delete
+    # and project_update, which bump first.
+    version = ctx.bump()
     # An offline device can queue a task_add for a project, section or parent task a
     # teammate deleted before it synced. Rejecting it would throw the typed task away
     # (the client rolls back and full-syncs), so a deleted target is replaced by the
@@ -518,9 +521,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     project_id = None
     requested_project_id = None
     if args.get("project_id") is not None:
-        project = _get_including_deleted(
-            ctx, Project, args["project_id"], "project", lock_shared=True
-        )
+        project = _get_including_deleted(ctx, Project, args["project_id"], "project")
         requested_project_id = project.id
         if project.is_deleted:
             relocated.append("project_deleted")
@@ -548,7 +549,6 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
         else:
             parent_task_id = _check_parent(ctx, parent.id)
 
-    version = ctx.bump()
     task = Task(
         id=uuid.uuid4(),
         workspace_id=ctx.workspace_id,

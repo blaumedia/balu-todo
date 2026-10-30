@@ -346,43 +346,64 @@ def test_alembic_logger_is_info_with_one_shared_handler_after_create_app():
     assert tagged[0] in logging.getLogger("balu").handlers
 
 
-def test_task_add_holds_a_shared_lock_on_its_project(client, user):
-    """A concurrent project_delete must wait for an in-flight task_add (what-if run
-    a6ec1231, finding 4): its first UPDATE needs the row lock task_add holds.
+def test_task_add_waits_for_an_uncommitted_project_delete_then_lands_in_inbox(client, user):
+    """task_add must serialise behind an in-flight project_delete (review runs
+    a6ec1231 and 4240a9dc).
 
-    Deterministic without threads: run the handler in an uncommitted transaction and
-    probe the row from a second session with NOWAIT.
+    project_delete bumps the workspace version first, which row-locks the workspace;
+    task_add bumps before any lookup, so it blocks on that lock and, once the delete
+    commits, reads the project as deleted. No project row lock is taken, so the two
+    cannot deadlock. Threaded, but deterministic: the adder is released only by the
+    deleter's commit, and the "still blocked" check is a bounded wait.
     """
-    import pytest
-    from sqlalchemy import select
-    from sqlalchemy.exc import OperationalError
+    import threading
 
     from balu.db import get_sessionmaker
-    from balu.models import Project
-    from balu.sync.commands import Ctx, h_task_add
+    from balu.models import Task
+    from balu.sync.commands import Ctx, h_project_delete, h_task_add
 
     pid, _sid, _token = _live_project_with_section(client, user)
     sm = get_sessionmaker()
-    with sm() as adder, sm() as deleter:
-        ctx = Ctx(
-            session=adder,
-            workspace_id=uuid.UUID(user["workspace_id"]),
-            user_id=uuid.UUID(user["user"]["id"]),
-            role="owner",
-            temp_map={},
+    workspace_id = uuid.UUID(user["workspace_id"])
+    user_id = uuid.UUID(user["user"]["id"])
+    started, done = threading.Event(), threading.Event()
+    outcome: dict = {}
+
+    def add_task():
+        try:
+            with sm() as session:
+                ctx = Ctx(
+                    session=session, workspace_id=workspace_id, user_id=user_id,
+                    role="owner", temp_map={},
+                )
+                started.set()
+                outcome["result"] = h_task_add(
+                    ctx, {"title": "In flight", "project_id": pid}
+                )
+                session.commit()
+        except BaseException as exc:  # surfaced by the assertions below
+            outcome["error"] = exc
+        finally:
+            done.set()
+
+    with sm() as deleter:
+        h_project_delete(
+            Ctx(
+                session=deleter, workspace_id=workspace_id, user_id=user_id,
+                role="owner", temp_map={},
+            ),
+            {"id": pid},
         )
-        h_task_add(ctx, {"title": "In flight", "project_id": pid})
-        with pytest.raises(OperationalError):
-            deleter.execute(
-                select(Project.id)
-                .where(Project.id == uuid.UUID(pid))
-                .with_for_update(nowait=True)
-            )
-        deleter.rollback()
-        # Another reader's shared lock is compatible, so adds do not serialise.
-        deleter.execute(
-            select(Project.id)
-            .where(Project.id == uuid.UUID(pid))
-            .with_for_update(read=True, nowait=True)
-        )
-        adder.rollback()
+        thread = threading.Thread(target=add_task)
+        thread.start()
+        assert started.wait(10)
+        assert not done.wait(0.5), "task_add did not wait for the uncommitted delete"
+        deleter.commit()
+    thread.join(15)
+    assert done.is_set()
+    assert "error" not in outcome, outcome.get("error")
+    assert outcome["result"]["relocated"] == ["project_deleted"]
+    with sm() as session:
+        task = session.get(Task, outcome["result"]["object_id"])
+        assert task.project_id is None
+        assert task.is_deleted is False
