@@ -26,3 +26,16 @@ export function composeTaskArgs(
     context: ctx.context,
   });
 }
+
+/**
+ * Whether the project screen offers quick-add into this project: only for
+ * members who may write, and never into a project that is missing (not loaded
+ * yet), deleted (the screen is about to pop) or archived (unarchive first -
+ * the MCP refuses placing tasks there too; web still allows it).
+ */
+export function canQuickAddInto(
+  project: Pick<Project, 'is_deleted' | 'archived_at'> | undefined,
+  writable: boolean,
+): boolean {
+  return writable && project != null && !project.is_deleted && project.archived_at == null;
+}
