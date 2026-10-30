@@ -221,6 +221,32 @@ describe("temp_id rewrite", () => {
     // No temp ids linger in the replica.
     expect(snap.projects.map((x) => x.id)).toEqual(["P1"]);
   });
+
+  it("exposes the temp -> real mapping on the snapshot after a delta ack", async () => {
+    const server = makeServer();
+    const c = track(createSyncClient(base({ fetch: server.fetch, maxBatch: 1 })));
+    const { temp_id: p } = c.mutate({ type: "project_add", args: { name: "Proj" } });
+    expect(c.getSnapshot().idAliases).toEqual({});
+    const { temp_id: t } = c.mutate({ type: "task_add", args: { title: "x", project_id: p } });
+    await c.flush();
+
+    const snap = c.getSnapshot();
+    // The second response's merge keeps the alias from the first.
+    expect(snap.idAliases).toEqual({ [p!]: "P1", [t!]: "T2" });
+    expect(snap.projects.map((x) => x.id)).toEqual(["P1"]);
+  });
+
+  it("records the mapping from a full-sync response too", async () => {
+    // A fresh client sends token "*", so the server answers full_sync: true.
+    const server = makeRejectingServer(() => null);
+    const c = track(createSyncClient(base({ fetch: server.fetch })));
+    const { temp_id: p } = c.mutate({ type: "project_add", args: { name: "Proj" } });
+    await c.flush();
+
+    const snap = c.getSnapshot();
+    expect(snap.idAliases[p!]).toBe("P1");
+    expect(snap.projects.map((x) => x.id)).toEqual(["P1"]);
+  });
 });
 
 describe("offline queue persistence", () => {
