@@ -407,3 +407,33 @@ def test_task_add_waits_for_an_uncommitted_project_delete_then_lands_in_inbox(cl
         task = session.get(Task, outcome["result"]["object_id"])
         assert task.project_id is None
         assert task.is_deleted is False
+
+
+def test_httpx_and_httpcore_loggers_are_pinned_to_warning():
+    from balu.main import create_app
+
+    create_app()
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING
+
+
+def test_uvicorn_access_log_redacts_invite_tokens_once():
+    from balu.main import create_app
+
+    create_app()
+    create_app()
+    access = logging.getLogger("uvicorn.access")
+    assert len([f for f in access.filters if type(f).__name__ == "_RedactInviteTokens"]) == 1
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:1", "GET", "/invite/SECRET-TOKEN?x=1", "1.1", 200), None,
+    )
+    assert access.filter(record)
+    assert "SECRET-TOKEN" not in record.getMessage()
+    assert "/invite/<redacted>?x=1" in record.getMessage()
+    other = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1, "%s", ("/api/v1/me",), None
+    )
+    access.filter(other)
+    assert other.getMessage() == "/api/v1/me"

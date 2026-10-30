@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -89,6 +90,25 @@ async def lifespan(app: FastAPI):
                 pass
 
 
+_INVITE_PATH = re.compile(r"(/invite/)[^/?#\s]+")
+
+
+class _RedactInviteTokens(logging.Filter):
+    """Blank the token in /invite/<token> request lines of the uvicorn access log.
+
+    The web invite link carries the token in the path and is served by the SPA
+    fallback, so the access log would otherwise store it in plain text.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _INVITE_PATH.sub(r"\1<redacted>", a) if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
+
+
 def _configure_app_logging() -> None:
     """Give the `balu` logger tree INFO level and a stderr handler (idempotent).
 
@@ -106,6 +126,13 @@ def _configure_app_logging() -> None:
         app_logger.addHandler(handler)
     app_logger.setLevel(logging.INFO)
     # Migrations run in-process at boot; keep their "Running upgrade" lines visible.
+    # httpx logs "HTTP Request: POST https://api.telegram.org/bot<token>/..." at INFO;
+    # keep it (and httpcore) quiet even if a root handler is ever added.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _RedactInviteTokens) for f in access_logger.filters):
+        access_logger.addFilter(_RedactInviteTokens())
     alembic_logger = logging.getLogger("alembic")
     alembic_logger.setLevel(logging.INFO)
     if handler not in alembic_logger.handlers:

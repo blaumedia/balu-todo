@@ -268,9 +268,18 @@ def test_delivery_failure_logs_never_contain_the_bot_token(client, user, monkeyp
         with get_sessionmaker()() as session:
             uid = session.query(User).one().id
             deliver_to_user(session, send_to_channel, uid, "t", "b")
-    # Only balu's own loggers: httpx's INFO request line carries the URL too, but the
-    # app only attaches a handler to "balu", so it never reaches the container logs.
-    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("balu"))
-    assert "HTTPStatusError (HTTP 400)" in ours
-    assert "FAKE-TOKEN" not in ours
-    assert not any(r.exc_info for r in caplog.records if r.name.startswith("balu"))
+    # Every logger, httpx's included: its INFO request line carries the URL too, and
+    # create_app() pins httpx/httpcore to WARNING so that line is never emitted.
+    everything = "\n".join(r.getMessage() for r in caplog.records)
+    assert "HTTPStatusError (HTTP 400)" in everything
+    assert "FAKE-TOKEN" not in everything
+    assert not any(r.exc_info for r in caplog.records)
+
+
+def test_describe_failure_keeps_our_own_channel_messages():
+    from balu.notifications import ChannelUnavailable, describe_failure
+
+    assert describe_failure(ChannelUnavailable("SMTP is not configured")) == (
+        "SMTP is not configured"
+    )
+    assert describe_failure(ValueError("secret url")) == "ValueError"

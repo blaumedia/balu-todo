@@ -16,6 +16,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..attachments import remove_blob
@@ -1021,14 +1022,22 @@ def process_commands(
             status = {"error_code": exc.code, "error": exc.message}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
-        except Exception:  # unexpected -> treat as invalid_args, keep going
+        except Exception as exc:  # unexpected -> treat as invalid_args, keep going
             session.rollback()
             # Never leak the driver/ORM message to the client: it carries table
             # names, constraint names and sometimes parameter values (S6).
-            logger.exception(
-                "command %s (%s) failed unexpectedly in workspace %s",
-                cmd_uuid, command.type, workspace_id,
-            )
+            # A DBAPIError's text can carry Postgres's "Failing row contains (...)"
+            # DETAIL, i.e. user content: log only its type.
+            if isinstance(exc, DBAPIError):
+                logger.error(
+                    "command %s (%s) failed unexpectedly in workspace %s: %s",
+                    cmd_uuid, command.type, workspace_id, type(exc).__name__,
+                )
+            else:
+                logger.exception(
+                    "command %s (%s) failed unexpectedly in workspace %s",
+                    cmd_uuid, command.type, workspace_id,
+                )
             status = {"error_code": "invalid_args", "error": "command could not be applied"}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status

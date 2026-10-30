@@ -25,19 +25,23 @@ logger = logging.getLogger("balu.notifications")
 _HTTP_TIMEOUT = 10.0
 
 
+class ChannelUnavailable(Exception):
+    """Raised when a channel's transport is not configured / delivery is impossible."""
+
+
 def describe_failure(exc: BaseException) -> str:
     """Log-safe summary of a delivery failure: exception type and HTTP status only.
+
+    Our own ChannelUnavailable messages are fixed strings we wrote, so they are kept.
 
     httpx puts the full request URL in its error text, and the Telegram URL carries
     the bot token, so ``str(exc)`` / tracebacks must never reach the logs.
     """
+    if isinstance(exc, ChannelUnavailable):
+        return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
         return f"{type(exc).__name__} (HTTP {exc.response.status_code})"
     return type(exc).__name__
-
-
-class ChannelUnavailable(Exception):
-    """Raised when a channel's transport is not configured / delivery is impossible."""
 
 
 # ---------------------------------------------------------------------------

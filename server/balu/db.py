@@ -25,8 +25,10 @@ def get_engine():
             settings.database_url,
             pool_pre_ping=True,
             future=True,
-            # Keep bound parameters (task titles, notes) out of SQL error text,
-            # which is logged.
+            # Keep bound parameters (task titles, notes) out of SQLAlchemy's error
+            # text. Postgres's own DETAIL (e.g. "Failing row contains (...)") is not
+            # covered; handlers that log unexpected errors log only the type for
+            # DBAPIError.
             hide_parameters=True,
         )
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
