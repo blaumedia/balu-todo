@@ -21,7 +21,14 @@ def get_engine():
     global _engine, _SessionLocal
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
+        _engine = create_engine(
+            settings.database_url,
+            pool_pre_ping=True,
+            future=True,
+            # Keep bound parameters (task titles, notes) out of SQL error text,
+            # which is logged.
+            hide_parameters=True,
+        )
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _engine
 

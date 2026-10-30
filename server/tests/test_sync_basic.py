@@ -121,3 +121,30 @@ def test_incremental_sync_never_skips_a_task_committed_mid_request(client, user,
     assert any(t["id"] == created["id"] for t in later["tasks"]), (
         "task committed mid-request was skipped forever"
     )
+
+
+def test_validation_log_cannot_be_forged_through_the_path(client, caplog):
+    import asyncio
+
+    from fastapi.exceptions import RequestValidationError
+    from starlette.requests import Request
+
+    from balu.main import app
+
+    # The decoded path may hold a newline (%0A); built by hand because the sync
+    # route's own matching rejects it before validation.
+    scope = {
+        "type": "http", "method": "POST", "path": "/x\nFORGED LINE", "headers": [],
+        "query_string": b"",
+    }
+    for handler in (
+        app.exception_handlers[RequestValidationError],
+        app.state.api.exception_handlers[RequestValidationError],
+    ):
+        caplog.clear()
+        with caplog.at_level("INFO", logger="balu.main"):
+            asyncio.run(handler(Request(scope), RequestValidationError([])))
+        messages = [r.getMessage() for r in caplog.records]
+        assert len(messages) == 1
+        assert "\n" not in messages[0]
+        assert "FORGED LINE" in messages[0]

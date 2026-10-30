@@ -526,3 +526,17 @@ def test_task_complete_ignores_an_implausible_client_day(client, user):
     task = next(t for t in r2["tasks"] if t["id"] == tid)
     # Clamped back to UTC today, so the next occurrence is simply tomorrow.
     assert task["start_date"] == (utc_today + timedelta(days=1)).isoformat()
+
+
+def test_sort_order_out_of_int32_range_is_invalid_args(client, user):
+    for bad in (3_000_000_000, -3_000_000_000):
+        add = cmd("task_add", temp_id="t", title="Secret title", sort_order=bad)
+        body = sync(client, user, "*", [add])
+        assert body["sync_status"][add["uuid"]]["error_code"] == "invalid_args"
+        assert "out of range" in body["sync_status"][add["uuid"]]["error"]
+
+
+def test_sort_order_at_int32_bounds_accepted(client, user):
+    add = cmd("task_add", temp_id="t", title="Edge", sort_order=2**31 - 1)
+    body = sync(client, user, "*", [add])
+    assert body["sync_status"][add["uuid"]] == "ok"

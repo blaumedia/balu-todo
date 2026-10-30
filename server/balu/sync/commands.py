@@ -92,6 +92,25 @@ def _as_uuid(value: Any) -> uuid.UUID:
         raise CommandError("not_found", f"unknown reference: {value!r}") from exc
 
 
+_INT32_MAX = 2**31 - 1
+_INT32_MIN = -(2**31)
+
+
+def _sort_order(value: Any) -> int:
+    """Parse a client sort_order; reject what the Integer column cannot hold.
+
+    Out of range used to reach Postgres as a DataError, whose logged text carried
+    the bound parameters (task titles and notes).
+    """
+    try:
+        number = int(value)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise CommandError("invalid_args", "sort_order must be an integer") from exc
+    if not _INT32_MIN <= number <= _INT32_MAX:
+        raise CommandError("invalid_args", "sort_order is out of range")
+    return number
+
+
 def _require_str(args: dict, key: str, max_length: int = MAX_NAME) -> str:
     value = args.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -341,7 +360,7 @@ def h_project_add(ctx: Ctx, args: dict) -> dict:
         workspace_id=ctx.workspace_id,
         name=name,
         color=color,
-        sort_order=int(sort_order),
+        sort_order=_sort_order(sort_order),
         version=version,
     )
     ctx.session.add(project)
@@ -355,7 +374,7 @@ def h_project_update(ctx: Ctx, args: dict) -> dict:
     if "color" in args:
         project.color = _validate_color(args.get("color"))
     if "sort_order" in args:
-        project.sort_order = int(args["sort_order"])
+        project.sort_order = _sort_order(args["sort_order"])
     if "archived_at" in args:
         project.archived_at = _parse_dt(args.get("archived_at"), "archived_at")
     project.version = ctx.bump()
@@ -448,7 +467,7 @@ def h_section_add(ctx: Ctx, args: dict) -> dict:
         workspace_id=ctx.workspace_id,
         project_id=project.id,
         name=name,
-        sort_order=int(sort_order),
+        sort_order=_sort_order(sort_order),
         version=version,
     )
     ctx.session.add(section)
@@ -460,7 +479,7 @@ def h_section_update(ctx: Ctx, args: dict) -> dict:
     if "name" in args:
         section.name = _require_str(args, "name")
     if "sort_order" in args:
-        section.sort_order = int(args["sort_order"])
+        section.sort_order = _sort_order(args["sort_order"])
     section.version = ctx.bump()
     return {}
 
@@ -544,7 +563,7 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
             sort_order = _max_sort_order(
                 ctx, Task, project_id=project_id, section_id=section_id, parent_task_id=None
             )
-    task.sort_order = int(sort_order)
+    task.sort_order = _sort_order(sort_order)
     ctx.session.add(task)
     result: dict = {"object_id": task.id}
     if relocated:
@@ -581,7 +600,7 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
         else:
             task.section_id = None
     if "sort_order" in args:
-        task.sort_order = int(args["sort_order"])
+        task.sort_order = _sort_order(args["sort_order"])
     task.version = ctx.bump()
     return {}
 
@@ -678,7 +697,7 @@ def h_task_reorder(ctx: Ctx, args: dict) -> dict:
         if not isinstance(item, dict) or "id" not in item or "sort_order" not in item:
             raise CommandError("invalid_args", "each item needs id and sort_order")
         task = _get_task(ctx, item["id"])
-        tasks.append((task, int(item["sort_order"])))
+        tasks.append((task, _sort_order(item["sort_order"])))
     version = ctx.bump()
     for task, sort_order in tasks:
         task.sort_order = sort_order
@@ -709,7 +728,7 @@ def h_label_add(ctx: Ctx, args: dict) -> dict:
         workspace_id=ctx.workspace_id,
         name=name,
         color=color,
-        sort_order=int(args.get("sort_order") or _max_sort_order(ctx, Label)),
+        sort_order=_sort_order(args.get("sort_order") or _max_sort_order(ctx, Label)),
         version=version,
     )
     ctx.session.add(label)
@@ -726,7 +745,7 @@ def h_label_update(ctx: Ctx, args: dict) -> dict:
     if "color" in args:
         label.color = _validate_color(args.get("color"))
     if "sort_order" in args:
-        label.sort_order = int(args["sort_order"])
+        label.sort_order = _sort_order(args["sort_order"])
     label.version = ctx.bump()
     return {}
 

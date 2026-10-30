@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Project, Task, UserChannel
+from .notifications import describe_failure
 from .sync.serialize import iso_date
 
 logger = logging.getLogger("balu.delivery")
@@ -60,6 +61,7 @@ def deliver_to_user(
             sender(channel.type, channel.config, title, body)
         except Exception as exc:  # noqa: BLE001 - log and continue, never propagate
             logger.warning(
-                "delivery failed for user=%s channel=%s: %s", user_id, channel.type, exc
+                "delivery failed for user=%s channel=%s: %s",
+                user_id, channel.type, describe_failure(exc),
             )
     return len(channels)

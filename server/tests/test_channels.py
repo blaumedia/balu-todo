@@ -239,3 +239,38 @@ def test_send_time_rejection_does_not_leak_the_resolved_address(client, user):
     message = resp.json()["detail"]["message"]
     assert "127.0.0.1" not in message
     assert "resolves to" not in message
+
+
+def test_delivery_failure_logs_never_contain_the_bot_token(client, user, monkeypatch, caplog):
+    import httpx
+
+    from balu.config import get_settings
+    from balu.db import get_sessionmaker
+    from balu.delivery import deliver_to_user
+    from balu.models import User
+    from balu.notifications import send_to_channel
+
+    token = "123456:FAKE-TOKEN-NOT-A-SECRET"
+    monkeypatch.setattr(get_settings(), "telegram_bot_token", token)
+    transport = httpx.MockTransport(lambda request: httpx.Response(400, request=request))
+    mock_client = httpx.Client(transport=transport)
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: mock_client.post(url, json=kw["json"]))
+    client.put(
+        "/api/v1/me/channels",
+        headers=user["headers"],
+        json={"channels": [{"type": "telegram", "chat_id": "42"}]},
+    )
+    with caplog.at_level("DEBUG"):
+        resp = client.post(
+            "/api/v1/me/channels/test", headers=user["headers"], json={"type": "telegram"}
+        )
+        assert resp.status_code == 400
+        with get_sessionmaker()() as session:
+            uid = session.query(User).one().id
+            deliver_to_user(session, send_to_channel, uid, "t", "b")
+    # Only balu's own loggers: httpx's INFO request line carries the URL too, but the
+    # app only attaches a handler to "balu", so it never reaches the container logs.
+    ours = "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("balu"))
+    assert "HTTPStatusError (HTTP 400)" in ours
+    assert "FAKE-TOKEN" not in ours
+    assert not any(r.exc_info for r in caplog.records if r.name.startswith("balu"))

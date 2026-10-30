@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request: Request, exc: RequestValidationError):
         logger.info(
-            "validation error on %s: %s",
+            "validation error on %r: %s",
             request.url.path,
             _error_shape(exc),
         )
@@ -149,7 +149,7 @@ def create_app() -> FastAPI:
     @api.exception_handler(RequestValidationError)
     async def _api_validation_handler(request: Request, exc: RequestValidationError):
         logger.info(
-            "validation error on %s: %s",
+            "validation error on %r: %s",
             request.url.path,
             _error_shape(exc),
         )
