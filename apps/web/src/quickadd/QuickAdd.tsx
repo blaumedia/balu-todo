@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
-import { composeTaskArgs } from "../lib/quickadd.js";
+import { composeTaskArgs, quickAddTarget } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { useSnapshot } from "../store/useSync.js";
@@ -96,8 +96,11 @@ export function QuickAdd() {
 
   function create() {
     if (!text.trim()) return;
+    // The view's project can be gone or archived by now, or still carry a temp
+    // id the server has replaced - never file into a dead id (quickAddTarget).
+    const target = quickAddTarget(view, snapshot.projects, snapshot.idAliases);
     const args = composeTaskArgs(text, parsed, {
-      view,
+      context: target.context,
       projects: activeProjects(snapshot.projects),
       labels: snapshot.labels,
       today,
@@ -106,6 +109,7 @@ export function QuickAdd() {
     setText("");
     persistDraft("");
     setQuickAdd(false);
+    if (target.redirected && args["project_id"] === undefined) useApp.getState().showToast(t("quickadd.addedToInbox"));
   }
 
   if (!open) return null;
