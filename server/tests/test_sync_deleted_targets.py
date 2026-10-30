@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import uuid
 
+import pytest
+
 from balu.models import Membership
 from balu.sync.engine import bump_version
 from tests.conftest import auth_headers, cmd, register_user, sync
@@ -537,29 +539,52 @@ def _integrity_error():
     )
 
 
-def test_sync_dbapi_error_is_logged_by_type_only(client, user, monkeypatch, caplog):
+def _statement_error():
+    from sqlalchemy.exc import StatementError
+
+    return StatementError(
+        "msg", "INSERT ...", {}, Exception("Failing row contains (SECRET)")
+    )
+
+
+_DB_ERRORS = pytest.mark.parametrize(
+    "make_error", [_integrity_error, _statement_error], ids=["dbapi", "statement"]
+)
+
+
+@_DB_ERRORS
+def test_sync_dbapi_error_is_logged_by_type_only(
+    client, user, monkeypatch, caplog, make_error
+):
     from balu.sync import commands
 
+    err = make_error()
+
     def boom(ctx, args):
-        raise _integrity_error()
+        raise err
 
     monkeypatch.setitem(commands.HANDLERS, "task_add", boom)
     with caplog.at_level(logging.INFO, logger="balu"):
         body = sync(client, user, "*", [cmd("task_add", temp_id="t", title="x")])
     status = next(iter(body["sync_status"].values()))
     assert status == {"error_code": "invalid_args", "error": "command could not be applied"}
-    assert "IntegrityError" in caplog.text
+    assert type(err).__name__ in caplog.text
     assert "SECRET" not in caplog.text
     assert all(r.exc_info is None for r in caplog.records)
 
 
-def test_mcp_dbapi_error_is_logged_by_type_only(client, user, monkeypatch, caplog):
+@_DB_ERRORS
+def test_mcp_dbapi_error_is_logged_by_type_only(
+    client, user, monkeypatch, caplog, make_error
+):
     from balu.config import get_settings
     from balu.mcp import protocol
     from tests.test_mcp import mcp_key, rpc
 
+    err = make_error()
+
     def boom(ctx, name, arguments):
-        raise _integrity_error()
+        raise err
 
     settings = get_settings()
     settings.mcp_enabled = True
@@ -571,21 +596,24 @@ def test_mcp_dbapi_error_is_logged_by_type_only(client, user, monkeypatch, caplo
     finally:
         settings.mcp_enabled = False
     assert resp.json()["error"]["message"] == "Tool call failed"
-    assert "IntegrityError" in caplog.text
+    assert type(err).__name__ in caplog.text
     assert "SECRET" not in caplog.text
     assert all(r.exc_info is None for r in caplog.records)
 
 
+@_DB_ERRORS
 def test_unhandled_dbapi_error_in_a_router_is_a_generic_500_without_detail(
-    client, caplog
+    client, caplog, make_error
 ):
     from balu.main import app
+
+    err = make_error()
 
     api = app.state.api
 
     @api.get("/_boom")
     def boom():
-        raise _integrity_error()
+        raise err
 
     try:
         with caplog.at_level(logging.INFO, logger="balu"):
@@ -596,7 +624,7 @@ def test_unhandled_dbapi_error_in_a_router_is_a_generic_500_without_detail(
         ]
     assert resp.status_code == 500
     assert "SECRET" not in resp.text
-    assert "IntegrityError" in caplog.text
+    assert type(err).__name__ in caplog.text
     assert "/_boom" in caplog.text
     assert "SECRET" not in caplog.text
     assert all(r.exc_info is None for r in caplog.records)

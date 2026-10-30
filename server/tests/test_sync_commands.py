@@ -549,9 +549,7 @@ def test_sort_order_at_int32_bounds_accepted(client, user):
 
 def _sort_order_commands(ids: dict, bad):
     return {
-        "project_add": cmd(
-            "project_add", temp_id="np", name="P", sort_order=bad
-        ),
+        "project_add": cmd("project_add", temp_id="np", name="P", sort_order=bad),
         "project_update": cmd("project_update", id=ids["p"], sort_order=bad),
         "section_add": cmd(
             "section_add", temp_id="ns", project_id=ids["p"], name="S", sort_order=bad
