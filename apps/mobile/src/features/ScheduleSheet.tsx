@@ -1,13 +1,14 @@
 import { addDaysISO, dowISO, todayLocalISO, type IsoDate } from '@balu/domain';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../components/Icon';
 import { Title } from '../components/Title';
-import { useWritable } from '../hooks/use-my-role';
+import { useMyRole, useWritable } from '../hooks/use-my-role';
 import { scheduleTask } from '../lib/actions';
 import { useT, type TranslationKey } from '../i18n';
+import { shouldCloseWriteSheet } from '../lib/role';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, hit, space } from '../theme/tokens';
@@ -25,7 +26,14 @@ export function ScheduleSheet() {
   const taskId = useApp((s) => s.scheduleTaskId);
   const close = useApp((s) => s.closeSchedule);
   const writable = useWritable();
+  const role = useMyRole();
   const [showPicker, setShowPicker] = useState(false);
+
+  // The role can drop while the sheet is open; close and clear the target so it
+  // cannot pop up again by itself later.
+  useEffect(() => {
+    if (taskId != null && shouldCloseWriteSheet(role)) close();
+  }, [taskId, role, close]);
 
   const today = todayLocalISO();
   const dow = dowISO(today); // 0 Sun … 6 Sat

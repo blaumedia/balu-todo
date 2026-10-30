@@ -5,7 +5,9 @@ import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'r
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { TokenPill } from '../components/TokenPill';
+import { useMyRole } from '../hooks/use-my-role';
 import { addTask } from '../lib/actions';
+import { shouldCloseWriteSheet } from '../lib/role';
 import { interpretChange } from '../lib/quickAddInput';
 import { composeTaskArgs, resolveQuickAddContext } from '../lib/quickadd';
 import { useT } from '../i18n';
@@ -21,6 +23,7 @@ export function QuickAddSheet() {
   const close = useApp((s) => s.closeQuickAdd);
   const context = useApp((s) => s.context);
   const snap = useSnapshot();
+  const role = useMyRole();
   const [text, setText] = useState('');
   const [inputEpoch, setInputEpoch] = useState(0);
   const inputRef = useRef<TextInput>(null);
@@ -38,6 +41,12 @@ export function QuickAddSheet() {
       return () => clearTimeout(timer);
     }
   }, [open]);
+
+  // The role can drop while the sheet is open. Close it (the typed text is not
+  // kept: the sheet clears on every open anyway). Unknown role stays open.
+  useEffect(() => {
+    if (open && shouldCloseWriteSheet(role)) close();
+  }, [open, role, close]);
 
   const parsed = useMemo(
     () => (text.trim() ? parseQuickAdd(text, { locale, referenceDate: today }) : null),
