@@ -252,15 +252,22 @@ def _get_attachment(ctx: Ctx, ref: Any) -> Attachment:
 # Deleted-tolerant getter (task_add placement fallback only)
 # ---------------------------------------------------------------------------
 def _get_including_deleted[M: (Project, Section, Task)](
-    ctx: Ctx, model: type[M], ref: Any, what: str
+    ctx: Ctx, model: type[M], ref: Any, what: str, *, lock_shared: bool = False
 ) -> M:
     """Like the getters above, but a soft-deleted row is returned instead of raising.
 
     Only for task_add's placement fallback (contract §5.5): every other caller must
     keep treating a deleted object as not_found. Unknown ids and other workspaces
     are still not_found.
+
+    ``lock_shared`` takes a row lock (SELECT ... FOR SHARE) held until the command's
+    transaction ends: a concurrent project_delete updates the project row first, so
+    it waits for us and its cascade then sees the task we add. If the delete got
+    there first we wait for it and read the row as deleted.
     """
-    obj = ctx.session.get(model, _as_uuid(ref))
+    obj = ctx.session.get(
+        model, _as_uuid(ref), with_for_update={"read": True} if lock_shared else None
+    )
     if obj is None or obj.workspace_id != ctx.workspace_id:
         raise CommandError("not_found", f"{what} not found")
     return obj
@@ -511,7 +518,9 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     project_id = None
     requested_project_id = None
     if args.get("project_id") is not None:
-        project = _get_including_deleted(ctx, Project, args["project_id"], "project")
+        project = _get_including_deleted(
+            ctx, Project, args["project_id"], "project", lock_shared=True
+        )
         requested_project_id = project.id
         if project.is_deleted:
             relocated.append("project_deleted")

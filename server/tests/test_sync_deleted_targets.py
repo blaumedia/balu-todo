@@ -344,3 +344,45 @@ def test_alembic_logger_is_info_with_one_shared_handler_after_create_app():
     tagged = [h for h in alembic_logger.handlers if getattr(h, "_balu_app", False)]
     assert len(tagged) == 1
     assert tagged[0] in logging.getLogger("balu").handlers
+
+
+def test_task_add_holds_a_shared_lock_on_its_project(client, user):
+    """A concurrent project_delete must wait for an in-flight task_add (what-if run
+    a6ec1231, finding 4): its first UPDATE needs the row lock task_add holds.
+
+    Deterministic without threads: run the handler in an uncommitted transaction and
+    probe the row from a second session with NOWAIT.
+    """
+    import pytest
+    from sqlalchemy import select
+    from sqlalchemy.exc import OperationalError
+
+    from balu.db import get_sessionmaker
+    from balu.models import Project
+    from balu.sync.commands import Ctx, h_task_add
+
+    pid, _sid, _token = _live_project_with_section(client, user)
+    sm = get_sessionmaker()
+    with sm() as adder, sm() as deleter:
+        ctx = Ctx(
+            session=adder,
+            workspace_id=uuid.UUID(user["workspace_id"]),
+            user_id=uuid.UUID(user["user"]["id"]),
+            role="owner",
+            temp_map={},
+        )
+        h_task_add(ctx, {"title": "In flight", "project_id": pid})
+        with pytest.raises(OperationalError):
+            deleter.execute(
+                select(Project.id)
+                .where(Project.id == uuid.UUID(pid))
+                .with_for_update(nowait=True)
+            )
+        deleter.rollback()
+        # Another reader's shared lock is compatible, so adds do not serialise.
+        deleter.execute(
+            select(Project.id)
+            .where(Project.id == uuid.UUID(pid))
+            .with_for_update(read=True, nowait=True)
+        )
+        adder.rollback()
