@@ -32,9 +32,11 @@ export function resolveMyRole({ userId, workspaceId, members, memberships }: Rol
 /**
  * Whether the tabs show the add button. Hidden for read-only members (viewers,
  * contract §2 - the server rejects their task_add as forbidden). Shown while the
- * role is still unknown (null): that only happens on an offline cold start
- * before the replica has loaded, and a writer's main entry point flickering
- * away is worse than a viewer seeing it for a moment (the server still rejects).
+ * role is unknown (null): normally an offline cold start before the replica has
+ * loaded; also a member removed mid-session (loaded replica without the own
+ * record) or no signed-in user. A writer's main entry point flickering away is
+ * worse than a viewer or removed member seeing it briefly (the server still
+ * rejects).
  */
 export function canQuickAddFromTabs(role: Role | null): boolean {
   return role == null || canWrite(role);
