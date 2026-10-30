@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
-import { getSync, getSyncWorkspaceId } from "../lib/clients.js";
+import { getSync } from "../lib/clients.js";
 import { composeTaskArgs, quickAddTarget, shouldNotifyInbox } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
@@ -64,13 +64,6 @@ export function QuickAdd() {
   // Set when onChange collapsed a newline, so the caret can be put back where
   // the paste ended instead of jumping to the end of the controlled value.
   const caretRef = useRef<number | null>(null);
-  // Latches on the first "synced" of a workspace and resets on workspace
-  // switch: a later pull/flush (syncing/offline/error) must not un-confirm the
-  // replica, or a remotely deleted project would be filed into its dead id.
-  const syncedOnce = useRef<{ ws: string | null; synced: boolean }>({ ws: null, synced: false });
-  const syncWs = getSyncWorkspaceId();
-  if (syncedOnce.current.ws !== syncWs) syncedOnce.current = { ws: syncWs, synced: false };
-  if (snapshot.status === "synced") syncedOnce.current.synced = true;
 
   useEffect(() => {
     if (open) {
@@ -114,7 +107,7 @@ export function QuickAdd() {
     }
     // On confirmed data, never file into a dead id; before the first sync a
     // missing project is kept (it may just not be loaded yet).
-    const target = quickAddTarget(view, snapshot.projects, snapshot.idAliases, syncedOnce.current.synced);
+    const target = quickAddTarget(view, snapshot.projects, snapshot.idAliases, snapshot.hasSynced);
     const args = composeTaskArgs(text, parsed, {
       context: target.context,
       projects: activeProjects(snapshot.projects),
