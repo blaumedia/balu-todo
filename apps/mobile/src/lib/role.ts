@@ -48,8 +48,7 @@ export function shouldCloseWriteSheet(role: Role | null): boolean {
  * contract §2 - the server rejects their task_add as forbidden). Shown while the
  * role is unknown (null): normally an offline cold start before the replica has
  * loaded; also no signed-in user. A writer's main entry point flickering away is
- * worse than a viewer or removed member seeing it briefly (the server still
- * rejects).
+ * worse than a viewer seeing it briefly (the server still rejects).
  */
 export function canQuickAddFromTabs(role: Role | null): boolean {
   return role == null || canWrite(role);
