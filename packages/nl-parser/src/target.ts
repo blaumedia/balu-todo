@@ -43,15 +43,21 @@ export interface QuickAddTarget {
  * accepts tasks falls back to the Inbox instead of filing into a dead id;
  * an explicit #project token in the text still wins (composeTaskArgs).
  * A temp project id that was remapped is followed, not treated as gone.
+ * A project absent from the list is only treated as gone when `confirmed`
+ * (the data is known complete, e.g. synced): before the first sync the replica
+ * may simply not be loaded, so the project context is kept. Deleted or
+ * archived projects present in the list redirect regardless.
  */
 export function resolveQuickAddContext(
   context: ComposeContext,
   projects: ReadonlyArray<TargetProject>,
   aliases: Readonly<Record<string, string>>,
+  confirmed = true,
 ): QuickAddTarget {
   if (context.kind !== "project") return { context, redirected: false };
   const projectId = resolveProjectId(aliases, context.projectId);
   const project = projects.find((p) => p.id === projectId);
+  if (!project && !confirmed) return { context: { kind: "project", projectId }, redirected: false };
   if (canQuickAddInto(project, true)) return { context: { kind: "project", projectId }, redirected: false };
   return { context: { kind: "list", list: "inbox" }, redirected: true };
 }

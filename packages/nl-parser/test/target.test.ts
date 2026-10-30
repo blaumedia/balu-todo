@@ -104,6 +104,27 @@ describe("resolveQuickAddContext", () => {
     });
   });
 
+  it("keeps a missing project while the data is unconfirmed", () => {
+    expect(resolveQuickAddContext({ kind: "project", projectId: "gone" }, [], {}, false)).toEqual({
+      context: { kind: "project", projectId: "gone" },
+      redirected: false,
+    });
+  });
+
+  it("redirects a missing project to the Inbox once confirmed", () => {
+    expect(resolveQuickAddContext({ kind: "project", projectId: "gone" }, [], {}, true)).toEqual({
+      context: inbox,
+      redirected: true,
+    });
+  });
+
+  it("still redirects a deleted project while unconfirmed", () => {
+    expect(resolveQuickAddContext({ kind: "project", projectId: "P1" }, [p({ is_deleted: true })], {}, false)).toEqual({
+      context: inbox,
+      redirected: true,
+    });
+  });
+
   it("lets an explicit #project token win over the redirect", () => {
     const projects = [{ id: "W1", name: "Work", is_deleted: false, archived_at: null }];
     const target = resolveQuickAddContext({ kind: "project", projectId: "gone" }, projects, {});
