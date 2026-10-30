@@ -21,7 +21,7 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`, `internal_error`.
   Error messages are for humans and never carry internal detail (driver messages,
   the submitted body, transport hostnames) — that goes to the server log.
 
@@ -147,8 +147,10 @@ Field semantics (these ARE the product decisions — implement precisely):
   `parent_task_id` set, else (project, section) pair, else Inbox). Clients append with
   `max + 1000`; reorders rewrite the affected set (§5.5 `task_reorder`). Must be a JSON
   integer; whole-number floats (`2000.0`) are accepted, anything else (strings, booleans,
-  fractions) is `invalid_args`. A value outside the int32 range is clamped to the nearest
-  bound (so an append after `2147483647` is never lost).
+  fractions) is `invalid_args`. This applies to every `sort_order` (projects, sections,
+  labels and tasks). A value outside the int32 range is clamped to the nearest bound (so
+  an append after `2147483647` is never lost), but clamped items then tie: their relative
+  order is unspecified, and clients should renumber the container.
 - Subtasks: one level only in v1 — server rejects a `parent_task_id` pointing at a task
   that itself has a parent (`invalid_args`).
 - `label_ids` order is not meaningful.

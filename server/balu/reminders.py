@@ -15,6 +15,7 @@ import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -86,7 +87,12 @@ async def reminder_loop(stop_event: asyncio.Event) -> None:
             with sm() as session:
                 reminder_tick(session)
         except Exception as exc:  # noqa: BLE001 - never let the loop die
-            logger.warning("reminder tick failed: %s", exc)
+            # A DBAPIError's text carries the SQL, its parameters and Postgres's
+            # DETAIL (user content): log the type only.
+            logger.warning(
+                "reminder tick failed: %s",
+                type(exc).__name__ if isinstance(exc, DBAPIError) else exc,
+            )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
         except TimeoutError:

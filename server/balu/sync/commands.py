@@ -80,7 +80,7 @@ class Ctx:
     # Memoised: process_commands bumps before the handler runs, so the workspace
     # row lock is taken before any other lock or lookup; the handler's own call
     # then returns the same version (one bump per command).
-    _version: int | None = None
+    _version: int | None = field(default=None, init=False, repr=False)
 
     def bump(self) -> int:
         if self._version is None:
@@ -210,8 +210,8 @@ def _max_sort_order(ctx: Ctx, model, **filters) -> int:
         stmt = stmt.where(col.is_(None) if value is None else col == value)
     stmt = stmt.where(model.is_deleted.is_(False))
     highest = ctx.session.execute(stmt).scalar()
-    # Capped so an automatic sort order (a relocated offline add included) never
-    # fails the int32 range check in _sort_order.
+    # Capped so an automatic sort order (a relocated offline add included) stays
+    # within the int32 column.
     return min((highest or 0) + 1000, _INT32_MAX)
 
 
@@ -273,7 +273,7 @@ def _get_including_deleted[M: (Project, Section, Task)](
     are still not_found.
 
     Races with a concurrent project_delete are closed by the caller bumping the
-    workspace version before any lookup (see h_task_add), not by a row lock here.
+    workspace version before any lookup (process_commands takes the lock), not by a row lock here.
     """
     obj = ctx.session.get(model, _as_uuid(ref))
     if obj is None or obj.workspace_id != ctx.workspace_id:
@@ -743,12 +743,15 @@ def h_label_add(ctx: Ctx, args: dict) -> dict:
     if _label_name_exists(ctx, name):
         raise CommandError("name_taken", "a label with that name already exists")
     version = ctx.bump()
+    sort_order = args.get("sort_order")
+    if sort_order is None:
+        sort_order = _max_sort_order(ctx, Label)
     label = Label(
         id=uuid.uuid4(),
         workspace_id=ctx.workspace_id,
         name=name,
         color=color,
-        sort_order=_sort_order(args.get("sort_order") or _max_sort_order(ctx, Label)),
+        sort_order=_sort_order(sort_order),
         version=version,
     )
     ctx.session.add(label)
