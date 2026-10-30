@@ -89,7 +89,23 @@ async def lifespan(app: FastAPI):
                 pass
 
 
+def _configure_app_logging() -> None:
+    """Give the `balu` logger tree INFO level and a stderr handler (idempotent).
+
+    Uvicorn only configures its own loggers, and the root logger defaults to WARNING,
+    so without this the app's info logs never surface.
+    """
+    app_logger = logging.getLogger("balu")
+    app_logger.setLevel(logging.INFO)
+    if not any(getattr(h, "_balu_app", False) for h in app_logger.handlers):
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        handler._balu_app = True  # type: ignore[attr-defined]
+        app_logger.addHandler(handler)
+
+
 def create_app() -> FastAPI:
+    _configure_app_logging()
     settings = get_settings()
     app = FastAPI(title="Balu", version=__version__, lifespan=lifespan)
 

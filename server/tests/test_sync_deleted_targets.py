@@ -297,9 +297,7 @@ def test_replay_of_relocated_add_is_idempotent(client, user):
     assert len([t for t in full["tasks"] if t["title"] == "Buy milk"]) == 1
 
 
-def test_relocation_is_logged(client, user, caplog, monkeypatch):
-    # alembic/env.py's fileConfig (run by the test DB fixtures) disables existing loggers.
-    monkeypatch.setattr(logging.getLogger("balu.sync.commands"), "disabled", False)
+def test_relocation_is_logged(client, user, caplog):
     pid, _sid, token = _deleted_project_with_section(client, user)
     add = cmd("task_add", temp_id="t", title="Buy milk", project_id=pid)
     with caplog.at_level(logging.INFO, logger="balu.sync.commands"):
@@ -310,3 +308,11 @@ def test_relocation_is_logged(client, user, caplog, monkeypatch):
         for r in caplog.records
     )
     assert all("Buy milk" not in m for m in messages)
+
+
+def test_migrations_leave_application_loggers_enabled():
+    from balu.migrate import run_migrations
+
+    run_migrations()
+    assert logging.getLogger("balu.sync.commands").disabled is False
+    assert logging.getLogger("balu.main").disabled is False

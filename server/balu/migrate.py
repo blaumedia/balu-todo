@@ -20,6 +20,8 @@ def _alembic_config() -> Config:
     cfg = Config(str(_SERVER_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_SERVER_ROOT / "alembic"))
     cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+    # Programmatic runs must not reconfigure the host application's logging.
+    cfg.attributes["configure_logger"] = False
     return cfg
 
 
