@@ -521,6 +521,93 @@ def test_httpx_and_httpcore_loggers_are_pinned_to_warning():
     assert logging.getLogger("httpcore").level == logging.WARNING
 
 
+def test_uvicorn_access_log_redacts_mixed_case_invite_paths():
+    from balu.main import create_app
+
+    create_app()
+    access = logging.getLogger("uvicorn.access")
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:1", "GET", "/Invite/SECRET-TOKEN", "1.1", 200), None,
+    )
+    assert access.filter(record)
+    assert "SECRET-TOKEN" not in record.getMessage()
+
+
+def _integrity_error():
+    from sqlalchemy.exc import IntegrityError
+
+    return IntegrityError(
+        "INSERT ...", {}, Exception("Failing row contains (SECRET)")
+    )
+
+
+def test_sync_dbapi_error_is_logged_by_type_only(client, user, monkeypatch, caplog):
+    from balu.sync import commands
+
+    def boom(ctx, args):
+        raise _integrity_error()
+
+    monkeypatch.setitem(commands.HANDLERS, "task_add", boom)
+    with caplog.at_level(logging.INFO, logger="balu"):
+        body = sync(client, user, "*", [cmd("task_add", temp_id="t", title="x")])
+    status = next(iter(body["sync_status"].values()))
+    assert status == {"error_code": "invalid_args", "error": "command could not be applied"}
+    assert "IntegrityError" in caplog.text
+    assert "SECRET" not in caplog.text
+    assert all(r.exc_info is None for r in caplog.records)
+
+
+def test_mcp_dbapi_error_is_logged_by_type_only(client, user, monkeypatch, caplog):
+    from balu.config import get_settings
+    from balu.mcp import protocol
+    from tests.test_mcp import mcp_key, rpc
+
+    def boom(ctx, name, arguments):
+        raise _integrity_error()
+
+    settings = get_settings()
+    settings.mcp_enabled = True
+    try:
+        key = mcp_key(client, user)
+        monkeypatch.setattr(protocol, "call_tool", boom)
+        with caplog.at_level(logging.INFO, logger="balu"):
+            resp = rpc(client, key, "tools/call", {"name": "list_workspaces", "arguments": {}})
+    finally:
+        settings.mcp_enabled = False
+    assert resp.json()["error"]["message"] == "Tool call failed"
+    assert "IntegrityError" in caplog.text
+    assert "SECRET" not in caplog.text
+    assert all(r.exc_info is None for r in caplog.records)
+
+
+def test_unhandled_dbapi_error_in_a_router_is_a_generic_500_without_detail(
+    client, caplog
+):
+    from balu.main import app
+
+    api = app.state.api
+
+    @api.get("/_boom")
+    def boom():
+        raise _integrity_error()
+
+    try:
+        with caplog.at_level(logging.INFO, logger="balu"):
+            resp = client.get("/api/v1/_boom")
+    finally:
+        api.router.routes[:] = [
+            r for r in api.router.routes if getattr(r, "path", "") != "/_boom"
+        ]
+    assert resp.status_code == 500
+    assert "SECRET" not in resp.text
+    assert "IntegrityError" in caplog.text
+    assert "/_boom" in caplog.text
+    assert "SECRET" not in caplog.text
+    assert all(r.exc_info is None for r in caplog.records)
+
+
 def test_uvicorn_access_log_redacts_invite_tokens_once():
     from balu.main import create_app
 

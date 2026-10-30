@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from . import __version__
 from .config import get_settings
@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
                 pass
 
 
-_INVITE_PATH = re.compile(r"(/invite/)[^/?#\s]+")
+_INVITE_PATH = re.compile(r"(/invite/)[^/?#\s]+", re.IGNORECASE)
 
 
 class _RedactInviteTokens(logging.Filter):
@@ -183,6 +183,19 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=422,
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
+        )
+
+    @api.exception_handler(DBAPIError)
+    async def _db_error_handler(request: Request, exc: DBAPIError):
+        # Left to uvicorn, a DBAPIError is logged with its full traceback, and
+        # Postgres's DETAIL ("Failing row contains (...)") carries user content.
+        logger.error(
+            "database error on %s %r: %s",
+            request.method, request.url.path, type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": {"code": "internal_error", "message": "Internal server error"}},
         )
 
     api.include_router(auth_router.router)
