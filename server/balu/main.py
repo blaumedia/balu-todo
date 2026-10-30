@@ -96,12 +96,20 @@ def _configure_app_logging() -> None:
     so without this the app's info logs never surface.
     """
     app_logger = logging.getLogger("balu")
-    app_logger.setLevel(logging.INFO)
-    if not any(getattr(h, "_balu_app", False) for h in app_logger.handlers):
+    handler = next(
+        (h for h in app_logger.handlers if getattr(h, "_balu_app", False)), None
+    )
+    if handler is None:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
         handler._balu_app = True  # type: ignore[attr-defined]
         app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+    # Migrations run in-process at boot; keep their "Running upgrade" lines visible.
+    alembic_logger = logging.getLogger("alembic")
+    alembic_logger.setLevel(logging.INFO)
+    if handler not in alembic_logger.handlers:
+        alembic_logger.addHandler(handler)
 
 
 def create_app() -> FastAPI:

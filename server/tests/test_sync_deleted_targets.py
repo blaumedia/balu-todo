@@ -183,6 +183,22 @@ def test_unresolvable_temp_section_of_deleted_project_still_files_in_inbox(clien
     assert body["relocated"][add["uuid"]] == {"reasons": ["project_deleted"]}
 
 
+def test_section_of_other_project_is_ignored_when_project_is_deleted(client, user):
+    pid, _sid, token = _deleted_project_with_section(client, user)
+    live = sync(client, user, token, [
+        cmd("project_add", temp_id="lp", name="Live"),
+        cmd("section_add", temp_id="ls", project_id="lp", name="Live section"),
+    ])
+    live_sid = live["temp_id_mapping"]["ls"]
+    add = cmd("task_add", temp_id="t", title="Keep me", project_id=pid, section_id=live_sid)
+    body = sync(client, user, live["sync_token"], [add])
+    assert body["sync_status"][add["uuid"]] == "ok"
+    task = _task(body, body["temp_id_mapping"]["t"])
+    assert task["project_id"] is None
+    assert task["section_id"] is None
+    assert body["relocated"][add["uuid"]] == {"reasons": ["project_deleted"]}
+
+
 def _sync_in(client, user, ws_id, token, commands):
     resp = client.post(
         f"/api/v1/workspaces/{ws_id}/sync",
@@ -316,3 +332,15 @@ def test_migrations_leave_application_loggers_enabled():
     run_migrations()
     assert logging.getLogger("balu.sync.commands").disabled is False
     assert logging.getLogger("balu.main").disabled is False
+
+
+def test_alembic_logger_is_info_with_one_shared_handler_after_create_app():
+    from balu.main import create_app
+
+    create_app()
+    create_app()
+    alembic_logger = logging.getLogger("alembic")
+    assert alembic_logger.level == logging.INFO
+    tagged = [h for h in alembic_logger.handlers if getattr(h, "_balu_app", False)]
+    assert len(tagged) == 1
+    assert tagged[0] in logging.getLogger("balu").handlers

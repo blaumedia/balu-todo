@@ -422,7 +422,7 @@ whenever any command in a flush was rejected, then reports the failures to the a
   appended, max + 1000, to its new container), and the command is listed in `relocated`
   (§5.2). Only *deleted* targets qualify: an id unknown in this workspace (`not_found`),
   a section of another project (`invalid_args`, I4, checked against the requested
-  project), a *live* parent that is itself a subtask (`invalid_args`) and the viewer role
+  project; not checked when the requested project itself is deleted, see below), a *live* parent that is itself a subtask (`invalid_args`) and the viewer role
   (`forbidden`) are still rejected. Archived projects are not deleted and are
   unaffected. When the project is deleted the `section_id` is not looked up at all, so a
   temp section id whose own `section_add` failed because of that deleted project does

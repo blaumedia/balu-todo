@@ -500,13 +500,9 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
 
     section_id = None
     project_deleted = "project_deleted" in relocated
-    if args.get("section_id") is not None and requested_project_id is None:
-        # A section without a project is an I4 violation (invalid_args), as before.
+    if args.get("section_id") is not None and not project_deleted:
         section = _get_including_deleted(ctx, Section, args["section_id"], "section")
-        _check_section_in_project(section, requested_project_id)
-    elif args.get("section_id") is not None and not project_deleted:
-        section = _get_including_deleted(ctx, Section, args["section_id"], "section")
-        _check_section_in_project(section, requested_project_id)
+        _check_section_in_project(section, requested_project_id)  # raises with no project (I4)
         if section.is_deleted:
             relocated.append("section_deleted")
         else:
