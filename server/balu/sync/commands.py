@@ -229,7 +229,12 @@ def _get_attachment(ctx: Ctx, ref: Any) -> Attachment:
     return obj
 
 
-def _get_including_deleted(ctx: Ctx, model, ref: Any, what: str):
+# ---------------------------------------------------------------------------
+# Deleted-tolerant getter (task_add placement fallback only)
+# ---------------------------------------------------------------------------
+def _get_including_deleted[M: (Project, Section, Task)](
+    ctx: Ctx, model: type[M], ref: Any, what: str
+) -> M:
     """Like the getters above, but a soft-deleted row is returned instead of raising.
 
     Only for task_add's placement fallback (contract §5.5): every other caller must
@@ -494,14 +499,21 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
             project_id = project.id
 
     section_id = None
-    if args.get("section_id") is not None:
+    project_deleted = "project_deleted" in relocated
+    if args.get("section_id") is not None and requested_project_id is None:
+        # A section without a project is an I4 violation (invalid_args), as before.
         section = _get_including_deleted(ctx, Section, args["section_id"], "section")
         _check_section_in_project(section, requested_project_id)
-        if project_id is not None:  # a deleted project already sends the task to the Inbox
-            if section.is_deleted:
-                relocated.append("section_deleted")
-            else:
-                section_id = section.id
+    elif args.get("section_id") is not None and not project_deleted:
+        section = _get_including_deleted(ctx, Section, args["section_id"], "section")
+        _check_section_in_project(section, requested_project_id)
+        if section.is_deleted:
+            relocated.append("section_deleted")
+        else:
+            section_id = section.id
+    # With the project deleted the task goes to the Inbox whatever the section is, so
+    # the section id is not looked up: it may be an unresolvable temp id whose
+    # section_add failed because of that same deleted project.
 
     parent_task_id = None
     if args.get("parent_task_id") is not None:

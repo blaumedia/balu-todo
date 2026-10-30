@@ -8,6 +8,7 @@ import uuid
 from balu.models import Membership
 from balu.sync.engine import bump_version
 from tests.conftest import auth_headers, cmd, register_user, sync
+from tests.test_sync_commands import _second_workspace
 
 
 def _task(body, task_id):
@@ -158,6 +159,79 @@ def test_deleted_section_of_another_project_is_still_invalid_args(client, user):
     add = cmd("task_add", temp_id="t", title="X", project_id=pb, section_id=sa)
     body = sync(client, user, body["sync_token"], [add])
     assert body["sync_status"][add["uuid"]]["error_code"] == "invalid_args"
+
+
+def test_deleted_section_without_project_is_invalid_args(client, user):
+    _pid, sid, token = _live_project_with_section(client, user)
+    body = sync(client, user, token, [cmd("section_delete", id=sid)])
+    add = cmd("task_add", temp_id="t", title="X", section_id=sid)
+    body = sync(client, user, body["sync_token"], [add])
+    assert body["sync_status"][add["uuid"]]["error_code"] == "invalid_args"
+    assert body["relocated"] == {}
+
+
+def test_unresolvable_temp_section_of_deleted_project_still_files_in_inbox(client, user):
+    pid, _sid, token = _deleted_project_with_section(client, user)
+    sec = cmd("section_add", temp_id="s2", project_id=pid, name="Late")
+    add = cmd("task_add", temp_id="t", title="Keep me", project_id=pid, section_id="s2")
+    body = sync(client, user, token, [sec, add])
+    assert body["sync_status"][sec["uuid"]]["error_code"] == "not_found"
+    assert body["sync_status"][add["uuid"]] == "ok"
+    task = _task(body, body["temp_id_mapping"]["t"])
+    assert task["project_id"] is None
+    assert task["section_id"] is None
+    assert body["relocated"][add["uuid"]] == {"reasons": ["project_deleted"]}
+
+
+def _sync_in(client, user, ws_id, token, commands):
+    resp = client.post(
+        f"/api/v1/workspaces/{ws_id}/sync",
+        headers=user["headers"],
+        json={"sync_token": token, "commands": commands},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def test_deleted_project_of_another_workspace_is_not_found(client, user):
+    ws_b = _second_workspace(client, user)
+    body = _sync_in(client, user, ws_b, "*", [cmd("project_add", temp_id="p", name="B proj")])
+    pb = body["temp_id_mapping"]["p"]
+    _sync_in(client, user, ws_b, body["sync_token"], [cmd("project_delete", id=pb)])
+    add = cmd("task_add", temp_id="t", title="Leak", project_id=pb)
+    body = sync(client, user, "*", [add])
+    assert body["sync_status"][add["uuid"]]["error_code"] == "not_found"
+    assert body["relocated"] == {}
+    assert all(t["title"] != "Leak" for t in body["tasks"])
+
+
+def test_deleted_parent_of_another_workspace_is_not_found(client, user):
+    ws_b = _second_workspace(client, user)
+    body = _sync_in(client, user, ws_b, "*", [cmd("task_add", temp_id="par", title="B parent")])
+    parent = body["temp_id_mapping"]["par"]
+    _sync_in(client, user, ws_b, body["sync_token"], [cmd("task_delete", id=parent)])
+    add = cmd("task_add", temp_id="t", title="Leak", parent_task_id=parent)
+    body = sync(client, user, "*", [add])
+    assert body["sync_status"][add["uuid"]]["error_code"] == "not_found"
+    assert body["relocated"] == {}
+    assert all(t["title"] != "Leak" for t in body["tasks"])
+
+
+def test_deleted_parent_that_was_a_subtask_is_still_relocated(client, user):
+    pid, _sid, token = _live_project_with_section(client, user)
+    body = sync(client, user, token, [
+        cmd("task_add", temp_id="top", title="Top", project_id=pid),
+    ])
+    top = body["temp_id_mapping"]["top"]
+    body = sync(client, user, body["sync_token"], [
+        cmd("task_add", temp_id="mid", title="Mid", project_id=pid, parent_task_id=top),
+    ])
+    mid = body["temp_id_mapping"]["mid"]
+    body = sync(client, user, body["sync_token"], [cmd("task_delete", id=mid)])
+    add = cmd("task_add", temp_id="t", title="Leaf", project_id=pid, parent_task_id=mid)
+    body = sync(client, user, body["sync_token"], [add])
+    assert body["sync_status"][add["uuid"]] == "ok"
+    assert body["relocated"][add["uuid"]] == {"reasons": ["parent_deleted"]}
 
 
 def test_task_move_into_deleted_project_is_still_not_found(client, user):
