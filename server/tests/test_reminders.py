@@ -214,3 +214,30 @@ def test_reminder_of_subtask_follows_parents_archived_project(client, user):
     rec = Recorder()
     assert _run_tick(rec) == 1
     assert rec.calls == []
+
+
+def test_reminder_loop_logs_only_the_type_of_a_database_error(monkeypatch, caplog):
+    import asyncio
+    import logging
+
+    from sqlalchemy.exc import DBAPIError
+
+    from balu import reminders
+
+    def boom(session):
+        raise DBAPIError("INSERT secret-sql", {"title": "secret-title"}, Exception("DETAIL secret"))
+
+    monkeypatch.setattr(reminders, "reminder_tick", boom)
+
+    async def run():
+        stop = asyncio.Event()
+        task = asyncio.create_task(reminders.reminder_loop(stop))
+        await asyncio.sleep(0.2)
+        stop.set()
+        await asyncio.wait_for(task, 5)
+
+    with caplog.at_level(logging.WARNING, logger="balu.reminders"):
+        asyncio.run(run())
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "DBAPIError" in text
+    assert "secret" not in text

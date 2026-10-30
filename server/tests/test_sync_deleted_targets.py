@@ -409,7 +409,7 @@ def test_task_add_waits_for_an_uncommitted_project_delete_then_lands_in_inbox(cl
         assert task.is_deleted is False
 
 
-def _run_blocked_command(client, user, delete_handler, delete_args, command):
+def _run_blocked_command(user, delete_handler, delete_args, command):
     """Apply `command` through process_commands in a thread while another session
     holds an uncommitted delete; assert the command waits for it, release it by
     committing, and return (sync_status entry, command uuid) after the join."""
@@ -458,23 +458,17 @@ def _run_blocked_command(client, user, delete_handler, delete_args, command):
     return outcome["status"][command["uuid"]]
 
 
-def _wire(command):
-    return {
-        "type": command["type"], "args": command["args"],
-        "temp_id": command.get("temp_id"), "uuid": command["uuid"],
-    }
-
-
 def test_task_move_with_section_waits_for_an_uncommitted_task_delete(client, user):
     """task_move used to flush its project_id change (locking the task row) before
-    the workspace lock, deadlocking against task_delete (review run 062744e0)."""
+    the workspace lock: it moved a task a concurrent task_delete had removed (and
+    could deadlock against it) (review run 062744e0)."""
     from balu.sync.commands import h_task_delete
 
     pid, sid, token = _live_project_with_section(client, user)
     body = sync(client, user, token, [cmd("task_add", temp_id="t", title="Moving")])
     tid = body["temp_id_mapping"]["t"]
     move = cmd("task_move", id=tid, project_id=pid, section_id=sid)
-    status = _run_blocked_command(client, user, h_task_delete, {"id": tid}, move)
+    status = _run_blocked_command(user, h_task_delete, {"id": tid}, move)
     assert status == {"error_code": "not_found", "error": "task not found"}
 
 
@@ -485,7 +479,7 @@ def test_section_add_and_task_move_wait_for_an_uncommitted_project_delete(client
     body = sync(client, user, token, [cmd("task_add", temp_id="t", title="Mover")])
     tid = body["temp_id_mapping"]["t"]
     add = cmd("section_add", temp_id="s2", project_id=pid, name="Late")
-    status = _run_blocked_command(client, user, h_project_delete, {"id": pid}, add)
+    status = _run_blocked_command(user, h_project_delete, {"id": pid}, add)
     assert status["error_code"] == "not_found"
 
     body = sync(client, user, "*", [
@@ -494,7 +488,7 @@ def test_section_add_and_task_move_wait_for_an_uncommitted_project_delete(client
     ])
     pid2, sid2 = body["temp_id_mapping"]["p2"], body["temp_id_mapping"]["s3"]
     move = cmd("task_move", id=tid, project_id=pid2, section_id=sid2)
-    status = _run_blocked_command(client, user, h_project_delete, {"id": pid2}, move)
+    status = _run_blocked_command(user, h_project_delete, {"id": pid2}, move)
     assert status["error_code"] == "not_found"
     body = sync(client, user, "*", [])
     assert not [s for s in body["sections"] if s["name"] == "Late"]
@@ -508,7 +502,7 @@ def test_task_move_into_section_waits_for_an_uncommitted_section_delete(client, 
     body = sync(client, user, token, [cmd("task_add", temp_id="t", title="Mover")])
     tid = body["temp_id_mapping"]["t"]
     move = cmd("task_move", id=tid, project_id=pid, section_id=sid)
-    status = _run_blocked_command(client, user, h_section_delete, {"id": sid}, move)
+    status = _run_blocked_command(user, h_section_delete, {"id": sid}, move)
     assert status["error_code"] == "not_found"
     assert _task(sync(client, user, "*", []), tid)["section_id"] is None
 
@@ -628,3 +622,62 @@ def test_uvicorn_access_log_redacts_invite_tokens_once():
     )
     access.filter(other)
     assert other.getMessage() == "/api/v1/me"
+
+
+def test_upload_waits_for_an_uncommitted_task_delete(client, user, tmp_path, monkeypatch):
+    """The upload takes the workspace lock before looking the task up, so a
+    task_delete still in flight is committed first: 404, no attachment row and no
+    blob left on disk (review run 77777ed7)."""
+    import threading
+
+    from sqlalchemy import select
+
+    from balu.config import get_settings
+    from balu.db import get_sessionmaker
+    from balu.models import Attachment
+    from balu.sync.commands import Ctx, h_task_delete
+
+    monkeypatch.setenv("BALU_DATA_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    try:
+        body = sync(client, user, "*", [cmd("task_add", temp_id="t", title="Doomed")])
+        tid = body["temp_id_mapping"]["t"]
+        sm = get_sessionmaker()
+        workspace_id = uuid.UUID(user["workspace_id"])
+        done = threading.Event()
+        outcome: dict = {}
+
+        def upload():
+            try:
+                outcome["resp"] = client.post(
+                    f"/api/v1/workspaces/{user['workspace_id']}/attachments",
+                    headers=user["headers"],
+                    data={"task_id": tid},
+                    files={"file": ("a.png", b"pixels", "image/png")},
+                )
+            except BaseException as exc:  # surfaced by the assertions below
+                outcome["error"] = exc
+            finally:
+                done.set()
+
+        with sm() as deleter:
+            h_task_delete(
+                Ctx(
+                    session=deleter, workspace_id=workspace_id,
+                    user_id=uuid.UUID(user["user"]["id"]), role="owner", temp_map={},
+                ),
+                {"id": tid},
+            )
+            thread = threading.Thread(target=upload)
+            thread.start()
+            assert not done.wait(1.0), "upload did not wait for the uncommitted delete"
+            deleter.commit()
+        thread.join(15)
+        assert done.is_set()
+        assert "error" not in outcome, outcome.get("error")
+        assert outcome["resp"].status_code == 404
+        with sm() as session:
+            assert session.scalars(select(Attachment)).all() == []
+        assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
+    finally:
+        get_settings.cache_clear()

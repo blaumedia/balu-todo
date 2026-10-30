@@ -584,6 +584,55 @@ def test_sort_order_is_validated_by_every_command_that_parses_it(client, user, b
         assert message in status["error"], name
 
 
+_CLAMP_TARGETS = {
+    "project_add": "projects", "project_update": "projects",
+    "section_add": "sections", "section_update": "sections",
+    "label_add": "labels", "label_update": "labels",
+    "task_add": "tasks", "task_move": "tasks", "task_reorder": "tasks",
+}
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(3_000_000_000, 2**31 - 1), (-3_000_000_000, -(2**31))],
+)
+def test_sort_order_out_of_range_is_clamped_by_every_command(client, user, value, expected):
+    setup = sync(client, user, "*", [
+        cmd("project_add", temp_id="p", name="P0"),
+        cmd("section_add", temp_id="s", project_id="p", name="S0"),
+        cmd("label_add", temp_id="l", name="L0"),
+        cmd("task_add", temp_id="t", title="T0"),
+    ])
+    ids = {k: setup["temp_id_mapping"][k] for k in ("p", "s", "l", "t")}
+    token = setup["sync_token"]
+    for name, command in _sort_order_commands(ids, value).items():
+        body = sync(client, user, token, [command])
+        token = body["sync_token"]
+        assert body["sync_status"][command["uuid"]] == "ok", name
+        target = ids[{
+            "project_add": None, "project_update": "p", "section_add": None,
+            "section_update": "s", "label_add": None, "label_update": "l",
+            "task_add": None, "task_move": "t", "task_reorder": "t",
+        }[name]] if name not in (
+            "project_add", "section_add", "label_add", "task_add"
+        ) else body["temp_id_mapping"].get(command.get("temp_id"))
+        rows = body[_CLAMP_TARGETS[name]]
+        if target is None:
+            # An add: the only row in the payload carrying the new value.
+            assert any(r["sort_order"] == expected for r in rows), name
+        else:
+            row = next(r for r in rows if r["id"] == target)
+            assert row["sort_order"] == expected, name
+
+
+def test_label_add_keeps_an_explicit_zero_sort_order(client, user):
+    sync(client, user, "*", [cmd("label_add", temp_id="a", name="A", sort_order=5000)])
+    add = cmd("label_add", temp_id="b", name="B", sort_order=0)
+    body = sync(client, user, "*", [add])
+    label = next(x for x in body["labels"] if x["id"] == body["temp_id_mapping"]["b"])
+    assert label["sort_order"] == 0
+
+
 def test_whole_float_sort_order_is_accepted(client, user):
     add = cmd("task_add", temp_id="t", title="Whole", sort_order=5.0)
     assert sync(client, user, "*", [add])["sync_status"][add["uuid"]] == "ok"
