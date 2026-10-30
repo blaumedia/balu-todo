@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -30,8 +32,15 @@ def sync(
 
     # Apply commands first (each in its own transaction via the sessionmaker).
     sm = get_sessionmaker()
+    relocated: dict[str, Any] = {}
     sync_status, temp_id_mapping = process_commands(
-        sm, ws_id, user.id, membership.role, body.commands, event_sender=event_sender
+        sm,
+        ws_id,
+        user.id,
+        membership.role,
+        body.commands,
+        event_sender=event_sender,
+        relocated=relocated,
     )
 
     # Then read the (post-command) changes for this client.
@@ -60,6 +69,7 @@ def sync(
         full_sync=full_sync,
         sync_status=sync_status,
         temp_id_mapping=temp_id_mapping,
+        relocated=relocated,
         projects=changes["projects"],
         sections=changes["sections"],
         tasks=changes["tasks"],

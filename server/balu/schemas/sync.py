@@ -25,6 +25,10 @@ class SyncResponse(BaseModel):
     full_sync: bool
     sync_status: dict[str, Any]
     temp_id_mapping: dict[str, str]
+    # v1.5.1: {command uuid: {"reasons": [...]}} for task_adds filed elsewhere because
+    # their target was deleted (contract §5.5). Their status stays "ok"; clients that
+    # do not know this field simply keep the task.
+    relocated: dict[str, Any] = Field(default_factory=dict)
     projects: list[dict[str, Any]]
     sections: list[dict[str, Any]]
     tasks: list[dict[str, Any]]

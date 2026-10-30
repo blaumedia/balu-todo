@@ -229,6 +229,19 @@ def _get_attachment(ctx: Ctx, ref: Any) -> Attachment:
     return obj
 
 
+def _get_including_deleted(ctx: Ctx, model, ref: Any, what: str):
+    """Like the getters above, but a soft-deleted row is returned instead of raising.
+
+    Only for task_add's placement fallback (contract §5.5): every other caller must
+    keep treating a deleted object as not_found. Unknown ids and other workspaces
+    are still not_found.
+    """
+    obj = ctx.session.get(model, _as_uuid(ref))
+    if obj is None or obj.workspace_id != ctx.workspace_id:
+        raise CommandError("not_found", f"{what} not found")
+    return obj
+
+
 def _is_member(ctx: Ctx, user_id: uuid.UUID) -> bool:
     m = ctx.session.get(Membership, {"workspace_id": ctx.workspace_id, "user_id": user_id})
     return m is not None and not m.is_deleted
@@ -463,15 +476,40 @@ def h_section_delete(ctx: Ctx, args: dict) -> dict:
 
 def h_task_add(ctx: Ctx, args: dict) -> dict:
     title = _require_str(args, "title", MAX_TITLE)
+    # An offline device can queue a task_add for a project, section or parent task a
+    # teammate deleted before it synced. Rejecting it would throw the typed task away
+    # (the client rolls back and full-syncs), so a deleted target is replaced by the
+    # nearest live container instead (contract §5.5). Only *deleted* targets qualify:
+    # unknown ids, other workspaces and I4 violations are still rejected.
+    relocated: list[str] = []
+
     project_id = None
+    requested_project_id = None
     if args.get("project_id") is not None:
-        project_id = _get_project(ctx, args["project_id"]).id
+        project = _get_including_deleted(ctx, Project, args["project_id"], "project")
+        requested_project_id = project.id
+        if project.is_deleted:
+            relocated.append("project_deleted")
+        else:
+            project_id = project.id
+
     section_id = None
     if args.get("section_id") is not None:
-        section = _get_section(ctx, args["section_id"])
-        _check_section_in_project(section, project_id)
-        section_id = section.id
-    parent_task_id = _check_parent(ctx, args.get("parent_task_id"))
+        section = _get_including_deleted(ctx, Section, args["section_id"], "section")
+        _check_section_in_project(section, requested_project_id)
+        if project_id is not None:  # a deleted project already sends the task to the Inbox
+            if section.is_deleted:
+                relocated.append("section_deleted")
+            else:
+                section_id = section.id
+
+    parent_task_id = None
+    if args.get("parent_task_id") is not None:
+        parent = _get_including_deleted(ctx, Task, args["parent_task_id"], "task")
+        if parent.is_deleted:
+            relocated.append("parent_deleted")
+        else:
+            parent_task_id = _check_parent(ctx, parent.id)
 
     version = ctx.bump()
     task = Task(
@@ -487,7 +525,9 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     )
     _apply_task_fields(ctx, task, args)
     _record_assignment(ctx, task, previous=None)
-    sort_order = args.get("sort_order")
+    # The client computed sort_order for the container it asked for; appended to the
+    # one it actually lands in instead.
+    sort_order = None if relocated else args.get("sort_order")
     if sort_order is None:
         if parent_task_id is not None:
             sort_order = _max_sort_order(ctx, Task, parent_task_id=parent_task_id)
@@ -497,7 +537,10 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
             )
     task.sort_order = int(sort_order)
     ctx.session.add(task)
-    return {"object_id": task.id}
+    result: dict = {"object_id": task.id}
+    if relocated:
+        result["relocated"] = relocated
+    return result
 
 
 def h_task_update(ctx: Ctx, args: dict) -> dict:
@@ -821,10 +864,15 @@ def process_commands(
     role: str,
     commands: list,
     event_sender: EventSender = send_to_channel,
+    relocated: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Apply commands in order, each in its own transaction.
 
     Returns (sync_status keyed by command uuid, temp_id_mapping).
+
+    When `relocated` is given, it is filled with `{command uuid: {"reasons": [...]}}`
+    for every task_add the server filed somewhere other than requested because its
+    target was deleted (contract §5.5); a replay reports the stored entry again.
     """
     sync_status: dict[str, Any] = {}
     temp_id_mapping: dict[str, str] = {}
@@ -857,6 +905,9 @@ def process_commands(
                 if stored_temp and stored_obj:
                     temp_map[stored_temp] = stored_obj
                     temp_id_mapping[stored_temp] = stored_obj
+                stored_relocated = existing.status_json.get("relocated")
+                if stored_relocated and relocated is not None:
+                    relocated[str(cmd_uuid)] = stored_relocated
                 continue
 
         handler = HANDLERS.get(command.type)
@@ -908,6 +959,9 @@ def process_commands(
             if object_id:
                 record["object_id"] = object_id
                 record["temp_id"] = command.temp_id
+            reasons = result.get("relocated")
+            if reasons:
+                record["relocated"] = {"reasons": list(reasons)}
             session.add(
                 SyncedCommand(
                     uuid=cmd_uuid_obj, workspace_id=workspace_id, status_json=record
@@ -915,6 +969,14 @@ def process_commands(
             )
             session.commit()
             sync_status[str(cmd_uuid)] = status
+            if reasons:
+                if relocated is not None:
+                    relocated[str(cmd_uuid)] = record["relocated"]
+                logger.info(
+                    "command %s (%s) relocated in workspace %s (%s): task %s",
+                    cmd_uuid, command.type, workspace_id, ", ".join(reasons),
+                    result["object_id"],
+                )
             # Fire-and-forget: post-commit so rows are durable; never affects status.
             dispatch_events(sm, user_id, ctx.events, event_sender)
         except CommandError as exc:
