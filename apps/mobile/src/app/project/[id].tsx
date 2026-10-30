@@ -149,8 +149,11 @@ export default function ProjectScreen() {
       {/* Same quick-add as the tabs; the focus effect above already set the
           compose context to this project, so new tasks land here unless the
           text names another #project. Hidden where adding makes no sense:
-          read-only members, and archived projects (unarchive first). */}
-      {writable && project != null && project.archived_at == null ? (
+          read-only members, deleted projects (the heal effect is about to pop
+          the screen) and archived projects (unarchive first). Web still lets
+          quick-add create into an archived project view; mobile follows the
+          MCP rule that refuses it. */}
+      {writable && project != null && !project.is_deleted && project.archived_at == null ? (
         <Fab onPress={openQuickAdd} bottom={insets.bottom + 24} label={t('project.addTask')} />
       ) : null}
     </View>

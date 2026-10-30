@@ -8,11 +8,12 @@ import { Icon } from './Icon';
 export function Fab({
   onPress,
   bottom = 24,
-  label = 'Add task',
+  label,
 }: {
   onPress: () => void;
   bottom?: number;
-  label?: string;
+  /** Translated accessibility label - callers pass it so screen readers are not English-only. */
+  label: string;
 }) {
   const theme = useTheme();
   return (
