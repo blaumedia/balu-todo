@@ -36,6 +36,8 @@ export const en = {
   'quickadd.placeholder': 'Add a task — try dates, #project, @label, !p1',
   'quickadd.hint': 'Return to add · another stays open',
   'quickadd.add': 'Add task',
+  'quickadd.inboxTitle': 'Added to Inbox',
+  'quickadd.inboxBody': 'This project no longer accepts tasks (it was deleted or archived), so the task went to your Inbox.',
 
   'search.placeholder': 'Search tasks…',
 

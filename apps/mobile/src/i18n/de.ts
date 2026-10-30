@@ -39,6 +39,8 @@ export const de: Record<TranslationKey, string> = {
   'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',
   'quickadd.add': 'Hinzufügen',
+  'quickadd.inboxTitle': 'Im Eingang abgelegt',
+  'quickadd.inboxBody': 'Dieses Projekt nimmt keine Aufgaben mehr an (gelöscht oder archiviert), daher liegt die Aufgabe jetzt im Eingang.',
 
   'search.placeholder': 'Aufgaben suchen…',
 
