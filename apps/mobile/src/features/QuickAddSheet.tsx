@@ -1,13 +1,13 @@
 import { activeProjects, todayLocalISO } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { TokenPill } from '../components/TokenPill';
 import { addTask } from '../lib/actions';
 import { interpretChange } from '../lib/quickAddInput';
-import { composeTaskArgs } from '../lib/quickadd';
+import { composeTaskArgs, resolveQuickAddContext } from '../lib/quickadd';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useSnapshot } from '../store/useSnapshot';
@@ -56,13 +56,23 @@ export function QuickAddSheet() {
     if (now - lastSubmitAt.current < 400) return;
     lastSubmitAt.current = now;
     const result = parseQuickAdd(trimmed, { locale, referenceDate: today });
+    // The project this sheet was opened in can vanish or be archived while it is
+    // open (deleted elsewhere); never file into a dead id - see resolveQuickAddContext.
+    const target = resolveQuickAddContext(context, snap.projects, snap.idAliases);
     const args = composeTaskArgs(trimmed, result, {
-      context,
+      context: target.context,
       projects: activeProjects(snap.projects),
       labels: snap.labels,
       today,
     });
     addTask(args);
+    if (target.redirected && args['project_id'] === undefined) {
+      // The context is dead, so close rather than repeat this for every next task.
+      setText('');
+      close();
+      Alert.alert(t('quickadd.inboxTitle'), t('quickadd.inboxBody'));
+      return;
+    }
     setText(''); // submit-and-add-another: stay open, keep focus
     inputRef.current?.clear();
     // Gboard's composing region survives a controlled clear and resurrects

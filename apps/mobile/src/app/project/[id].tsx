@@ -3,6 +3,7 @@ import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'exp
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Fab } from '../../components/Fab';
 import { Icon } from '../../components/Icon';
 import { MoreButton } from '../../components/MoreButton';
 import { ProgressRing } from '../../components/ProgressRing';
@@ -11,6 +12,7 @@ import { TaskItems } from '../../components/TaskList';
 import { EmptyState, SectionHeader } from '../../components/ui';
 import { useT } from '../../i18n';
 import { deleteSection, updateProject } from '../../lib/actions';
+import { canQuickAddInto, resolveProjectId } from '../../lib/quickadd';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -23,11 +25,17 @@ export default function ProjectScreen() {
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const today = todayLocalISO();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: routeId } = useLocalSearchParams<{ id: string }>();
+  // A project created offline is pushed as /project/tmp-...; once the server acks,
+  // the replica holds it under its real id. Follow the alias so the screen (and
+  // the compose context set below) keeps pointing at it instead of healing away.
+  const id = resolveProjectId(snap.idAliases, routeId);
   const navigation = useNavigation();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
   const openProjectActions = useApp((s) => s.openProjectActions);
+  const openQuickAdd = useApp((s) => s.openQuickAdd);
+  const quickAddOpen = useApp((s) => s.quickAddOpen);
 
   useFocusEffect(useCallback(() => setContext({ kind: 'project', projectId: id }), [setContext, id]));
 
@@ -55,7 +63,10 @@ export default function ProjectScreen() {
   // the project simply stops being found). `seen` remembers the id this screen
   // has actually shown, so a project that has not loaded yet is not gone; the
   // status gate mirrors the web Shell (never act on unconfirmed data);
-  // `healed` makes the pop fire once.
+  // `healed` makes the pop fire once. Held while quick-add is open: the sheet
+  // sits over this screen, and popping under it would switch the compose context
+  // to Browse's Inbox mid-typing; the sheet's own guard redirects with a notice
+  // instead, and the pop follows when it closes.
   const seen = useRef<string | null>(null);
   const healed = useRef(false);
   // Screen-scoped focus in state so the heal effect re-runs when focus returns:
@@ -76,13 +87,13 @@ export default function ProjectScreen() {
       return;
     }
     const gone = project?.is_deleted === true || (seen.current === id && project == null && snap.status === 'synced');
-    if (!gone || healed.current || !focused) return;
+    if (!gone || healed.current || !focused || quickAddOpen) return;
     healed.current = true;
     // The screen's own navigation, not the global router: back must pop this
     // screen, never whatever happens to be on top of it.
     if (navigation.canGoBack()) navigation.goBack();
     else router.replace('/browse');
-  }, [project, snap.status, focused, id, navigation]);
+  }, [project, snap.status, focused, quickAddOpen, id, navigation]);
 
   const confirmDeleteSection = (sectionId: string) =>
     Alert.alert(t('project.deleteSection'), t('project.deleteSectionConfirm'), [
@@ -144,6 +155,13 @@ export default function ProjectScreen() {
           </>
         )}
       </ScrollView>
+      {/* Same quick-add as the tabs; the focus effect above already set the
+          compose context to this project, so new tasks land here unless the
+          text names another #project. Hidden where adding makes no sense
+          (see canQuickAddInto). */}
+      {canQuickAddInto(project, writable) ? (
+        <Fab onPress={openQuickAdd} bottom={insets.bottom + 24} label={t('project.addTask')} />
+      ) : null}
     </View>
   );
 }

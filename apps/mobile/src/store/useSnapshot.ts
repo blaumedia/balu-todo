@@ -15,6 +15,7 @@ const EMPTY: Snapshot = {
   status: 'offline',
   syncToken: '*',
   pending: 0,
+  idAliases: {},
 };
 
 const noopSubscribe = (): (() => void) => () => {};

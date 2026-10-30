@@ -47,7 +47,7 @@ export default function TabsLayout() {
         />
         <Tabs.Screen name="search" options={{ title: t('nav.search'), tabBarIcon: icon('search') }} />
       </Tabs>
-      <Fab onPress={openQuickAdd} bottom={insets.bottom + 64} />
+      <Fab onPress={openQuickAdd} bottom={insets.bottom + 64} label={t('project.addTask')} />
     </View>
   );
 }

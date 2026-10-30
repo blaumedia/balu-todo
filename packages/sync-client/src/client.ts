@@ -70,6 +70,12 @@ export interface Snapshot {
   status: SyncStatus;
   syncToken: string;
   pending: number;
+  /**
+   * temp_id -> real id for every object the server created this session
+   * (contract §5.3). Lets a screen still holding a temp id find the real object
+   * after the ack. In memory only; never pruned.
+   */
+  idAliases: Readonly<Record<string, string>>;
 }
 
 export interface SyncClient {
@@ -116,6 +122,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   let flushing = false;
   let hydrated = false;
   let needsFullSync = false;
+  let idAliases: Record<string, string> = {};
 
   const subscribers = new Set<() => void>();
   let snapshot: Snapshot | null = null;
@@ -153,6 +160,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       status,
       syncToken,
       pending: queue.length,
+      idAliases,
     };
   }
 
@@ -244,7 +252,12 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     const mapping = resp.temp_id_mapping ?? {};
     const hasMapping = Object.keys(mapping).length > 0;
 
-    if (hasMapping) rewriteCommandRefs(queue, mapping);
+    // Before either branch: the full-sync branch drops temp records too, and the
+    // snapshot built after this call must carry the replica and the aliases together.
+    if (hasMapping) {
+      idAliases = { ...idAliases, ...mapping };
+      rewriteCommandRefs(queue, mapping);
+    }
 
     if (resp.full_sync) {
       replica = emptyReplica();
@@ -407,6 +420,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       args,
       ...(tempId ? { temp_id: tempId } : {}),
     };
+    // A flush may have rewritten the replica but not yet notified React, so the
+    // caller can still hold a temp id that no longer exists in the replica.
+    if (Object.keys(idAliases).length) rewriteCommandRefs([cmd], idAliases);
     applyCommand(replica, cmd, ctx);
     queue.push(cmd);
     void persistQueue();
