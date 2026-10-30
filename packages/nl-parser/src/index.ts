@@ -13,6 +13,13 @@ export {
   type ComposeOptions,
   type NamedEntity,
 } from "./compose.js";
+export {
+  canQuickAddInto,
+  resolveProjectId,
+  resolveQuickAddContext,
+  type QuickAddTarget,
+  type TargetProject,
+} from "./target.js";
 
 interface Candidate extends Token {
   order: number; // tie-break: lower = higher priority
