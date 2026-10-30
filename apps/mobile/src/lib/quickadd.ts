@@ -1,4 +1,4 @@
-import type { IsoDate, Label, Project } from '@balu/domain';
+import { canWrite, type IsoDate, type Label, type Project, type Role } from '@balu/domain';
 import { composeTaskArgs as compose, type ParseResult } from '@balu/nl-parser';
 import type { ComposeContext } from '../store/app';
 
@@ -38,6 +38,17 @@ export function canQuickAddInto(
   writable: boolean,
 ): boolean {
   return writable && project != null && !project.is_deleted && project.archived_at == null;
+}
+
+/**
+ * Whether the tabs show the add button. Hidden for read-only members (viewers,
+ * contract §2 - the server rejects their task_add as forbidden). Shown while the
+ * role is still unknown (null): that only happens on an offline cold start
+ * before the replica has loaded, and a writer's main entry point flickering
+ * away is worse than a viewer seeing it for a moment (the server still rejects).
+ */
+export function canQuickAddFromTabs(role: Role | null): boolean {
+  return role == null || canWrite(role);
 }
 
 /**

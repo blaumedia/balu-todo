@@ -5,7 +5,9 @@ import { View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fab } from '../../components/Fab';
 import { Icon, type IconName } from '../../components/Icon';
+import { useMyRole } from '../../hooks/use-my-role';
 import { useT } from '../../i18n';
+import { canQuickAddFromTabs } from '../../lib/quickadd';
 import { useApp } from '../../store/app';
 import { useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -16,6 +18,7 @@ export default function TabsLayout() {
   const { t } = useT();
   const insets = useSafeAreaInsets();
   const openQuickAdd = useApp((s) => s.openQuickAdd);
+  const role = useMyRole();
   const snap = useSnapshot();
   const inboxCount = selectList(snap.tasks, snap.projects, 'inbox', todayLocalISO()).length;
 
@@ -47,7 +50,10 @@ export default function TabsLayout() {
         />
         <Tabs.Screen name="search" options={{ title: t('nav.search'), tabBarIcon: icon('search') }} />
       </Tabs>
-      <Fab onPress={openQuickAdd} bottom={insets.bottom + 64} label={t('project.addTask')} />
+      {/* Hidden for read-only members; kept while the role is unknown (see canQuickAddFromTabs). */}
+      {canQuickAddFromTabs(role) ? (
+        <Fab onPress={openQuickAdd} bottom={insets.bottom + 64} label={t('project.addTask')} />
+      ) : null}
     </View>
   );
 }
