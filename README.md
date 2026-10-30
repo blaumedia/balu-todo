@@ -58,6 +58,11 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   app:
     image: ghcr.io/blaumedia/balu-todo:latest
@@ -73,6 +78,11 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   balu-db:
