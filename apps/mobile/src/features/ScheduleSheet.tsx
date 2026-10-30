@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../components/Icon';
 import { Title } from '../components/Title';
+import { useWritable } from '../hooks/use-my-role';
 import { scheduleTask } from '../lib/actions';
 import { useT, type TranslationKey } from '../i18n';
 import { useApp } from '../store/app';
@@ -23,6 +24,7 @@ export function ScheduleSheet() {
   const { t } = useT();
   const taskId = useApp((s) => s.scheduleTaskId);
   const close = useApp((s) => s.closeSchedule);
+  const writable = useWritable();
   const [showPicker, setShowPicker] = useState(false);
 
   const today = todayLocalISO();
@@ -55,7 +57,8 @@ export function ScheduleSheet() {
   };
 
   return (
-    <BottomSheet visible={taskId != null} onClose={close}>
+    // Every option mutates; never shown to read-only members (same gate as ProjectActionsSheet).
+    <BottomSheet visible={taskId != null && writable} onClose={close}>
       <Title>{t('schedule.title')}</Title>
       <View style={styles.list}>
         {options.map((o) => (
