@@ -118,7 +118,7 @@ function DetailBody({
         <Checkbox
           checked={completed}
           priority={task.priority}
-          onToggle={() => writable && (completed ? uncompleteTask(task.id) : completeTask(task.id))}
+          onToggle={writable ? () => (completed ? uncompleteTask(task.id) : completeTask(task.id)) : undefined}
         />
         <TextInput
           value={title}
