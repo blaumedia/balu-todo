@@ -103,10 +103,13 @@ def _sort_order(value: Any) -> int:
     Out of range used to reach Postgres as a DataError, whose logged text carried
     the bound parameters (task titles and notes).
     """
-    try:
-        number = int(value)
-    except (ValueError, TypeError, OverflowError) as exc:
-        raise CommandError("invalid_args", "sort_order must be an integer") from exc
+    # The clients only send JSON numbers. bool is an int subclass, floats would be
+    # truncated and strings are not sent, so all of those are rejected.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise CommandError("invalid_args", "sort_order must be an integer")
+    if isinstance(value, float) and not value.is_integer():  # also inf and NaN
+        raise CommandError("invalid_args", "sort_order must be an integer")
+    number = int(value)
     if not _INT32_MIN <= number <= _INT32_MAX:
         raise CommandError("invalid_args", "sort_order is out of range")
     return number
@@ -201,7 +204,9 @@ def _max_sort_order(ctx: Ctx, model, **filters) -> int:
         stmt = stmt.where(col.is_(None) if value is None else col == value)
     stmt = stmt.where(model.is_deleted.is_(False))
     highest = ctx.session.execute(stmt).scalar()
-    return (highest or 0) + 1000
+    # Capped so an automatic sort order (a relocated offline add included) never
+    # fails the int32 range check in _sort_order.
+    return min((highest or 0) + 1000, _INT32_MAX)
 
 
 # ---------------------------------------------------------------------------

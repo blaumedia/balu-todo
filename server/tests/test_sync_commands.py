@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from tests.conftest import cmd, sync
 
 
@@ -540,3 +542,57 @@ def test_sort_order_at_int32_bounds_accepted(client, user):
     add = cmd("task_add", temp_id="t", title="Edge", sort_order=2**31 - 1)
     body = sync(client, user, "*", [add])
     assert body["sync_status"][add["uuid"]] == "ok"
+
+
+def _sort_order_commands(ids: dict, bad):
+    return {
+        "project_add": cmd("project_add", name="P", sort_order=bad),
+        "project_update": cmd("project_update", id=ids["p"], sort_order=bad),
+        "section_add": cmd("section_add", project_id=ids["p"], name="S", sort_order=bad),
+        "section_update": cmd("section_update", id=ids["s"], sort_order=bad),
+        "label_add": cmd("label_add", name="L2", sort_order=bad),
+        "label_update": cmd("label_update", id=ids["l"], sort_order=bad),
+        "task_add": cmd("task_add", title="T2", sort_order=bad),
+        "task_move": cmd("task_move", id=ids["t"], sort_order=bad),
+        "task_reorder": cmd("task_reorder", items=[{"id": ids["t"], "sort_order": bad}]),
+    }
+
+
+@pytest.mark.parametrize(
+    "bad,message",
+    [
+        (3_000_000_000, "out of range"),
+        (-3_000_000_000, "out of range"),
+        (True, "must be an integer"),
+        (1.5, "must be an integer"),
+        ("12", "must be an integer"),
+    ],
+)
+def test_sort_order_is_validated_by_every_command_that_parses_it(client, user, bad, message):
+    setup = sync(client, user, "*", [
+        cmd("project_add", temp_id="p", name="P0"),
+        cmd("section_add", temp_id="s", project_id="p", name="S0"),
+        cmd("label_add", temp_id="l", name="L0"),
+        cmd("task_add", temp_id="t", title="T0"),
+    ])
+    ids = {k: setup["temp_id_mapping"][k] for k in ("p", "s", "l", "t")}
+    for name, command in _sort_order_commands(ids, bad).items():
+        body = sync(client, user, setup["sync_token"], [command])
+        status = body["sync_status"][command["uuid"]]
+        assert status["error_code"] == "invalid_args", name
+        assert message in status["error"], name
+
+
+def test_whole_float_sort_order_is_accepted(client, user):
+    add = cmd("task_add", temp_id="t", title="Whole", sort_order=5.0)
+    assert sync(client, user, "*", [add])["sync_status"][add["uuid"]] == "ok"
+
+
+def test_computed_sort_order_is_capped_at_int32(client, user):
+    first = cmd("task_add", temp_id="a", title="Max", sort_order=2**31 - 1)
+    body = sync(client, user, "*", [first])
+    second = cmd("task_add", temp_id="b", title="After")
+    body = sync(client, user, body["sync_token"], [second])
+    assert body["sync_status"][second["uuid"]] == "ok"
+    task = next(t for t in body["tasks"] if t["id"] == body["temp_id_mapping"]["b"])
+    assert task["sort_order"] == 2**31 - 1
