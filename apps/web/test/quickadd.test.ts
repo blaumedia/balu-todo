@@ -1,7 +1,7 @@
 import type { Project } from "@balu/domain";
 import { parseQuickAdd } from "@balu/nl-parser";
 import { describe, expect, it } from "vitest";
-import { composeTaskArgs, contextOf, quickAddTarget } from "../src/lib/quickadd.js";
+import { composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
 
 function project(over: Partial<Project>): Project {
   return {
@@ -20,6 +20,19 @@ function project(over: Partial<Project>): Project {
 
 const inbox = { kind: "list", list: "inbox" } as const;
 const view = (projectId: string) => ({ kind: "project", projectId }) as const;
+
+describe("shouldNotifyInbox", () => {
+  const redirected = { context: inbox, redirected: true } as const;
+  it("notifies when redirected and no project token was given", () => {
+    expect(shouldNotifyInbox(redirected, {})).toBe(true);
+  });
+  it("stays quiet when an explicit project was named", () => {
+    expect(shouldNotifyInbox(redirected, { project_id: "P2" })).toBe(false);
+  });
+  it("stays quiet when not redirected", () => {
+    expect(shouldNotifyInbox({ context: inbox, redirected: false }, {})).toBe(false);
+  });
+});
 
 describe("contextOf", () => {
   it("maps project, list and other views", () => {

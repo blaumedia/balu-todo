@@ -29,6 +29,12 @@ export function quickAddTarget(
   return resolveQuickAddContext(contextOf(view), projects, aliases);
 }
 
+/** Whether to toast that the task landed in the Inbox: only when the view's
+ *  project was redirected and the user did not name a project via `#`. */
+export function shouldNotifyInbox(target: QuickAddTarget, args: Record<string, unknown>): boolean {
+  return target.redirected && args["project_id"] === undefined;
+}
+
 /**
  * Turn a parsed quick-add string into `task_add` args. The logic lives in
  * `@balu/nl-parser` so web and mobile cannot drift (acceptance criterion 5:

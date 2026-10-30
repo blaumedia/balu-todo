@@ -116,6 +116,7 @@ export function Shell() {
           break;
         case " ":
         case "e":
+          if (!writable) break;
           if (focusedId) {
             e.preventDefault();
             sync?.mutate({ type: "task_complete", args: { id: focusedId } });
@@ -124,12 +125,15 @@ export function Shell() {
         case "1":
         case "2":
         case "3":
+          if (!writable) break;
           update({ priority: Number(e.key) as Priority });
           break;
         case "0":
+          if (!writable) break;
           update({ priority: 0 });
           break;
         case "t":
+          if (!writable) break;
           update({ start_date: todayLocalISO(), someday: false });
           break;
         case "d":

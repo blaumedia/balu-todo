@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
-import { composeTaskArgs, quickAddTarget } from "../lib/quickadd.js";
+import { composeTaskArgs, quickAddTarget, shouldNotifyInbox } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { useSnapshot } from "../store/useSync.js";
@@ -109,7 +109,7 @@ export function QuickAdd() {
     setText("");
     persistDraft("");
     setQuickAdd(false);
-    if (target.redirected && args["project_id"] === undefined) useApp.getState().showToast(t("quickadd.addedToInbox"));
+    if (shouldNotifyInbox(target, args)) useApp.getState().showToast(t("quickadd.addedToInbox"));
   }
 
   if (!open) return null;
