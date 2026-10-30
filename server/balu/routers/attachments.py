@@ -299,6 +299,10 @@ async def upload_attachment(
         # this is the first point at which `task_id` is guaranteed to be known.
         # The write it may discard is bounded by the cap and is only reachable
         # by a caller who is already an authenticated, writable member.
+        # Workspace lock first (as every sync command does), so a task_delete or
+        # project_delete still in flight is committed, and its cascade complete,
+        # before the task is looked up: no attachment lands on a deleted task.
+        version = bump_version(db, ws_id)
         task = _get_task(db, ws_id, task_ref)
 
         attachment = Attachment(
@@ -312,7 +316,7 @@ async def upload_attachment(
             # A fresh workspace version, exactly as a command would take: without
             # it the row carries version 0 and no incremental sync ever reports
             # the new attachment.
-            version=bump_version(db, ws_id),
+            version=version,
         )
         db.add(attachment)
         db.commit()

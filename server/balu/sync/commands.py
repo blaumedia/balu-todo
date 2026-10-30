@@ -77,8 +77,15 @@ class Ctx:
     temp_map: dict[str, str]  # in-request + persisted temp_id resolution cache
     events: list[Event] = field(default_factory=list)  # fire-and-forget, dispatched post-commit
 
+    # Memoised: process_commands bumps before the handler runs, so the workspace
+    # row lock is taken before any other lock or lookup; the handler's own call
+    # then returns the same version (one bump per command).
+    _version: int | None = None
+
     def bump(self) -> int:
-        return bump_version(self.session, self.workspace_id)
+        if self._version is None:
+            self._version = bump_version(self.session, self.workspace_id)
+        return self._version
 
 
 # ---------------------------------------------------------------------------
@@ -509,12 +516,11 @@ def h_section_delete(ctx: Ctx, args: dict) -> dict:
 
 def h_task_add(ctx: Ctx, args: dict) -> dict:
     title = _require_str(args, "title", MAX_TITLE)
-    # Bump first: the UPDATE row-locks the workspace, which serialises this command
-    # against every other sync command in the workspace (project_delete bumps before
-    # its cascade too). Under READ COMMITTED the lookups below then see a committed
-    # delete, and a delete waiting on this lock sees our task in its cascade. Taking
-    # a project row lock before the bump instead deadlocks against project_delete
-    # and project_update, which bump first.
+    # process_commands has already taken the workspace lock (ctx.bump() is memoised),
+    # so every sync command is serialised against every other one. Under READ
+    # COMMITTED the lookups below see a committed delete, and a delete waiting on
+    # the lock sees our task in its cascade. Taking a project row lock before the
+    # bump would instead deadlock against project_delete and project_update.
     version = ctx.bump()
     # An offline device can queue a task_add for a project, section or parent task a
     # teammate deleted before it synced. Rejecting it would throw the typed task away
@@ -985,6 +991,10 @@ def process_commands(
                 role=role,
                 temp_map=temp_map,
             )
+            # Workspace lock first, before the handler reads or changes any row: a
+            # handler that flushed a row change or checked a parent before its own
+            # bump raced concurrent deletes and could deadlock against them.
+            ctx.bump()
             result = handler(ctx, resolved_args)
             status = "ok"
             if command.type in _ADD_COMMANDS and command.temp_id and result.get("object_id"):

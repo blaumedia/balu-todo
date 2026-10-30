@@ -409,6 +409,110 @@ def test_task_add_waits_for_an_uncommitted_project_delete_then_lands_in_inbox(cl
         assert task.is_deleted is False
 
 
+def _run_blocked_command(client, user, delete_handler, delete_args, command):
+    """Apply `command` through process_commands in a thread while another session
+    holds an uncommitted delete; assert the command waits for it, release it by
+    committing, and return (sync_status entry, command uuid) after the join."""
+    import threading
+
+    from balu.db import get_sessionmaker
+    from balu.sync.commands import Ctx, process_commands
+
+    sm = get_sessionmaker()
+    workspace_id = uuid.UUID(user["workspace_id"])
+    user_id = uuid.UUID(user["user"]["id"])
+    done = threading.Event()
+    outcome: dict = {}
+
+    class _Command:
+        type = command["type"]
+        args = command["args"]
+        temp_id = command.get("temp_id")
+        uuid = command["uuid"]
+
+    def apply():
+        try:
+            outcome["status"], _ = process_commands(
+                sm, workspace_id, user_id, "owner", [_Command()]
+            )
+        except BaseException as exc:  # surfaced by the assertions below
+            outcome["error"] = exc
+        finally:
+            done.set()
+
+    with sm() as deleter:
+        delete_handler(
+            Ctx(
+                session=deleter, workspace_id=workspace_id, user_id=user_id,
+                role="owner", temp_map={},
+            ),
+            delete_args,
+        )
+        thread = threading.Thread(target=apply)
+        thread.start()
+        assert not done.wait(0.5), "command did not wait for the uncommitted delete"
+        deleter.commit()
+    thread.join(15)
+    assert done.is_set()
+    assert "error" not in outcome, outcome.get("error")
+    return outcome["status"][command["uuid"]]
+
+
+def _wire(command):
+    return {
+        "type": command["type"], "args": command["args"],
+        "temp_id": command.get("temp_id"), "uuid": command["uuid"],
+    }
+
+
+def test_task_move_with_section_waits_for_an_uncommitted_task_delete(client, user):
+    """task_move used to flush its project_id change (locking the task row) before
+    the workspace lock, deadlocking against task_delete (review run 062744e0)."""
+    from balu.sync.commands import h_task_delete
+
+    pid, sid, token = _live_project_with_section(client, user)
+    body = sync(client, user, token, [cmd("task_add", temp_id="t", title="Moving")])
+    tid = body["temp_id_mapping"]["t"]
+    move = cmd("task_move", id=tid, project_id=pid, section_id=sid)
+    status = _run_blocked_command(client, user, h_task_delete, {"id": tid}, move)
+    assert status == {"error_code": "not_found", "error": "task not found"}
+
+
+def test_section_add_and_task_move_wait_for_an_uncommitted_project_delete(client, user):
+    from balu.sync.commands import h_project_delete
+
+    pid, sid, token = _live_project_with_section(client, user)
+    body = sync(client, user, token, [cmd("task_add", temp_id="t", title="Mover")])
+    tid = body["temp_id_mapping"]["t"]
+    add = cmd("section_add", temp_id="s2", project_id=pid, name="Late")
+    status = _run_blocked_command(client, user, h_project_delete, {"id": pid}, add)
+    assert status["error_code"] == "not_found"
+
+    body = sync(client, user, "*", [
+        cmd("project_add", temp_id="p2", name="Second"),
+        cmd("section_add", temp_id="s3", project_id="p2", name="Second section"),
+    ])
+    pid2, sid2 = body["temp_id_mapping"]["p2"], body["temp_id_mapping"]["s3"]
+    move = cmd("task_move", id=tid, project_id=pid2, section_id=sid2)
+    status = _run_blocked_command(client, user, h_project_delete, {"id": pid2}, move)
+    assert status["error_code"] == "not_found"
+    body = sync(client, user, "*", [])
+    assert not [s for s in body["sections"] if s["name"] == "Late"]
+    assert _task(body, tid)["project_id"] is None
+
+
+def test_task_move_into_section_waits_for_an_uncommitted_section_delete(client, user):
+    from balu.sync.commands import h_section_delete
+
+    pid, sid, token = _live_project_with_section(client, user)
+    body = sync(client, user, token, [cmd("task_add", temp_id="t", title="Mover")])
+    tid = body["temp_id_mapping"]["t"]
+    move = cmd("task_move", id=tid, project_id=pid, section_id=sid)
+    status = _run_blocked_command(client, user, h_section_delete, {"id": sid}, move)
+    assert status["error_code"] == "not_found"
+    assert _task(sync(client, user, "*", []), tid)["section_id"] is None
+
+
 def test_httpx_and_httpcore_loggers_are_pinned_to_warning():
     from balu.main import create_app
 
