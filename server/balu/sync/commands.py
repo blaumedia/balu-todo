@@ -105,10 +105,12 @@ _INT32_MIN = -(2**31)
 
 
 def _sort_order(value: Any) -> int:
-    """Parse a client sort_order; reject what the Integer column cannot hold.
+    """Parse a client sort_order into what the Integer column can hold.
 
     Out of range used to reach Postgres as a DataError, whose logged text carried
-    the bound parameters (task titles and notes).
+    the bound parameters (task titles and notes). It is clamped instead of rejected:
+    the clients append with max + 1000 without a cap, so once a container sits at
+    the int32 maximum every offline add would otherwise be thrown away.
     """
     # The clients only send JSON numbers. bool is an int subclass, floats would be
     # truncated and strings are not sent, so all of those are rejected.
@@ -116,10 +118,7 @@ def _sort_order(value: Any) -> int:
         raise CommandError("invalid_args", "sort_order must be an integer")
     if isinstance(value, float) and not value.is_integer():  # also inf and NaN
         raise CommandError("invalid_args", "sort_order must be an integer")
-    number = int(value)
-    if not _INT32_MIN <= number <= _INT32_MAX:
-        raise CommandError("invalid_args", "sort_order is out of range")
-    return number
+    return max(_INT32_MIN, min(int(value), _INT32_MAX))
 
 
 def _require_str(args: dict, key: str, max_length: int = MAX_NAME) -> str:

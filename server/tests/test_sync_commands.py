@@ -530,12 +530,15 @@ def test_task_complete_ignores_an_implausible_client_day(client, user):
     assert task["start_date"] == (utc_today + timedelta(days=1)).isoformat()
 
 
-def test_sort_order_out_of_int32_range_is_invalid_args(client, user):
-    for bad in (3_000_000_000, -3_000_000_000):
-        add = cmd("task_add", temp_id="t", title="Secret title", sort_order=bad)
+def test_sort_order_out_of_int32_range_is_clamped(client, user):
+    for n, (bad, expected) in enumerate(
+        ((3_000_000_000, 2**31 - 1), (-3_000_000_000, -(2**31)))
+    ):
+        add = cmd("task_add", temp_id=f"t{n}", title="Secret title", sort_order=bad)
         body = sync(client, user, "*", [add])
-        assert body["sync_status"][add["uuid"]]["error_code"] == "invalid_args"
-        assert "out of range" in body["sync_status"][add["uuid"]]["error"]
+        assert body["sync_status"][add["uuid"]] == "ok"
+        task = next(t for t in body["tasks"] if t["id"] == body["temp_id_mapping"][f"t{n}"])
+        assert task["sort_order"] == expected
 
 
 def test_sort_order_at_int32_bounds_accepted(client, user):
@@ -561,8 +564,6 @@ def _sort_order_commands(ids: dict, bad):
 @pytest.mark.parametrize(
     "bad,message",
     [
-        (3_000_000_000, "out of range"),
-        (-3_000_000_000, "out of range"),
         (True, "must be an integer"),
         (1.5, "must be an integer"),
         ("12", "must be an integer"),

@@ -146,8 +146,9 @@ Field semantics (these ARE the product decisions — implement precisely):
 - `sort_order`: integer ordering **within its container** (container = parent task if
   `parent_task_id` set, else (project, section) pair, else Inbox). Clients append with
   `max + 1000`; reorders rewrite the affected set (§5.5 `task_reorder`). Must be a JSON
-  integer in the int32 range; whole-number floats (`2000.0`) are accepted, anything else
-  (strings, booleans, fractions, out-of-range) is `invalid_args`.
+  integer; whole-number floats (`2000.0`) are accepted, anything else (strings, booleans,
+  fractions) is `invalid_args`. A value outside the int32 range is clamped to the nearest
+  bound (so an append after `2147483647` is never lost).
 - Subtasks: one level only in v1 — server rejects a `parent_task_id` pointing at a task
   that itself has a parent (`invalid_args`).
 - `label_ids` order is not meaningful.
