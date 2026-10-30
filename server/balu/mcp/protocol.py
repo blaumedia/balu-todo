@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import StatementError
 
 from .. import __version__
 from .tools import ToolContext, ToolError, call_tool, tool_specs
@@ -124,8 +124,8 @@ def _tools_call(request_id: Any, params: dict, ctx: ToolContext) -> dict[str, An
         return _result(request_id, {"content": _text_content(report), "isError": True})
     except Exception as exc:
         # Never hand a driver/ORM message to an MCP client (S6) - log it instead.
-        # A DBAPIError's text can carry Postgres's DETAIL (user content): type only.
-        if isinstance(exc, DBAPIError):
+        # A StatementError's text can carry Postgres's DETAIL (user content): type only.
+        if isinstance(exc, StatementError):
             logger.error("MCP tool %s failed unexpectedly: %s", name, type(exc).__name__)
         else:
             logger.exception("MCP tool %s failed unexpectedly", name)

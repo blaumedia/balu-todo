@@ -16,7 +16,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..attachments import remove_blob
@@ -1043,9 +1043,9 @@ def process_commands(
             session.rollback()
             # Never leak the driver/ORM message to the client: it carries table
             # names, constraint names and sometimes parameter values (S6).
-            # A DBAPIError's text can carry Postgres's "Failing row contains (...)"
+            # A StatementError's text can carry Postgres's "Failing row contains (...)"
             # DETAIL, i.e. user content: log only its type.
-            if isinstance(exc, DBAPIError):
+            if isinstance(exc, StatementError):
                 logger.error(
                     "command %s (%s) failed unexpectedly in workspace %s: %s",
                     cmd_uuid, command.type, workspace_id, type(exc).__name__,

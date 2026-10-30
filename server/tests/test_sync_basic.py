@@ -148,3 +148,26 @@ def test_validation_log_cannot_be_forged_through_the_path(client, caplog):
         assert len(messages) == 1
         assert "\n" not in messages[0]
         assert "FORGED LINE" in messages[0]
+
+
+def test_api_database_error_handler_covers_statement_error_and_logs_only_the_type(caplog):
+    import asyncio
+
+    from sqlalchemy.exc import StatementError
+    from starlette.requests import Request
+
+    from balu.main import app
+
+    scope = {
+        "type": "http", "method": "POST", "path": "/x", "headers": [], "query_string": b"",
+    }
+    handler = app.state.api.exception_handlers[StatementError]
+    exc = StatementError(
+        "secret-message", "INSERT secret-sql", {"title": "secret-title"}, Exception("DETAIL")
+    )
+    with caplog.at_level("ERROR", logger="balu.main"):
+        response = asyncio.run(handler(Request(scope), exc))
+    assert response.status_code == 500
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "StatementError" in text
+    assert "secret" not in text

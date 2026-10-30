@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from balu.db import get_sessionmaker
 from balu.reminders import reminder_tick
 from tests.conftest import cmd, sync
@@ -216,16 +218,19 @@ def test_reminder_of_subtask_follows_parents_archived_project(client, user):
     assert rec.calls == []
 
 
-def test_reminder_loop_logs_only_the_type_of_a_database_error(monkeypatch, caplog):
+@pytest.mark.parametrize("error_type", ["DBAPIError", "StatementError"])
+def test_reminder_loop_logs_only_the_type_of_a_database_error(monkeypatch, caplog, error_type):
     import asyncio
     import logging
 
-    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy import exc as sa_exc
 
     from balu import reminders
 
     def boom(session):
-        raise DBAPIError("INSERT secret-sql", {"title": "secret-title"}, Exception("DETAIL secret"))
+        raise getattr(sa_exc, error_type)(
+            "INSERT secret-sql", {"title": "secret-title"}, Exception("DETAIL secret")
+        )
 
     monkeypatch.setattr(reminders, "reminder_tick", boom)
 
@@ -239,5 +244,5 @@ def test_reminder_loop_logs_only_the_type_of_a_database_error(monkeypatch, caplo
     with caplog.at_level(logging.WARNING, logger="balu.reminders"):
         asyncio.run(run())
     text = " ".join(r.getMessage() for r in caplog.records)
-    assert "DBAPIError" in text
+    assert error_type in text
     assert "secret" not in text

@@ -549,13 +549,17 @@ def test_sort_order_at_int32_bounds_accepted(client, user):
 
 def _sort_order_commands(ids: dict, bad):
     return {
-        "project_add": cmd("project_add", name="P", sort_order=bad),
+        "project_add": cmd(
+            "project_add", temp_id="np", name="P", sort_order=bad
+        ),
         "project_update": cmd("project_update", id=ids["p"], sort_order=bad),
-        "section_add": cmd("section_add", project_id=ids["p"], name="S", sort_order=bad),
+        "section_add": cmd(
+            "section_add", temp_id="ns", project_id=ids["p"], name="S", sort_order=bad
+        ),
         "section_update": cmd("section_update", id=ids["s"], sort_order=bad),
-        "label_add": cmd("label_add", name="L2", sort_order=bad),
+        "label_add": cmd("label_add", temp_id="nl", name="L2", sort_order=bad),
         "label_update": cmd("label_update", id=ids["l"], sort_order=bad),
-        "task_add": cmd("task_add", title="T2", sort_order=bad),
+        "task_add": cmd("task_add", temp_id="nt", title="T2", sort_order=bad),
         "task_move": cmd("task_move", id=ids["t"], sort_order=bad),
         "task_reorder": cmd("task_reorder", items=[{"id": ids["t"], "sort_order": bad}]),
     }
@@ -584,11 +588,13 @@ def test_sort_order_is_validated_by_every_command_that_parses_it(client, user, b
         assert message in status["error"], name
 
 
+# command -> (table in the payload, id key: an `ids` key for an update, the
+# add's temp_id for an add).
 _CLAMP_TARGETS = {
-    "project_add": "projects", "project_update": "projects",
-    "section_add": "sections", "section_update": "sections",
-    "label_add": "labels", "label_update": "labels",
-    "task_add": "tasks", "task_move": "tasks", "task_reorder": "tasks",
+    "project_add": ("projects", "np"), "project_update": ("projects", "p"),
+    "section_add": ("sections", "ns"), "section_update": ("sections", "s"),
+    "label_add": ("labels", "nl"), "label_update": ("labels", "l"),
+    "task_add": ("tasks", "nt"), "task_move": ("tasks", "t"), "task_reorder": ("tasks", "t"),
 }
 
 
@@ -609,20 +615,10 @@ def test_sort_order_out_of_range_is_clamped_by_every_command(client, user, value
         body = sync(client, user, token, [command])
         token = body["sync_token"]
         assert body["sync_status"][command["uuid"]] == "ok", name
-        target = ids[{
-            "project_add": None, "project_update": "p", "section_add": None,
-            "section_update": "s", "label_add": None, "label_update": "l",
-            "task_add": None, "task_move": "t", "task_reorder": "t",
-        }[name]] if name not in (
-            "project_add", "section_add", "label_add", "task_add"
-        ) else body["temp_id_mapping"].get(command.get("temp_id"))
-        rows = body[_CLAMP_TARGETS[name]]
-        if target is None:
-            # An add: the only row in the payload carrying the new value.
-            assert any(r["sort_order"] == expected for r in rows), name
-        else:
-            row = next(r for r in rows if r["id"] == target)
-            assert row["sort_order"] == expected, name
+        table, key = _CLAMP_TARGETS[name]
+        target = body["temp_id_mapping"].get(key) or ids[key]
+        row = next(r for r in body[table] if r["id"] == target)
+        assert row["sort_order"] == expected, name
 
 
 def test_label_add_keeps_an_explicit_zero_sort_order(client, user):

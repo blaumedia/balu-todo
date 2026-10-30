@@ -14,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import OperationalError, StatementError
 
 from . import __version__
 from .config import get_settings
@@ -185,9 +185,9 @@ def create_app() -> FastAPI:
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
-    @api.exception_handler(DBAPIError)
-    async def _db_error_handler(request: Request, exc: DBAPIError):
-        # Left to uvicorn, a DBAPIError is logged with its full traceback, and
+    @api.exception_handler(StatementError)
+    async def _db_error_handler(request: Request, exc: StatementError):
+        # Left to uvicorn, a StatementError is logged with its full traceback, and
         # Postgres's DETAIL ("Failing row contains (...)") carries user content.
         logger.error(
             "database error on %s %r: %s",
