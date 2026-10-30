@@ -25,8 +25,9 @@ export function quickAddTarget(
   view: ViewSel,
   projects: ReadonlyArray<Project>,
   aliases: Readonly<Record<string, string>>,
+  confirmed = true,
 ): QuickAddTarget {
-  return resolveQuickAddContext(contextOf(view), projects, aliases);
+  return resolveQuickAddContext(contextOf(view), projects, aliases, confirmed);
 }
 
 /** Whether to toast that the task landed in the Inbox: only when the view's

@@ -5,6 +5,7 @@ import { getSync } from "../lib/clients.js";
 import { composeTaskArgs, quickAddTarget, shouldNotifyInbox } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { useSnapshot } from "../store/useSync.js";
 import { Icon } from "../components/Icon.js";
 import { Button } from "../components/Button.js";
@@ -56,6 +57,7 @@ export function QuickAdd() {
   const view = useApp((s) => s.view);
   const { t, locale } = useT();
   const snapshot = useSnapshot();
+  const writable = canWrite(useMyRole());
   const today = todayLocalISO();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState<string>(() => sanitize(globalThis.localStorage?.getItem(DRAFT_KEY) ?? ""));
@@ -96,9 +98,14 @@ export function QuickAdd() {
 
   function create() {
     if (!text.trim()) return;
+    // Role can drop to read-only while quick-add is open - send nothing then.
+    if (!writable) {
+      close();
+      return;
+    }
     // The view's project can be gone or archived by now, or still carry a temp
     // id the server has replaced - never file into a dead id (quickAddTarget).
-    const target = quickAddTarget(view, snapshot.projects, snapshot.idAliases);
+    const target = quickAddTarget(view, snapshot.projects, snapshot.idAliases, snapshot.status === "synced");
     const args = composeTaskArgs(text, parsed, {
       context: target.context,
       projects: activeProjects(snapshot.projects),

@@ -66,6 +66,13 @@ describe("quickAddTarget", () => {
     expect(quickAddTarget(view("gone"), [project({})], {})).toEqual({ context: inbox, redirected: true });
   });
 
+  it("keeps a missing project before the first sync", () => {
+    expect(quickAddTarget(view("gone"), [], {}, false)).toEqual({
+      context: { kind: "project", projectId: "gone" },
+      redirected: false,
+    });
+  });
+
   it("leaves a list view unchanged", () => {
     expect(quickAddTarget({ kind: "list", list: "today" }, [], {})).toEqual({
       context: { kind: "list", list: "today" },
