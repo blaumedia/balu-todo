@@ -7,7 +7,7 @@ import { Fab } from '../../components/Fab';
 import { Icon, type IconName } from '../../components/Icon';
 import { useMyRole } from '../../hooks/use-my-role';
 import { useT } from '../../i18n';
-import { canQuickAddFromTabs } from '../../lib/quickadd';
+import { canQuickAddFromTabs } from '../../lib/role';
 import { useApp } from '../../store/app';
 import { useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';

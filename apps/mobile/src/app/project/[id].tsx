@@ -53,7 +53,6 @@ export default function ProjectScreen() {
 
   const body = bySection(null);
 
-  const members = snap.members.filter((m) => !m.is_deleted);
   const writable = useWritable();
 
   // Leave the screen once the project is gone: deleted here (the optimistic

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveMyRole } from '../src/lib/role';
 
 const ws = { id: 'ws-1' };
-const rec = (id: string, role: Role, is_deleted = false) => ({ id, role, is_deleted });
+const rec = (id: string, role: Role) => ({ id, role });
 
 describe('resolveMyRole', () => {
   it('prefers the replica record over /me, so a synced demotion applies', () => {
@@ -34,9 +34,9 @@ describe('resolveMyRole', () => {
     ).toBe('viewer');
   });
 
-  it('returns null for a deleted own record even when /me says owner', () => {
+  it('returns null when the replica is loaded but has no own record, ignoring /me', () => {
     expect(
-      resolveMyRole({ userId: 'u1', workspaceId: 'ws-1', members: [rec('u1', 'owner', true)], memberships: [{ role: 'owner', workspace: ws }] }),
+      resolveMyRole({ userId: 'u1', workspaceId: 'ws-1', members: [rec('u2', 'owner')], memberships: [{ role: 'owner', workspace: ws }] }),
     ).toBeNull();
   });
 

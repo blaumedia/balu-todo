@@ -1,7 +1,7 @@
 // The tabs add button must not show for read-only members: the server rejects
 // their task_add as forbidden (§2).
 import { describe, expect, it } from 'vitest';
-import { canQuickAddFromTabs } from '../src/lib/quickadd';
+import { canQuickAddFromTabs } from '../src/lib/role';
 
 describe('canQuickAddFromTabs', () => {
   it('is hidden for a viewer', () => {
