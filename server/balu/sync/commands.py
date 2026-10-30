@@ -485,7 +485,8 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     # teammate deleted before it synced. Rejecting it would throw the typed task away
     # (the client rolls back and full-syncs), so a deleted target is replaced by the
     # nearest live container instead (contract §5.5). Only *deleted* targets qualify:
-    # unknown ids, other workspaces and I4 violations are still rejected.
+    # unknown ids, other workspaces and I4 violations are still rejected (a
+    # `section_id` is not checked at all when the requested project is deleted).
     relocated: list[str] = []
 
     project_id = None
