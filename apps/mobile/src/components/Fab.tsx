@@ -5,13 +5,21 @@ import { Pressable, StyleSheet } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
 
-export function Fab({ onPress, bottom = 24 }: { onPress: () => void; bottom?: number }) {
+export function Fab({
+  onPress,
+  bottom = 24,
+  label = 'Add task',
+}: {
+  onPress: () => void;
+  bottom?: number;
+  label?: string;
+}) {
   const theme = useTheme();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel="Add task"
+      accessibilityLabel={label}
       style={({ pressed }) => [styles.wrap, { bottom, shadowColor: theme.accent }, pressed && styles.pressed]}
     >
       <LinearGradient

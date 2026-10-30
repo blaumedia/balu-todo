@@ -3,6 +3,7 @@ import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'exp
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Fab } from '../../components/Fab';
 import { Icon } from '../../components/Icon';
 import { MoreButton } from '../../components/MoreButton';
 import { ProgressRing } from '../../components/ProgressRing';
@@ -28,6 +29,7 @@ export default function ProjectScreen() {
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
   const openProjectActions = useApp((s) => s.openProjectActions);
+  const openQuickAdd = useApp((s) => s.openQuickAdd);
 
   useFocusEffect(useCallback(() => setContext({ kind: 'project', projectId: id }), [setContext, id]));
 
@@ -144,6 +146,13 @@ export default function ProjectScreen() {
           </>
         )}
       </ScrollView>
+      {/* Same quick-add as the tabs; the focus effect above already set the
+          compose context to this project, so new tasks land here unless the
+          text names another #project. Hidden where adding makes no sense:
+          read-only members, and archived projects (unarchive first). */}
+      {writable && project != null && project.archived_at == null ? (
+        <Fab onPress={openQuickAdd} bottom={insets.bottom + 24} label={t('project.addTask')} />
+      ) : null}
     </View>
   );
 }
