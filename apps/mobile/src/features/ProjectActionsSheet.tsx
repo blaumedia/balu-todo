@@ -1,10 +1,11 @@
-import { isOpen, nextProjectSortOrder, PROJECT_COLORS, canWrite, type Project } from '@balu/domain';
+import { isOpen, nextProjectSortOrder, PROJECT_COLORS, type Project } from '@balu/domain';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { Title } from '../components/Title';
+import { useWritable } from '../hooks/use-my-role';
 import { deleteProject, updateProject } from '../lib/actions';
 import { useT, type TranslationKey } from '../i18n';
 import { useApp } from '../store/app';
@@ -26,11 +27,9 @@ export function ProjectActionsSheet() {
   const { t } = useT();
   const projectId = useApp((s) => s.projectActionsId);
   const close = useApp((s) => s.closeProjectActions);
-  const user = useApp((s) => s.user);
   const snap = useSnapshot();
   const project: Project | undefined = projectId ? snap.projects.find((p) => p.id === projectId && !p.is_deleted) : undefined;
-  const myRole = user ? snap.members.find((m) => m.id === user.id && !m.is_deleted)?.role : undefined;
-  const writable = canWrite(myRole);
+  const writable = useWritable();
   const [mode, setMode] = useState<Mode>('menu');
   const [name, setName] = useState('');
 
