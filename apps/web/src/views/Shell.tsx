@@ -4,6 +4,7 @@ import { todayLocalISO, type Priority } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
 import { applyMoveDrop, dragKind, getDragResolver, makeAnnouncements } from "../lib/drag.js";
 import { projectViewAction } from "../lib/projectView.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { markReplaceNext, useUrlSync } from "../lib/useUrlSync.js";
 import { useApp } from "../store/app.js";
@@ -32,6 +33,7 @@ export function Shell() {
   const view = useApp((s) => s.view);
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const quickAddOpen = useApp((s) => s.quickAddOpen);
+  const writable = canWrite(useMyRole());
   const { t } = useT();
   useUrlSync();
 
@@ -61,7 +63,7 @@ export function Shell() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "n") {
         e.preventDefault();
-        st.setQuickAdd(true);
+        if (writable) st.setQuickAdd(true); // viewers cannot add tasks
         return;
       }
       if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
@@ -141,7 +143,7 @@ export function Shell() {
           break;
         case "n":
           e.preventDefault();
-          st.setQuickAdd(true);
+          if (writable) st.setQuickAdd(true);
           break;
         case "Escape":
           if (st.selectedTaskId) st.selectTask(null);
@@ -151,7 +153,7 @@ export function Shell() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [writable]);
 
   // Deep-linked project that does not exist in this workspace's replica
   // (deleted, or the link came from another workspace): fall back to Today once
