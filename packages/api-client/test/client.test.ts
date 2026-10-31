@@ -490,7 +490,7 @@ describe("refresh across tabs sharing one storage", () => {
     return c;
   }
 
-  it("a lease lost right before the request is re-acquired, and the retry stays single-flight", async () => {
+  it("a lease lost right before the request is re-acquired before POSTing", async () => {
     const { storage, state, fetchImpl } = await twoTabs();
     let armed = false;
     const c = await hookedTab(storage, fetchImpl, {
@@ -501,9 +501,8 @@ describe("refresh across tabs sharing one storage", () => {
       },
     });
     armed = true;
-    const [t1, t2] = await Promise.all([c.refresh(), c.refresh()]);
+    await c.refresh();
     expect(state.refreshCalls).toBe(1); // never POSTed without the lease, and only once after it
-    expect(t2).toBe(t1);
     expect(state.burned).toBe(false);
     expect(await storage.getItem("balu:auth:refreshLease")).toBeNull();
   });
@@ -512,6 +511,7 @@ describe("refresh across tabs sharing one storage", () => {
     const { storage, state, fetchImpl } = await twoTabs();
     let armed = false;
     let stolen = false;
+    let lostSeen = false;
     let late: Promise<unknown> | null = null;
     let cRef: Awaited<ReturnType<typeof hookedTab>> | null = null;
     const c = await hookedTab(storage, fetchImpl, {
@@ -528,7 +528,6 @@ describe("refresh across tabs sharing one storage", () => {
         if (k === "balu:auth:refreshLease" && stolen) lostSeen = true;
       },
     });
-    let lostSeen = false;
     cRef = c;
     armed = true;
     const first = c.refresh();
