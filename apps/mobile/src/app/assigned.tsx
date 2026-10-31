@@ -1,5 +1,4 @@
 import { selectList, todayLocalISO } from '@balu/domain';
-import { router } from 'expo-router';
 import { useEffect } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +6,7 @@ import { StackHeader } from '../components/StackHeader';
 import { TaskItems } from '../components/TaskList';
 import { EmptyState } from '../components/ui';
 import { useT } from '../i18n';
+import { goBackOr } from '../lib/goBack';
 import { useApp } from '../store/app';
 import { useMaps, useSnapshot } from '../store/useSnapshot';
 import { useTheme } from '../theme/ThemeProvider';
@@ -24,7 +24,7 @@ export default function AssignedScreen() {
   // Solo workspace or logged out → nothing to show here; bounce back.
   const memberCount = snap.members.filter((m) => !m.is_deleted).length;
   useEffect(() => {
-    if (user == null || memberCount <= 1) router.back();
+    if (user == null || memberCount <= 1) goBackOr();
   }, [user, memberCount]);
 
   const tasks = user ? selectList(snap.tasks, snap.projects, 'assigned', today, user.id) : [];

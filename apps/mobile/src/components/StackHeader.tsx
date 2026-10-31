@@ -1,7 +1,7 @@
-import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useT } from '../i18n';
+import { goBackOr } from '../lib/goBack';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, space } from '../theme/tokens';
 import { Icon } from './Icon';
@@ -12,7 +12,7 @@ export function StackHeader({ title, right, colorDot }: { title: string; right?:
   const { t } = useT();
   return (
     <View style={styles.row}>
-      <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel={t('common.back')}>
+      <Pressable onPress={() => goBackOr()} hitSlop={10} accessibilityLabel={t('common.back')}>
         <Icon name="arrow-left" size={24} color={theme.textPrimary} strokeWidth={2} />
       </Pressable>
       {colorDot ? <View style={[styles.dot, { backgroundColor: colorDot }]} /> : null}
