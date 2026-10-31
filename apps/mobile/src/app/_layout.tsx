@@ -32,8 +32,8 @@ export default function RootLayout() {
   // JS listener, so OK would silently do nothing. Close any orphan once at mount.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    DateTimePickerAndroid.dismiss('date');
-    DateTimePickerAndroid.dismiss('time');
+    DateTimePickerAndroid.dismiss('date').catch(() => {});
+    DateTimePickerAndroid.dismiss('time').catch(() => {});
   }, []);
 
   useEffect(() => {

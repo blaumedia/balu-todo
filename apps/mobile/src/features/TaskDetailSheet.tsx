@@ -103,7 +103,16 @@ function DetailBody({
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
 
-  // A role drop blurs the focused input; a viewer must not write (the server rejects it).
+  // A role drop must not leave an unsaved draft behind: it would show as if
+  // kept and be committed by the next blur after a promotion back to writer.
+  useEffect(() => {
+    if (!writable) {
+      setTitle(task.title);
+      setNotes(task.notes);
+    }
+  }, [writable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A viewer must not write (the server rejects it).
   const commitTitle = () => {
     if (!writable) return;
     const v = title.trim();

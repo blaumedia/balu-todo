@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../components/Icon';
 import { relativeDate } from '../lib/format';
-import { combineDayAndTime, firstReminderPickerStep, formatReminderTime, reminderDialogStep, type ReminderPickerStep } from '../lib/reminderPicker';
+import { combineDayAndTime, firstReminderPickerStep, formatReminderTime, reminderDialogStep, uses24h, type PickedDay, type ReminderPickerStep } from '../lib/reminderPicker';
 import { useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, radius, space } from '../theme/tokens';
@@ -40,7 +40,7 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
   const theme = useTheme();
   const { t, locale } = useT();
   const [step, setStep] = useState<ReminderPickerStep | null>(null);
-  const [day, setDay] = useState<Date | null>(null); // Android: the date from step 1
+  const [day, setDay] = useState<PickedDay | null>(null); // Android: the date from step 1
   const [draft, setDraft] = useState<Date | null>(null); // iOS: the wheel value until Done
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
@@ -175,7 +175,7 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
       </View>
       {step === 'datetime' && draft && !disabled ? (
         <View style={[styles.wheel, { borderBottomColor: theme.border }]}>
-          <DateTimePicker value={draft} mode="datetime" display="spinner" onChange={onWheelChange} />
+          <DateTimePicker value={draft} mode="datetime" display="spinner" locale={locale} onChange={onWheelChange} />
           <Pressable onPress={commitDraft} hitSlop={8} accessibilityRole="button" style={styles.done}>
             <Text style={[styles.doneText, { color: theme.accent }]}>{t('common.done')}</Text>
           </Pressable>
@@ -188,6 +188,7 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
           value={step === 'time' && day ? combineDayAndTime(day, draft) : draft}
           mode={step}
           display="default"
+          is24Hour={uses24h(locale)}
           onChange={onDialogChange}
         />
       ) : null}
