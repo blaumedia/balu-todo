@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from ..auth import get_current_user
 from ..config import get_settings
@@ -142,7 +143,12 @@ async def mcp_post(
     db: Session = Depends(get_db),
     event_sender: EventSender = Depends(get_event_sender),
 ) -> Response:
-    raw = await request.body()
+    try:
+        raw = await request.body()
+    except ClientDisconnect:
+        # The client went away mid-body: nobody to answer, and not a server
+        # fault, so do not let it escape as an unhandled ASGI exception.
+        return Response(status_code=400)
     authorization = request.headers.get("Authorization", "")
     ip = client_ip(request)
     # The body is the only async part; tool handling is synchronous SQLAlchemy and

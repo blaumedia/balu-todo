@@ -20,6 +20,7 @@ module then parses the stream itself, enforcing the cap as the bytes arrive.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import uuid
 from pathlib import Path
@@ -31,6 +32,7 @@ from python_multipart.exceptions import FormParserError
 from python_multipart.multipart import MultipartParser, parse_options_header
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from ..attachments import (
     blob_path,
@@ -46,6 +48,8 @@ from ..services import require_member_under_lock
 from ..sync.engine import ROLE_RANK, bump_version
 from ..sync.serialize import serialize_attachment
 from .workspaces import _parse_ws_id, get_membership
+
+logger = logging.getLogger("balu.attachments")
 
 router = APIRouter(prefix="/workspaces", tags=["attachments"])
 
@@ -405,6 +409,15 @@ async def upload_attachment(
         sink.close()
         path.unlink(missing_ok=True)
         raise validation_error("malformed multipart body") from None
+    except ClientDisconnect:
+        # The client went away mid-body. Not a server fault, so it must not
+        # escape as an unhandled exception (uvicorn would log it as an ERROR
+        # with a traceback). The response cannot reach the client; the 4xx only
+        # keeps the ASGI app from treating it as a crash.
+        sink.close()
+        path.unlink(missing_ok=True)
+        logger.info("upload aborted by client: workspace=%s bytes_received=%d", ws_id, total)
+        raise validation_error("upload aborted") from None
     except Exception:
         # A parser error, a dropped connection, a full disk: never leave the
         # half-written blob behind.

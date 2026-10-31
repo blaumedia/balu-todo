@@ -7,6 +7,7 @@ import concurrent.futures
 import uuid
 
 import pytest
+from starlette.requests import ClientDisconnect, Request
 
 from balu.attachments import sanitize_content_type, sanitize_filename
 from balu.config import get_settings
@@ -346,6 +347,39 @@ def test_upload_without_a_file_part_is_a_validation_error(client, user):
     )
     assert resp.status_code == 422
     assert resp.json()["detail"]["code"] == "validation_error"
+
+
+def test_upload_aborted_by_the_client_is_a_handled_event(
+    client, user, data_dir, db, monkeypatch, caplog
+):
+    """A client disconnecting mid-body must clean up and not crash the ASGI app.
+
+    The test client re-raises unhandled server exceptions, so an escaping
+    ClientDisconnect would fail the request call itself.
+    """
+    task_id = _add_task(client, user)
+    body = _field_part("task_id", task_id) + _file_part(
+        "secret-name.bin", b"A" * 4096, "application/octet-stream"
+    )
+
+    async def _aborted_stream(self):
+        yield body
+        raise ClientDisconnect()
+
+    monkeypatch.setattr(Request, "stream", _aborted_stream)
+    with caplog.at_level("INFO", logger="balu.attachments"):
+        resp = _post_raw(client, user, body)
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["code"] == "validation_error"
+    assert db.query(Attachment).count() == 0
+    assert [p for p in data_dir.rglob("*") if p.is_file()] == []
+    records = [r for r in caplog.records if r.name == "balu.attachments"]
+    assert len(records) == 1
+    assert records[0].levelname == "INFO"
+    assert "upload aborted by client" in records[0].getMessage()
+    assert user["workspace_id"] in records[0].getMessage()
+    assert "secret-name" not in records[0].getMessage()
 
 
 def test_truncated_multipart_body_is_rejected(client, user, data_dir, db):
