@@ -103,7 +103,9 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
   // A role drop to viewer mid-edit must not leave a stale picker or input behind.
   useEffect(() => {
     if (disabled) {
-      closePicker();
+      setStep(null);
+      setDay(null);
+      setDraft(null);
       setEditing(false);
     }
   }, [disabled]);

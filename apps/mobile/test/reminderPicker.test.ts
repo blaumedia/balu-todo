@@ -35,6 +35,9 @@ describe('reminderDialogStep', () => {
     expect(r.day).toBeNull();
     expect(r.commit?.getTime()).toBe(new Date(2026, 10, 3, 18, 45).getTime());
   });
+  it('falls back to the raw time when the time dialog OK arrives without a day', () => {
+    expect(reminderDialogStep('time', null, 'set', time).commit).toBe(time);
+  });
   it('discards everything when the time dialog is cancelled', () => {
     expect(reminderDialogStep('time', day, 'dismissed', undefined)).toEqual({ next: null, day: null, commit: null });
   });

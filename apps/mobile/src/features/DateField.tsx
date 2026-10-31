@@ -34,7 +34,8 @@ export interface DateFieldProps {
 export function DateField({ icon, label, value, onChange, disabled = false }: DateFieldProps) {
   const theme = useTheme();
   const { t, locale } = useT();
-  const [showPicker, setShowPicker] = useState(false);
+  // Seed captured once on open: `isoToDate(null)` is a fresh `new Date()` each render.
+  const [pickerSeed, setPickerSeed] = useState<Date | null>(null);
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
 
@@ -59,18 +60,19 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
     setEditing(false);
   };
 
-  // Stable identity: the Android wrapper re-opens the dialog whenever `onChange` changes.
+  // Stable identity: the Android wrapper re-opens the dialog whenever `onChange` or
+  // `value` changes, so both must stay stable while the dialog is open.
   const latestOnChange = useRef(onChange);
   latestOnChange.current = onChange;
   const onPickerChange = useCallback((e: DateTimePickerEvent, d?: Date) => {
-    setShowPicker(false);
+    setPickerSeed(null);
     if (e.type === 'set' && d) latestOnChange.current(dateToIso(d));
   }, []);
 
   // A role drop to viewer mid-edit must not leave a stale picker or input behind.
   useEffect(() => {
     if (disabled) {
-      setShowPicker(false);
+      setPickerSeed(null);
       setEditing(false);
     }
   }, [disabled]);
@@ -107,7 +109,7 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
           </Pressable>
         )}
         <Pressable
-          onPress={() => setShowPicker(true)}
+          onPress={() => setPickerSeed(isoToDate(value))}
           hitSlop={8}
           disabled={disabled}
           accessibilityRole="button"
@@ -129,8 +131,8 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
           </Pressable>
         ) : null}
       </View>
-      {showPicker && !disabled ? (
-        <DateTimePicker value={isoToDate(value)} mode="date" display="default" onChange={onPickerChange} />
+      {pickerSeed && !disabled ? (
+        <DateTimePicker value={pickerSeed} mode="date" display="default" onChange={onPickerChange} />
       ) : null}
     </View>
   );
