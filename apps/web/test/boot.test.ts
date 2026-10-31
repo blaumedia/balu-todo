@@ -16,7 +16,6 @@ const fake = vi.hoisted(() => {
     hydrated: 0,
     teardowns: 0,
     closes: 0,
-    settle: null as Promise<void> | null,
   };
   return state;
 });
@@ -56,11 +55,6 @@ vi.mock("../src/lib/clients.js", () => ({
   },
   closeSync: () => {
     fake.closes += 1;
-  },
-  teardownSyncSettled: async () => {
-    fake.teardowns += 1;
-    fake.closes += 1;
-    await fake.settle;
   },
 }));
 
@@ -121,7 +115,6 @@ beforeEach(() => {
   fake.hydrated = 0;
   fake.teardowns = 0;
   fake.closes = 0;
-  fake.settle = null;
   fake.open = "lost";
   fake.stored = [];
   fake.discarded.clear();
@@ -328,7 +321,7 @@ describe("cross-tab session changes", () => {
     globalThis.localStorage.removeItem("balu:auth:refresh");
     globalThis.localStorage.removeItem("balu:owner");
     expect(await reconcileSession()).toBe(false);
-    expect(fake.teardowns).toBe(1);
+    expect(fake.closes).toBe(1);
     expect(useApp.getState().boot).toBe("login");
     expect(useApp.getState().loginNotice).toBeNull();
     expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
@@ -337,7 +330,7 @@ describe("cross-tab session changes", () => {
   it("session expired in another tab (owner still stored): login screen with notice, queue kept", async () => {
     globalThis.localStorage.removeItem("balu:auth:refresh");
     expect(await reconcileSession()).toBe(false);
-    expect(fake.teardowns).toBeGreaterThan(0);
+    expect(fake.closes).toBeGreaterThan(0);
     expect(useApp.getState().boot).toBe("login");
     expect(useApp.getState().loginNotice).toBe("sessionExpired");
     expect(globalThis.localStorage.getItem("balu:queue:w1")).toBe("[]");
@@ -368,7 +361,7 @@ describe("cross-tab session changes", () => {
     globalThis.localStorage.removeItem("balu:owner");
     onStorageEvent({ key: "balu:auth:refresh" });
     await vi.waitFor(() => expect(useApp.getState().boot).toBe("login"));
-    expect(fake.teardowns).toBe(1);
+    expect(fake.closes).toBe(1);
   });
 
   it("another user signing in elsewhere: this tab restarts as that user", async () => {
@@ -382,22 +375,17 @@ describe("cross-tab session changes", () => {
     // The old client was closed (it can never write u1's queue back), not merely stopped.
     expect(fake.closes).toBe(1);
     expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
-    expect(fake.teardowns).toBeGreaterThan(0);
     expect(fake.hydrated).toBe(1);
     expect(fake.open).toBe("z");
   });
 
-  it("clears the previous user's screen before the old client has settled", async () => {
-    let release: () => void = () => {};
-    fake.settle = new Promise<void>((r) => {
-      release = r;
-    });
+  it("clears the previous user's screen at once and closes the old clients without waiting for them", async () => {
     globalThis.localStorage.removeItem("balu:auth:refresh");
     globalThis.localStorage.removeItem("balu:owner");
     const done = reconcileSession();
     expect(useApp.getState().user).toBeNull();
     expect(useApp.getState().boot).toBe("loading");
-    release();
+    expect(fake.closes).toBe(1);
     expect(await done).toBe(false);
     expect(useApp.getState().boot).toBe("login");
   });

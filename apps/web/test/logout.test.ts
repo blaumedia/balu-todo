@@ -8,10 +8,8 @@ vi.mock("../src/lib/clients.js", () => ({
       events.push(`api.logout owner=${globalThis.localStorage.getItem("balu:owner")}`);
     },
   },
-  teardownSyncSettled: async () => {
-    events.push("settle:start");
-    await new Promise((r) => setTimeout(r, 5));
-    events.push("settle:end");
+  closeSync: () => {
+    events.push("close");
   },
 }));
 vi.mock("../src/lib/localData.js", async (orig) => ({
@@ -35,9 +33,10 @@ beforeEach(() => {
 });
 
 describe("logout", () => {
-  it("lets the closed sync client settle before anything is purged", async () => {
+  it("closes the sync clients before anything is purged", async () => {
     await logout();
-    expect(events.indexOf("settle:end")).toBeLessThan(events.indexOf("purge"));
+    expect(events.indexOf("close")).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf("close")).toBeLessThan(events.indexOf("purge"));
   });
 
   it("removes the owner key before the tokens are revoked, so other tabs see a logout, not an expiry", async () => {

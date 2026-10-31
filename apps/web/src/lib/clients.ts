@@ -105,13 +105,32 @@ let sync: SyncClient | null = null;
 let syncWorkspaceId: string | null = null;
 
 /**
+ * Clients that were stopped (workspace switch, session expiry) but whose running
+ * pull or flush has not settled yet. `stop()` does not cancel that work, and it
+ * writes the old workspace's queue/replica/token when it lands - so a purge or an
+ * adoption by another user must reach these too, not only the current client.
+ */
+const retired = new Set<SyncClient>();
+
+/** Stop `client` and keep it reachable until its running work has settled. */
+function retire(client: SyncClient | null): void {
+  if (!client) return;
+  client.stop();
+  retired.add(client);
+  const settled = (): void => {
+    retired.delete(client);
+  };
+  client.idle().then(settled, settled);
+}
+
+/**
  * (Re)instantiate the sync client for a workspace. The sync-client persists its
  * queue/token/replica under workspace-scoped keys (`balu:{queue,token,replica}:<id>`),
  * so switching workspaces never mixes data — the old instance is stopped and a
  * fresh one hydrates from that workspace's own keys.
  */
 export function initSync(workspaceId: string, userId: string): SyncClient {
-  sync?.stop();
+  retire(sync);
   // Landing in a workspace again (re-invite) resets its loss bookkeeping.
   expectedLoss.delete(workspaceId);
   announcedLoss.delete(workspaceId);
@@ -154,25 +173,22 @@ export function getSyncWorkspaceId(): string | null {
 }
 
 /**
- * Close the sync client for good (it never persists again, even for a pull or
- * flush already in flight) and drop it. For when the stored data is about to be
- * wiped or handed to another user; `teardownSync` only stops it.
+ * Close every sync client for good - the current one and any stopped one still
+ * winding down - so none of them ever writes to storage again (not even a pull
+ * or flush already in flight) and drop the current one. For when the stored data
+ * is about to be wiped or handed to another user; `teardownSync` only stops it.
+ * localStorage writes are synchronous, so once closed nothing can land half-done
+ * and there is nothing to wait for.
  */
 export function closeSync(): void {
+  for (const client of retired) client.close();
   sync?.close();
   sync = null;
   syncWorkspaceId = null;
 }
 
-/** `closeSync`, then wait for the closed client's running pull or flush to wind down. */
-export async function teardownSyncSettled(): Promise<void> {
-  const old = sync;
-  closeSync();
-  await old?.idle();
-}
-
 export function teardownSync(): void {
-  sync?.stop();
+  retire(sync);
   sync = null;
   syncWorkspaceId = null;
 }

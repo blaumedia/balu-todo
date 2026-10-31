@@ -14,7 +14,6 @@ import {
   setSessionEndedElsewhereHandler,
   setSessionExpiredHandler,
   teardownSync,
-  teardownSyncSettled,
 } from "./clients.js";
 import { bootRetryDelayMs, waitForRetry } from "./bootRetry.js";
 import { adoptLocalDataFor, OWNER_KEY, purgeLocalData } from "./localData.js";
@@ -86,8 +85,9 @@ export async function reconcileSession(): Promise<boolean> {
   useApp.getState().reset();
   useApp.getState().setBoot("loading");
   // Closed, not just stopped: the other tab's adopt/purge may already have run,
-  // and a late write from this tab's client would land after it.
-  await teardownSyncSettled();
+  // and a late write from this tab's client would land after it. Not awaited:
+  // closed clients never write again and localStorage writes are synchronous.
+  closeSync();
   await api.hydrate();
   if (!api.isAuthenticated()) {
     await loginGone(wasReady);
