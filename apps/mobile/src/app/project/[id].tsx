@@ -1,4 +1,4 @@
-import { canWrite, isOpen, nextProjectSortOrder, todayLocalISO, type Task } from '@balu/domain';
+import { isOpen, nextProjectSortOrder, todayLocalISO, type Task } from '@balu/domain';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -10,6 +10,7 @@ import { ProgressRing } from '../../components/ProgressRing';
 import { StackHeader } from '../../components/StackHeader';
 import { TaskItems } from '../../components/TaskList';
 import { EmptyState, SectionHeader } from '../../components/ui';
+import { useWritable } from '../../hooks/use-my-role';
 import { useT } from '../../i18n';
 import { deleteSection, updateProject } from '../../lib/actions';
 import { canQuickAddInto, resolveProjectId } from '../../lib/quickadd';
@@ -32,7 +33,6 @@ export default function ProjectScreen() {
   const id = resolveProjectId(snap.idAliases, routeId);
   const navigation = useNavigation();
   const setContext = useApp((s) => s.setContext);
-  const user = useApp((s) => s.user);
   const openProjectActions = useApp((s) => s.openProjectActions);
   const openQuickAdd = useApp((s) => s.openQuickAdd);
   const quickAddOpen = useApp((s) => s.quickAddOpen);
@@ -53,9 +53,7 @@ export default function ProjectScreen() {
 
   const body = bySection(null);
 
-  const members = snap.members.filter((m) => !m.is_deleted);
-  const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined;
-  const writable = canWrite(myRole);
+  const writable = useWritable();
 
   // Leave the screen once the project is gone: deleted here (the optimistic
   // record stays, flagged is_deleted) or deleted elsewhere (a synced delete is

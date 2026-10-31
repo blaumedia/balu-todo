@@ -1,4 +1,5 @@
 import type { IsoDate, Task } from '@balu/domain';
+import { useWritable } from '../hooks/use-my-role';
 import { TaskRow } from './TaskRow';
 import type { ReplicaMaps } from '../store/useSnapshot';
 
@@ -16,6 +17,7 @@ export function TaskItems({
   hideProject?: boolean;
   swipeable?: boolean;
 }) {
+  const writable = useWritable();
   return (
     <>
       {tasks.map((task) => (
@@ -29,6 +31,7 @@ export function TaskItems({
           commentCount={maps.commentCounts.get(task.id) ?? 0}
           hideProject={hideProject}
           swipeable={swipeable}
+          writable={writable}
         />
       ))}
     </>

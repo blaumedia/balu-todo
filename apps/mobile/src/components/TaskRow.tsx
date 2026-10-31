@@ -27,9 +27,11 @@ export interface TaskRowProps {
   /** Hide the project dot/name (e.g. inside a project view). */
   hideProject?: boolean;
   swipeable?: boolean;
+  /** False for read-only members (viewers): the checkbox is inert and there are no swipe actions (§2). */
+  writable: boolean;
 }
 
-export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, swipeable = true }: TaskRowProps) {
+export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, swipeable = true, writable }: TaskRowProps) {
   const theme = useTheme();
   const { t, locale } = useT();
   const openDetail = useApp((s) => s.openDetail);
@@ -80,7 +82,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
       onPress={() => openDetail(task.id)}
       style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
-      <Checkbox checked={checked} priority={task.priority} onToggle={completeWithLinger} />
+      <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
       <View style={styles.body}>
         <Text
           numberOfLines={1}
@@ -146,7 +148,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     </Pressable>
   );
 
-  if (!swipeable) {
+  if (!swipeable || !writable) {
     return (
       <Animated.View exiting={FadeOut.duration(duration.medium)}>{content}</Animated.View>
     );

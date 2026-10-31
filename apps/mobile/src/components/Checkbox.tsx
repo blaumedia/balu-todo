@@ -45,11 +45,20 @@ export function Checkbox({ checked, priority = 0, onToggle, size = 24 }: Checkbo
   const ring = prioColor ?? theme.textTertiary;
 
   return (
-    <Pressable onPress={onToggle} hitSlop={10} accessibilityRole="checkbox" accessibilityState={{ checked }}>
+    // Without onToggle (read-only viewer) the control is disabled, so a tap falls
+    // through to the row and assistive tech does not announce it as actionable.
+    <Pressable
+      onPress={onToggle}
+      disabled={!onToggle}
+      hitSlop={10}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked, disabled: !onToggle }}
+    >
       <Animated.View
         style={[
           styles.box,
           { width: size, height: size, borderRadius: 7, borderColor: checked ? theme.accent : ring },
+          !onToggle && !checked && styles.readOnly,
           boxStyle,
         ]}
       >
@@ -71,6 +80,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  readOnly: {
+    opacity: 0.6,
   },
   check: {
     position: 'absolute',

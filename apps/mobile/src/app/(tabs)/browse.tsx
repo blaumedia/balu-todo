@@ -1,4 +1,4 @@
-import { activeProjects, archivedProjects, canWrite, isOpen, nextProjectSortOrder, reorderUpdates, selectList, todayLocalISO, type Project } from '@balu/domain';
+import { activeProjects, archivedProjects, isOpen, nextProjectSortOrder, reorderUpdates, selectList, todayLocalISO, type Project } from '@balu/domain';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,6 +8,7 @@ import { HeaderActions } from '../../components/HeaderActions';
 import { Icon } from '../../components/Icon';
 import { MoreButton } from '../../components/MoreButton';
 import { Divider, ListRow, ScreenHeader, SectionHeader } from '../../components/ui';
+import { useWritable } from '../../hooks/use-my-role';
 import { addProject, updateProject } from '../../lib/actions';
 import { hapticDrop, hapticSelect } from '../../lib/haptics';
 import { useT } from '../../i18n';
@@ -46,8 +47,7 @@ export default function BrowseScreen() {
   const memberCount = members.length;
   const showAssigned = memberCount > 1 && user != null;
   const assignedCount = user ? selectList(snap.tasks, snap.projects, 'assigned', today, user.id).length : 0;
-  const myRole = user ? members.find((m) => m.id === user.id)?.role : undefined;
-  const writable = canWrite(myRole);
+  const writable = useWritable();
   const projects = activeProjects(snap.projects);
   const archived = archivedProjects(snap.projects);
   const labels = snap.labels.filter((l) => !l.is_deleted).sort((a, b) => a.sort_order - b.sort_order);

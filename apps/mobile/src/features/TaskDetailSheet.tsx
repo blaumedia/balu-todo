@@ -1,4 +1,5 @@
 import type { Comment, Priority, Role, Task } from '@balu/domain';
+import { canWrite } from '@balu/domain';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
@@ -26,6 +27,7 @@ import {
 } from '../lib/collab';
 import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
+import { useMyRole } from '../hooks/use-my-role';
 import { useApp } from '../store/app';
 import { useSnapshot } from '../store/useSnapshot';
 import { useTheme } from '../theme/ThemeProvider';
@@ -92,8 +94,8 @@ function DetailBody({
   const members = snap.members.filter((m) => !m.is_deleted);
   const multiMember = members.length > 1;
   const assignee = task.assigned_to ? members.find((m) => m.id === task.assigned_to) : undefined;
-  const myRole: Role | undefined = user ? members.find((m) => m.id === user.id)?.role : undefined;
-  const writable = myRole != null && myRole !== 'viewer';
+  const myRole = useMyRole();
+  const writable = canWrite(myRole);
   const scrollRef = useRef<ScrollView>(null);
   // The composer sits at the sheet's bottom — when it gains focus the keyboard
   // pads the sheet, but the ScrollView doesn't follow on its own.
@@ -116,7 +118,7 @@ function DetailBody({
         <Checkbox
           checked={completed}
           priority={task.priority}
-          onToggle={() => writable && (completed ? uncompleteTask(task.id) : completeTask(task.id))}
+          onToggle={writable ? () => (completed ? uncompleteTask(task.id) : completeTask(task.id)) : undefined}
         />
         <TextInput
           value={title}
@@ -485,7 +487,7 @@ function CommentsSection({
   task: Task;
   snap: ReturnType<typeof useSnapshot>;
   userId: string | null;
-  role: Role | undefined;
+  role: Role | null;
   onComposerFocus?: () => void;
 }) {
   const theme = useTheme();
