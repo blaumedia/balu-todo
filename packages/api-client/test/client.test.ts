@@ -85,6 +85,61 @@ describe("auth", () => {
     expect(calls.filter((x) => x.includes("/auth/refresh"))).toHaveLength(1);
   });
 
+  async function expiredSession(refreshReply: () => Promise<Response> | Response, storage = memoryKV()) {
+    const fetchImpl = (async (u: any) => {
+      const path = String(u);
+      if (path.endsWith("/auth/login")) {
+        return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      }
+      if (path.endsWith("/auth/refresh")) return refreshReply();
+      return json({ detail: { code: "token_expired", message: "" } }, 401);
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl });
+    await c.login({ email: "d@example.com", password: "pw" });
+    return { c, storage, fetchImpl };
+  }
+
+  it("a network error during refresh keeps the tokens", async () => {
+    const { c, storage, fetchImpl } = await expiredSession(() => {
+      throw new TypeError("network down");
+    });
+    await expect(c.getMe()).rejects.toBeInstanceOf(TypeError);
+    expect(c.isAuthenticated()).toBe(true);
+    const fresh = createApiClient({ storage, fetch: fetchImpl });
+    await fresh.hydrate();
+    expect(fresh.isAuthenticated()).toBe(true);
+  });
+
+  it("a 5xx during refresh keeps the tokens", async () => {
+    const { c, storage, fetchImpl } = await expiredSession(
+      () => new Response("<html>bad gateway</html>", { status: 502 }),
+    );
+    await expect(c.getMe()).rejects.toMatchObject({ status: 502 });
+    expect(c.isAuthenticated()).toBe(true);
+    const fresh = createApiClient({ storage, fetch: fetchImpl });
+    await fresh.hydrate();
+    expect(fresh.isAuthenticated()).toBe(true);
+  });
+
+  it("a rejected refresh token (401) clears the tokens", async () => {
+    const { c } = await expiredSession(() =>
+      json({ detail: { code: "invalid_token", message: "" } }, 401),
+    );
+    await expect(c.getMe()).rejects.toMatchObject({ status: 401 });
+    expect(c.isAuthenticated()).toBe(false);
+  });
+
+  it("a hung request times out with ApiError timeout", async () => {
+    let signal: AbortSignal | undefined;
+    const fetchImpl = ((_u: any, init: any) => {
+      signal = init.signal;
+      return new Promise<Response>(() => {});
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage: memoryKV(), fetch: fetchImpl, requestTimeoutMs: 20 });
+    await expect(c.getMe()).rejects.toMatchObject({ code: "timeout", status: 0 });
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("surfaces contract error codes as ApiError", async () => {
     const fetchImpl = (async () =>
       json({ detail: { code: "email_taken", message: "Email already registered" } }, 409)) as unknown as typeof fetch;

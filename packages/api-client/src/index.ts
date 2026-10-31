@@ -18,6 +18,7 @@ import type {
   User,
   Workspace,
 } from "@balu/domain";
+import { withTimeout } from "@balu/domain";
 
 // Declared once in @balu/domain (D6); re-exported so existing imports keep working.
 export type { AsyncKV };
@@ -27,6 +28,8 @@ export interface ApiClientOptions {
   baseUrl?: string;
   storage: AsyncKV;
   fetch?: typeof fetch;
+  /** Give up on a JSON request (including a token refresh) after this long. Attachment upload/download are exempt. Default 30 000. */
+  requestTimeoutMs?: number;
 }
 
 export class ApiError extends Error {
@@ -121,6 +124,11 @@ export function attachmentFormData(taskId: string, file: unknown): FormData {
 export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? "/api/v1";
   const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
+  const timeoutMs = opts.requestTimeoutMs ?? 30_000;
+
+  function timed<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return withTimeout(timeoutMs, run, () => new ApiError("timeout", "Request timed out", 0));
+  }
 
   let accessToken: string | null = null;
   let refreshToken: string | null = null;
@@ -169,12 +177,16 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   }
 
   async function post<T>(path: string, body: unknown): Promise<T> {
-    const res = await fetchImpl(url(path), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    return parse<T>(res);
+    return timed(async (signal) =>
+      parse<T>(
+        await fetchImpl(url(path), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+          signal,
+        }),
+      ),
+    );
   }
 
   async function refresh(): Promise<AuthTokens> {
@@ -182,16 +194,24 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     if (!refreshToken) throw new ApiError("invalid_token", "No refresh token", 401);
     refreshInFlight = (async () => {
       try {
-        const res = await fetchImpl(url("/auth/refresh"), {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-        const tokens = await parse<AuthTokens>(res);
+        const tokens = await timed(async (signal) =>
+          parse<AuthTokens>(
+            await fetchImpl(url("/auth/refresh"), {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ refresh_token: refreshToken }),
+              signal,
+            }),
+          ),
+        );
         await setTokens(tokens);
         return tokens;
       } catch (e) {
-        await clearTokens();
+        // Only the server refusing the refresh token ends the session (401
+        // invalid_token / token_expired). A network error, a timeout, a 5xx or a 429
+        // during an outage says nothing about the token, and clearing it there logged
+        // the user out of a session that was still valid.
+        if (e instanceof ApiError && e.status === 401) await clearTokens();
         throw e;
       } finally {
         refreshInFlight = null;
@@ -236,7 +256,9 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     path: string,
     init: RequestInit & { method: string },
   ): Promise<T> {
-    return parse<T>(await authedRaw(path, init, { "content-type": "application/json" }));
+    return timed(async (signal) =>
+      parse<T>(await authedRaw(path, { ...init, signal }, { "content-type": "application/json" })),
+    );
   }
 
   return {
