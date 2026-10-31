@@ -290,8 +290,9 @@ describe("batch size recovery", () => {
     for (let i = 0; i < 100; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
     c.start();
     await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 3_000 });
-    // 40 and 20 time out; 10 passes and 20 is not tried again until 5 batches passed at the cap.
-    expect(s.sizes.slice(0, 7)).toEqual([40, 20, 10, 10, 10, 10, 10]);
+    // 40 and 20 time out; 10 passes and 20 is not tried again until 5 batches passed at the cap,
+    // then the ceiling lifts and the batch grows 20, 30.
+    expect(s.sizes.slice(0, 9)).toEqual([40, 20, 10, 10, 10, 10, 10, 20, 30]);
   });
 
   it("never sends a size that timed out twice in a row", async () => {
@@ -312,7 +313,26 @@ describe("batch size recovery", () => {
     c.start();
     await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 5_000 });
     expect(sizes.some((n) => n > 25)).toBe(true);
+    // After the first timeout a size above 25 comes back only after 5 passes at the cap.
+    const firstBig = sizes.findIndex((n) => n > 25);
+    expect(sizes.slice(firstBig + 1).some((n) => n > 25)).toBe(true);
     for (let i = 1; i < sizes.length; i++) expect(sizes[i]! > 25 && sizes[i - 1]! > 25).toBe(false);
+  });
+
+  it("small flushes do not lift the ceiling of a size that timed out", async () => {
+    const s = hangFirst(1);
+    const c = track(createSyncClient(base({ fetch: s.fetch, maxBatch: 40, requestTimeoutMs: 30, retryBaseMs: 5 })));
+    for (let i = 0; i < 40; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
+    c.start();
+    await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 3_000 });
+    for (let i = 0; i < 8; i++) {
+      c.mutate({ type: "task_add", args: { title: `s${i}` } });
+      await c.flush();
+    }
+    s.sizes.length = 0;
+    for (let i = 0; i < 100; i++) c.mutate({ type: "task_add", args: { title: `b${i}` } });
+    await c.flush();
+    expect(s.sizes[0]).toBeLessThan(40); // 40 timed out and only single-command flushes passed since
   });
 
   it("a timed-out pull does not shrink the next push", async () => {

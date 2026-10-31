@@ -320,7 +320,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   const maxBatch = opts.maxBatch ?? 100;
   // After a request times out the next flush sends fewer commands (a slow server
   // is working through each one) and a body read gets twice the time; a success
-  // restores both. The batch grows back additively and stays below the size that
+  // restores the body timeout. The batch grows back additively and stays below the size that
   // timed out until CEILING_PROBE_OK batches in a row passed at the cap, then that
   // size is tried once: doubling, or restoring the full size at once, alternated a
   // batch that times out with a half one that passes and burned a full timeout on
@@ -775,13 +775,17 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
           // redundant full sync.
           if (resp.full_sync) await clearNeedsFullSync();
           invalidate();
-          const limit = timedOutSize === null ? maxBatch : Math.max(minBatch, timedOutSize - minBatch);
-          if (batchSize < limit) {
-            batchSize = Math.min(limit, batchSize + minBatch);
-          } else if (timedOutSize !== null && ++okAtCap >= CEILING_PROBE_OK) {
-            timedOutSize = null; // probe the size that timed out once more
-            okAtCap = 0;
-            batchSize = Math.min(maxBatch, batchSize + minBatch);
+          // Only a full batch says anything about the size: a flush of one command
+          // would otherwise grow the batch and lift the ceiling after a few edits.
+          if (batch.length >= batchSize) {
+            const limit = timedOutSize === null ? maxBatch : Math.max(minBatch, timedOutSize - minBatch);
+            if (batchSize < limit) {
+              batchSize = Math.min(limit, batchSize + minBatch);
+            } else if (timedOutSize !== null && ++okAtCap >= CEILING_PROBE_OK) {
+              timedOutSize = null; // probe the size that timed out once more
+              okAtCap = 0;
+              batchSize = Math.min(maxBatch, batchSize + minBatch);
+            }
           }
         }
         setStatus("synced");
