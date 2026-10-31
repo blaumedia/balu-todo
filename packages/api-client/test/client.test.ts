@@ -448,7 +448,7 @@ describe("refresh across tabs sharing one storage", () => {
 
   it("waits while another tab holds a live lease, then refreshes", async () => {
     const { a, storage, state } = await twoTabs();
-    await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 60_000 }));
+    await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 20_000 }));
     let done = false;
     const refreshed = a.refresh().then(() => {
       done = true;
@@ -459,6 +459,23 @@ describe("refresh across tabs sharing one storage", () => {
     await storage.removeItem("balu:auth:refreshLease");
     await refreshed;
     expect(state.refreshCalls).toBe(1);
+  });
+
+  it("a lease whose expiry is far in the future (clock moved back) is taken over", async () => {
+    const { a, storage, state } = await twoTabs();
+    await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "skewed", exp: Date.now() + 3_600_000 }));
+    await a.refresh();
+    expect(state.refreshCalls).toBe(1);
+  });
+
+  it("crossContextLock none refreshes without touching a lease", async () => {
+    const { storage, state, fetchImpl } = await twoTabs();
+    await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 20_000 }));
+    const solo = (await loadTab()).createApiClient({ storage, fetch: fetchImpl, crossContextLock: "none" });
+    await solo.hydrate();
+    await solo.refresh();
+    expect(state.refreshCalls).toBe(1);
+    expect(await storage.getItem("balu:auth:refreshLease")).toContain("other-tab");
   });
 
   it("does not adopt the tokens of a different user", async () => {

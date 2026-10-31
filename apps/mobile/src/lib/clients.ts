@@ -128,7 +128,7 @@ export function initApi(serverUrl: string): ApiClient {
   const base = apiBase(serverUrl);
   if (api && apiBaseUrl === base) return api;
   apiBaseUrl = base;
-  api = createApiClient({ baseUrl: base, storage: sqliteKV, onSessionExpired: () => sessionExpiredHandler?.() });
+  api = createApiClient({ baseUrl: base, storage: sqliteKV, crossContextLock: 'none', onSessionExpired: () => sessionExpiredHandler?.() });
   return api;
 }
 

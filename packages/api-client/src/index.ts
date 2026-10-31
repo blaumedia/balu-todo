@@ -45,6 +45,14 @@ export interface ApiClientOptions {
    * adopted. The app should drop what it holds in memory and re-read storage.
    */
   onSessionEndedElsewhere?: (cause: "gone" | "replaced") => void;
+  /**
+   * How refreshes of separate contexts sharing `storage` are ordered. `"auto"`
+   * (default) uses Web Locks, or a lease in the storage without them. `"none"`
+   * is for a single JS realm that owns the storage (React Native): the in-process
+   * single flight is enough, and a lease would only linger in storage after a
+   * kill and stall the next launch.
+   */
+  crossContextLock?: "auto" | "none";
 }
 
 export class ApiError extends Error {
@@ -58,6 +66,9 @@ export class ApiError extends Error {
   }
 }
 
+/** Internal: the lease was lost between taking it and using it; take it again. */
+class LeaseLost extends Error {}
+
 /** Internal: the refresh found the stored session is not this tab's any more. */
 class SessionEndedElsewhere extends ApiError {
   constructor(readonly endedBy: "gone" | "replaced") {
@@ -65,8 +76,8 @@ class SessionEndedElsewhere extends ApiError {
   }
 }
 
-const ACCESS_KEY = "balu:auth:access";
-const REFRESH_KEY = "balu:auth:refresh";
+export const ACCESS_KEY = "balu:auth:access";
+export const REFRESH_KEY = "balu:auth:refresh";
 const REFRESH_LOCK = "balu:auth:refresh";
 /** Storage key of the lease that stands in for Web Locks across tabs. */
 const REFRESH_LEASE = "balu:auth:refreshLease";
@@ -255,28 +266,61 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
    * and the other keeps waiting. The lease expires, so a tab that died holding
    * it cannot block the others for longer than a refresh may take.
    */
-  async function withLease<T>(fn: () => Promise<T>): Promise<T> {
+  async function withLease<T>(fn: (stillHeld: () => Promise<boolean>) => Promise<T>): Promise<T> {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     const ttl = timeoutMs + 5000;
-    for (;;) {
-      const held = readLease(await opts.storage.getItem(REFRESH_LEASE));
-      if (!held || held.exp <= Date.now()) {
-        await opts.storage.setItem(REFRESH_LEASE, JSON.stringify({ id, exp: Date.now() + ttl }));
-        await sleep(LEASE_SETTLE_MS);
-        if (readLease(await opts.storage.getItem(REFRESH_LEASE))?.id === id) break;
-      }
-      await sleep(LEASE_POLL_MS + Math.random() * LEASE_POLL_MS);
-    }
-    try {
-      return await fn();
-    } finally {
+    const mine = (lease: { id: string; exp: number } | null): boolean => lease?.id === id;
+    const stillHeld = async (): Promise<boolean> => {
+      const lease = readLease(await opts.storage.getItem(REFRESH_LEASE));
+      return mine(lease) && (lease?.exp ?? 0) > Date.now();
+    };
+    // A reload or closed tab mid-refresh would leave the lease for the next
+    // refresh to wait out. Storage is synchronous in a page; best effort.
+    const onPageHide = (): void => {
       try {
-        if (readLease(await opts.storage.getItem(REFRESH_LEASE))?.id === id) {
-          await opts.storage.removeItem(REFRESH_LEASE);
-        }
+        const ls = globalThis.localStorage;
+        if (mine(readLease(ls?.getItem(REFRESH_LEASE) ?? null))) ls.removeItem(REFRESH_LEASE);
       } catch {
         /* it expires on its own */
       }
+    };
+    globalThis.addEventListener?.("pagehide", onPageHide);
+    try {
+      for (;;) {
+        const held = readLease(await opts.storage.getItem(REFRESH_LEASE));
+        // An expiry further ahead than a lease can last is a clock that moved
+        // back (or garbage): it would block every tab for as long as the skew.
+        const live = held && held.exp > Date.now() && held.exp <= Date.now() + ttl;
+        if (!live) {
+          await opts.storage.setItem(REFRESH_LEASE, JSON.stringify({ id, exp: Date.now() + ttl }));
+          await sleep(LEASE_SETTLE_MS);
+          if (mine(readLease(await opts.storage.getItem(REFRESH_LEASE)))) {
+            // The settle sleep can stretch far past 50 ms in a throttled background
+            // tab, past the expiry: renew, then confirm nobody took it meanwhile.
+            await opts.storage.setItem(REFRESH_LEASE, JSON.stringify({ id, exp: Date.now() + ttl }));
+            await sleep(LEASE_SETTLE_MS);
+            if (await stillHeld()) {
+              try {
+                return await fn(stillHeld);
+              } catch (e) {
+                if (!(e instanceof LeaseLost)) throw e;
+              } finally {
+                try {
+                  if (mine(readLease(await opts.storage.getItem(REFRESH_LEASE)))) {
+                    await opts.storage.removeItem(REFRESH_LEASE);
+                  }
+                } catch {
+                  /* it expires on its own */
+                }
+              }
+              continue;
+            }
+          }
+        }
+        await sleep(LEASE_POLL_MS + Math.random() * LEASE_POLL_MS);
+      }
+    } finally {
+      globalThis.removeEventListener?.("pagehide", onPageHide);
     }
   }
 
@@ -286,13 +330,21 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
    * The server treats a second use of one refresh token as a replay and burns the
    * whole token family, so two tabs refreshing with the same token log both out.
    * Web Locks serialise across tabs where the browser offers them (secure
-   * contexts). Without them a lease in the shared storage does the same; the
+   * contexts). Without them a best-effort lease in the shared storage does the
+   * same (re-checked right before the request, but not a hard guarantee); the
    * in-page chain only orders clients of one page ahead of it.
    */
-  function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  function exclusive<T>(fn: (stillHeld: () => Promise<boolean>) => Promise<T>): Promise<T> {
+    const always = async (): Promise<boolean> => true;
+    if (opts.crossContextLock === "none") {
+      const prev = chains.get(opts.storage) ?? Promise.resolve();
+      const run = prev.then(() => fn(always), () => fn(always));
+      chains.set(opts.storage, run.catch(() => undefined));
+      return run;
+    }
     const locks = (globalThis as { navigator?: { locks?: { request<R>(n: string, cb: () => Promise<R>): Promise<R> } } })
       .navigator?.locks;
-    if (locks?.request) return locks.request(REFRESH_LOCK, fn);
+    if (locks?.request) return locks.request(REFRESH_LOCK, () => fn(always));
     const prev = chains.get(opts.storage) ?? Promise.resolve();
     const run = prev.then(() => withLease(fn), () => withLease(fn));
     chains.set(opts.storage, run.catch(() => undefined));
@@ -302,12 +354,18 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   async function refresh(): Promise<AuthTokens> {
     if (refreshInFlight) return refreshInFlight;
     if (!refreshToken) throw new ApiError("invalid_token", "No refresh token", 401);
-    refreshInFlight = exclusive(async () => {
+    refreshInFlight = exclusive(async (stillHeld) => {
       try {
         // Another tab may have rotated the tokens while we waited (or before we
         // noticed our access token expired): its refresh token is the live one and
         // ours is already spent. Use what it stored instead of replaying ours.
-        const storedRefresh = await opts.storage.getItem(REFRESH_KEY);
+        let storedRefresh = await opts.storage.getItem(REFRESH_KEY);
+        if (storedRefresh === refreshToken) {
+          // Right before the request: the lease may have gone to another tab, or
+          // the token rotated, while we waited on storage.
+          if (!(await stillHeld())) throw new LeaseLost();
+          storedRefresh = await opts.storage.getItem(REFRESH_KEY);
+        }
         if (storedRefresh !== refreshToken) {
           const storedAccess = await opts.storage.getItem(ACCESS_KEY);
           const mine = tokenSubject(accessToken);
