@@ -74,6 +74,25 @@ describe("adoptLocalDataFor", () => {
     expect(ls().getItem("balu:owner")).toBe("u2");
   });
 
+  it("purges owner-less data that names another user (web 1.3.2 leftovers)", () => {
+    ls().removeItem("balu:owner");
+    ls().setItem("balu:replica:w1", JSON.stringify({ tasks: [{ id: "tmp-1", created_by: "A" }] }));
+    const spy = vi.fn();
+    expect(adoptLocalDataFor("B", spy)).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(ls().getItem("balu:queue:w1")).toBeNull();
+    expect(ls().getItem("balu:replica:w1")).toBeNull();
+    expect(ls().getItem("balu:auth:refresh")).not.toBeNull();
+    expect(ls().getItem("balu:owner")).toBe("B");
+  });
+
+  it("keeps owner-less data that names this user or nobody", () => {
+    ls().removeItem("balu:owner");
+    ls().setItem("balu:replica:w1", JSON.stringify({ tasks: [{ id: "tmp-1", created_by: "A" }, { id: "T5", created_by: "Z" }] }));
+    expect(adoptLocalDataFor("A")).toBe(false);
+    expect(ls().getItem("balu:queue:w1")).not.toBeNull();
+  });
+
   it("adopts data without an owner", () => {
     ls().removeItem("balu:owner");
     expect(adoptLocalDataFor("u2")).toBe(false);

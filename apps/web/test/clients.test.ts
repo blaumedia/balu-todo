@@ -45,7 +45,7 @@ vi.mock("@balu/sync-client", async (orig) => ({
   },
 }));
 
-import { closeSync, initSync, teardownSync } from "../src/lib/clients.js";
+import { closeSync, initSync, listStoredWorkspaceIds, teardownSync } from "../src/lib/clients.js";
 
 beforeEach(() => {
   closeSync();
@@ -103,5 +103,27 @@ describe("closeSync reaches stopped clients", () => {
     const [first, second] = fakes.made;
     expect(first!.closed).toBe(true);
     expect(second!.closed).toBe(false);
+  });
+});
+
+describe("listStoredWorkspaceIds", () => {
+  it("finds a workspace that only has a loss notice left (purge killed after the queue)", () => {
+    const m = new Map<string, string>([
+      ["balu:lossNotice:w9", "{}"],
+      ["balu:queue:w1", "[]"],
+      ["balu:theme", "dark"],
+    ]);
+    vi.stubGlobal("localStorage", {
+      get length() {
+        return m.size;
+      },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      getItem: (k: string) => m.get(k) ?? null,
+    });
+    try {
+      expect(listStoredWorkspaceIds().sort()).toEqual(["w1", "w9"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

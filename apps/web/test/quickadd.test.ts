@@ -1,7 +1,7 @@
 import type { Project } from "@balu/domain";
 import { parseQuickAdd } from "@balu/nl-parser";
 import { describe, expect, it } from "vitest";
-import { composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
+import { composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox, wasSaved } from "../src/lib/quickadd.js";
 
 function project(over: Partial<Project>): Project {
   return {
@@ -100,5 +100,13 @@ describe("quickAddTarget + composeTaskArgs", () => {
 
   it("lets a #project token win", () => {
     expect(run("Buy milk #Work")["project_id"]).toBe("W1");
+  });
+});
+
+describe("wasSaved", () => {
+  it("is false for a dropped edit or no client", () => {
+    expect(wasSaved({ dropped: true })).toBe(false);
+    expect(wasSaved(undefined)).toBe(false);
+    expect(wasSaved({})).toBe(true);
   });
 });

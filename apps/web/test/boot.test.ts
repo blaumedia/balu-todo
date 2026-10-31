@@ -103,9 +103,12 @@ const replaceState = vi.fn();
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 beforeEach(() => {
+  // The boot retry wait is jittered +-20%; 0.5 makes it exactly the backoff.
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
   vi.stubGlobal("localStorage", fakeStorage());
   vi.stubGlobal("history", { replaceState });
   replaceState.mockClear();
@@ -207,10 +210,13 @@ describe("discardLostWorkspaces", () => {
 
 describe("expireSession", () => {
   it("stops sync, shows the login screen with the notice and clears the address", async () => {
+    globalThis.localStorage.setItem("balu:owner", "u1");
     useApp.setState({ boot: "ready" });
     await expireSession();
     const st = useApp.getState();
-    expect(fake.teardowns).toBe(1);
+    // Closed, not just stopped: a pull still in flight must not write after another tab's purge.
+    expect(fake.closes).toBe(1);
+    expect(fake.teardowns).toBe(0);
     expect(fake.loggedOut).toBe(1);
     expect(st.boot).toBe("login");
     expect(st.loginNotice).toBe("sessionExpired");
@@ -483,5 +489,66 @@ describe("cross-tab session changes", () => {
     onStorageEvent({ key: "balu:auth:refresh" });
     expect(fake.teardowns).toBe(0);
     expect(useApp.getState().boot).toBe("ready");
+  });
+});
+
+describe("expireSession after a logout in another tab (what-if 10)", () => {
+  it("wipes instead of keeping data when the owner key is gone, without the expiry notice", async () => {
+    globalThis.localStorage.setItem("balu:queue:w1", "[]");
+    useApp.setState({ boot: "ready" });
+    await expireSession();
+    expect(fake.closes).toBe(1);
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
+    expect(useApp.getState().loginNotice).toBeNull();
+    expect(useApp.getState().boot).toBe("login");
+  });
+
+  it("keeps the data for the same user when the owner key is still there", async () => {
+    globalThis.localStorage.setItem("balu:owner", "u1");
+    globalThis.localStorage.setItem("balu:queue:w1", "[]");
+    useApp.setState({ boot: "ready" });
+    await expireSession();
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBe("[]");
+    expect(useApp.getState().loginNotice).toBe("sessionExpired");
+  });
+});
+
+describe("accounts without a workspace (what-if 6)", () => {
+  beforeEach(() => {
+    useApp.setState({ boot: "loading", user: null, workspace: null, memberships: [], loginNotice: null });
+  });
+
+  it("shows the no-workspace screen with the tokens kept, retries, then boots", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return calls === 1 ? me() : me("a");
+    };
+    const booted = bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useApp.getState().boot).toBe("noWorkspace");
+    expect(globalThis.localStorage.getItem("balu:auth:refresh")).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await booted).toBe(true);
+    expect(useApp.getState().boot).toBe("ready");
+  });
+});
+
+describe("Retry-After on the boot retry (what-if 7)", () => {
+  it("waits at least the server's Retry-After", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      if (calls === 1) throw new ApiError("unavailable", "db", 503, 10_000);
+      return me("a");
+    };
+    useApp.setState({ boot: "loading", user: null, workspace: null, memberships: [], loginNotice: null });
+    void bootSession();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(calls).toBe(2);
   });
 });

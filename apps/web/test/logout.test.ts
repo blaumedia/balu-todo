@@ -44,3 +44,26 @@ describe("logout", () => {
     expect(events).toContain("api.logout owner=null");
   });
 });
+
+describe("logout during an outage (what-if 3)", () => {
+  it("purges and resets before the revoke request has finished", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.resetModules();
+    events.length = 0;
+    const clients = await import("../src/lib/clients.js");
+    (clients.api as any).logout = async () => {
+      events.push("post start");
+      await gate;
+      events.push("post done");
+    };
+    const { logout: run } = await import("../src/lib/logout.js");
+    const out = run();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(events).toContain("purge");
+    expect(events).not.toContain("post done");
+    release();
+    await out;
+    expect(events.indexOf("purge")).toBeLessThan(events.indexOf("post done"));
+  });
+});
