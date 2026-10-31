@@ -207,7 +207,9 @@ export const de: Record<TranslationKey, string> = {
   'date.yesterday': 'Gestern',
   'date.overdue': 'Überfällig',
 
+  'common.back': 'Zurück',
   'common.cancel': 'Abbrechen',
+  'common.ok': 'OK',
   'common.copy': 'Kopieren',
   'common.done': 'Fertig',
   'common.delete': 'Löschen',

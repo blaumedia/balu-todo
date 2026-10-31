@@ -139,6 +139,8 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
           value={Platform.OS === 'android' ? pickerSeed : isoToDate(value)}
           mode="date"
           display="default"
+          positiveButton={{ label: t('common.ok') }}
+          negativeButton={{ label: t('common.cancel') }}
           onChange={onPickerChange}
         />
       ) : null}

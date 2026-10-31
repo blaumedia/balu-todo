@@ -189,6 +189,8 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
           mode={step}
           display="default"
           is24Hour={uses24h(locale)}
+          positiveButton={{ label: t('common.ok') }}
+          negativeButton={{ label: t('common.cancel') }}
           onChange={onDialogChange}
         />
       ) : null}

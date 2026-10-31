@@ -110,7 +110,11 @@ export function ScheduleSheet() {
         </Pressable>
       </View>
       {showPicker && pickerFor ? (
-        <DateTimePicker value={pickerFor.seed} mode="date" display="default" onChange={onPickerChange} />
+        <DateTimePicker value={pickerFor.seed} mode="date" display="default"
+          positiveButton={{ label: t('common.ok') }}
+          negativeButton={{ label: t('common.cancel') }}
+          onChange={onPickerChange}
+        />
       ) : null}
     </BottomSheet>
   );

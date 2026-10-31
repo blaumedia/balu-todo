@@ -202,7 +202,9 @@ export const en = {
   'date.yesterday': 'Yesterday',
   'date.overdue': 'Overdue',
 
+  'common.back': 'Back',
   'common.cancel': 'Cancel',
+  'common.ok': 'OK',
   'common.copy': 'Copy',
   'common.done': 'Done',
   'common.delete': 'Delete',
