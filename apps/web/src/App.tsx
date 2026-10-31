@@ -6,6 +6,7 @@ import { useApp } from "./store/app.js";
 import { LoginView } from "./views/LoginView.js";
 import { Shell } from "./views/Shell.js";
 import { InviteAcceptView } from "./views/InviteAcceptView.js";
+import { UnreachableView } from "./views/UnreachableView.js";
 import { Icon } from "./components/Icon.js";
 
 /** Extract the invite token from `/invite/:token`, or null. */
@@ -90,6 +91,7 @@ export function App() {
     );
   }
 
+  if (boot === "unreachable") return <UnreachableView />;
   if (boot === "login") return <LoginView onAuthenticated={authenticate} />;
   return <Shell />;
 }

@@ -224,6 +224,8 @@ export const de: Record<TranslationKey, string> = {
   "auth.email_taken": "Diese E-Mail ist bereits registriert.",
   "auth.registration_disabled": "Registrierung ist auf diesem Server deaktiviert.",
   "auth.sessionExpired": "Deine Sitzung ist abgelaufen, bitte melde dich erneut an.",
+  "boot.unreachableTitle": "Server nicht erreichbar - neuer Versuch läuft…",
+  "boot.unreachableHint": "Du bleibst angemeldet. Balu öffnet sich, sobald der Server wieder antwortet.",
 
   "project.newProject": "Neues Projekt",
   "project.newProjectName": "Projektname",

@@ -221,6 +221,8 @@ export const en = {
   "auth.email_taken": "That email is already registered.",
   "auth.registration_disabled": "Registration is disabled on this server.",
   "auth.sessionExpired": "Your session expired, please log in again.",
+  "boot.unreachableTitle": "Server unreachable - retrying…",
+  "boot.unreachableHint": "You stay signed in. Balu opens as soon as the server answers again.",
 
   "project.newProject": "New project",
   "project.newProjectName": "Project name",

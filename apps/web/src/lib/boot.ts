@@ -13,6 +13,7 @@ import {
   setSessionExpiredHandler,
   teardownSync,
 } from "./clients.js";
+import { bootRetryDelayMs, waitForRetry } from "./bootRetry.js";
 import { adoptLocalDataFor } from "./localData.js";
 import { accessLostMessage } from "./syncNotices.js";
 import { lastWorkspaceId, useApp } from "../store/app.js";
@@ -42,21 +43,51 @@ setSessionExpiredHandler(() => {
   void expireSession();
 });
 
+type BootAttempt = "ready" | "login" | "unreachable";
+
+let bootLoop: Promise<boolean> | null = null;
+
 /**
  * Boot the app into a workspace: fetch `/me`, choose a workspace (preferred →
- * last-used → first), start its sync client, and populate the store. Returns
- * false and drops to the login screen when there is no membership.
+ * last-used → first), start its sync client, and populate the store.
+ *
+ * Only a 401 drops to the login screen. Any other `/me` failure (server down,
+ * 5xx, timeout) keeps the tokens, shows the "server unreachable" screen and
+ * retries with backoff until `/me` answers - the login was still valid, and
+ * sending the user to the login form for a DB outage was the bug.
+ * Resolves true once booted, false when it ended on the login screen. A call
+ * while a retry loop runs joins that loop.
  */
-export async function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
-  const st = useApp.getState();
+export function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
+  if (!bootLoop) {
+    bootLoop = runBootLoop(preferredWorkspaceId).finally(() => {
+      bootLoop = null;
+    });
+  }
+  return bootLoop;
+}
+
+async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
+  for (let attempt = 0; ; attempt += 1) {
+    const outcome = await attemptBoot(preferredWorkspaceId);
+    if (outcome !== "unreachable") return outcome === "ready";
+    useApp.getState().setBoot("unreachable");
+    await waitForRetry(bootRetryDelayMs(attempt));
+  }
+}
+
+async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> {
   let me: MeResponse;
   try {
     me = await api.getMe();
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) await expireSession();
-    else st.setBoot("login");
-    return false;
+    if (e instanceof ApiError && e.status === 401) {
+      await expireSession();
+      return "login";
+    }
+    return "unreachable";
   }
+  const st = useApp.getState();
   try {
     // Before anything reads local data: another user's queue must never be
     // hydrated, let alone flushed, under this account.
@@ -64,15 +95,16 @@ export async function bootSession(preferredWorkspaceId?: string): Promise<boolea
     const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
       st.setBoot("login");
-      return false;
+      return "login";
     }
     initSync(membership.workspace.id, me.user.id);
     st.setSession(me.user, me.memberships, membership.workspace);
     void discardLostWorkspaces(me.memberships.map((m) => m.workspace.id));
-    return true;
+    return "ready";
   } catch {
+    // A local failure (e.g. storage quota) - retrying would not help.
     st.setBoot("login");
-    return false;
+    return "login";
   }
 }
 
