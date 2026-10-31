@@ -147,15 +147,17 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
   const hasComments = commentCount > 0;
 
+  // One computation drives both the listed actions and the handler, so they cannot diverge.
+  const a11yActions = rowAccessibilityActions(swipeable, writable, {
+    complete: t('row.complete'),
+    schedule: t('schedule.title'),
+  });
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
       // Only rows with swipe actions: the same two actions as swipe right / left.
-      accessibilityActions={rowAccessibilityActions(swipeable, writable, {
-        complete: t('row.complete'),
-        schedule: t('schedule.title'),
-      })}
-      onAccessibilityAction={swipeable && writable ? onAccessibilityAction : undefined}
+      accessibilityActions={a11yActions}
+      onAccessibilityAction={a11yActions ? onAccessibilityAction : undefined}
       style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
       <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
