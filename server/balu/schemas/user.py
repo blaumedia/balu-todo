@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, StringConstraints
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..models import User
@@ -33,6 +33,8 @@ def user_out(user: User) -> UserOut:
 
 
 class MeUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=200)
+    name: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ] = None
     locale: Literal["de", "en"] | None = None
     theme: Literal["system", "light", "dark"] | None = None

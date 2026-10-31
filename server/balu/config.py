@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     )
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 60
+    #: How long after a rotation the *immediately previous* refresh token of a
+    #: family is still answered with the same successor instead of burning the
+    #: family. A client that timed out, lost the response or raced a second tab
+    #: re-presents the token it still holds; without this window that is
+    #: indistinguishable from theft and logs the user out everywhere. Older
+    #: tokens, and the predecessor after the window, are replays as before.
+    refresh_reuse_grace_seconds: int = 60
 
     # --- Attachment storage ---------------------------------------------------
     #: Root for server-side data that is not in the database. Attachment blobs

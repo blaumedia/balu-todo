@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..attachments import remove_workspace_blobs
@@ -14,7 +14,12 @@ from ..db import get_db
 from ..errors import forbidden, not_found, validation_error
 from ..models import Membership, User, Workspace
 from ..schemas.workspace import WorkspaceCreate, WorkspaceOut, WorkspaceUpdate
-from ..services import create_workspace_with_owner
+from ..services import (
+    create_workspace_with_owner,
+    lock_users,
+    require_member_under_lock,
+    rescue_if_workspaceless,
+)
 from ..sync.engine import ROLE_RANK
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -61,7 +66,11 @@ def update_workspace(
     membership = get_membership(db, ws_id, user.id)
     if ROLE_RANK.get(membership.role, 0) < ROLE_RANK["admin"]:
         raise forbidden("admin role required")
-    workspace = db.get(Workspace, ws_id)
+    # Lock, re-read, then judge (members.py). Without it a rename racing a delete
+    # flushed an UPDATE onto a vanished row (StaleDataError, a 500), and an admin
+    # demoted meanwhile still renamed.
+    require_member_under_lock(db, ws_id, user.id, "admin", "admin role required")
+    workspace = db.get(Workspace, ws_id, populate_existing=True)
     if workspace is None:
         raise not_found("workspace not found")
     if not body.name.strip():
@@ -82,7 +91,11 @@ def delete_workspace(
     membership = get_membership(db, ws_id, user.id)
     if ROLE_RANK.get(membership.role, 0) < ROLE_RANK["owner"]:
         raise forbidden("owner role required")
-    workspace = db.get(Workspace, ws_id)
+    # Accept inserts memberships only under this lock, so once it is held
+    # `member_ids` below includes every committed accept, and an accept still
+    # waiting finds the workspace gone instead of stranding its new member.
+    require_member_under_lock(db, ws_id, user.id, "owner", "owner role required")
+    workspace = db.get(Workspace, ws_id, populate_existing=True)
     if workspace is None:
         raise not_found("workspace not found")
 
@@ -98,6 +111,13 @@ def delete_workspace(
         ).scalars()
     )
 
+    # Cross-workspace race: deleting this workspace while one of its members
+    # deletes or leaves another. Each request would count the other's still
+    # uncommitted membership as live, both would skip the rescue, and the user
+    # would end with zero workspaces. Locking the user rows (after the workspace
+    # lock, in id order) makes the later request count after the earlier commits.
+    lock_users(db, member_ids)
+
     db.delete(workspace)  # hard delete; FK cascades remove contents
     db.flush()
 
@@ -105,17 +125,7 @@ def delete_workspace(
     # anyone left at zero gets a fresh default - named exactly as registration
     # names it (balu/routers/auth.py).
     for member_id in member_ids:
-        remaining = db.execute(
-            select(func.count())
-            .select_from(Membership)
-            .where(Membership.user_id == member_id, Membership.is_deleted.is_(False))
-        ).scalar_one()
-        if remaining:
-            continue
-        member = db.get(User, member_id)
-        if member is None:
-            continue
-        create_workspace_with_owner(db, member.name.strip() or "My workspace", member_id)
+        rescue_if_workspaceless(db, member_id)
 
     db.commit()
 

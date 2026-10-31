@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import uuid
 
 import pytest
@@ -606,3 +608,280 @@ def test_upload_committed_mid_sync_is_never_skipped(client, user, monkeypatch):
     assert uploaded["id"] in {a["id"] for a in later["attachments"]}, (
         "attachment committed mid-request was skipped forever"
     )
+
+
+# ---------------------------------------------------------------------------
+# Upload judged under the workspace lock, DB work off the event loop
+# ---------------------------------------------------------------------------
+def _no_blobs(data_dir) -> bool:
+    return [p for p in data_dir.rglob("*") if p.is_file()] == []
+
+
+def _upload_racing(client, user, who, task_id, s0_sql: str, params: dict):
+    """Run `who`'s upload while `s0` holds the workspace lock with an uncommitted change."""
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.sync.engine import bump_version
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    ws = uuid.UUID(user["workspace_id"])
+    with get_sessionmaker()() as s0:
+        bump_version(s0, ws)
+        if s0_sql:
+            s0.execute(text(s0_sql), {"w": ws, **params})
+        bg = Background(lambda: _upload(client, who, task_id))
+        wait_for_lock_waiters(1)
+        s0.commit()
+    return bg.result()
+
+
+def test_upload_by_a_member_removed_while_uploading_is_forbidden(client, user, data_dir, db):
+    from sqlalchemy import func, select
+
+    task_id = _add_task(client, user)
+    otto = _join(client, user)
+    resp = _upload_racing(
+        client,
+        user,
+        otto,
+        task_id,
+        "UPDATE memberships SET is_deleted = true WHERE workspace_id = :w AND user_id = :u",
+        {"u": uuid.UUID(otto["user"]["id"])},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["message"] == "you are no longer a member of this workspace"
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 0
+    assert _no_blobs(data_dir)
+
+
+def test_upload_by_a_member_demoted_while_uploading_is_forbidden(client, user, data_dir, db):
+    from sqlalchemy import func, select
+
+    task_id = _add_task(client, user)
+    otto = _join(client, user)
+    resp = _upload_racing(
+        client,
+        user,
+        otto,
+        task_id,
+        "UPDATE memberships SET role = 'viewer' WHERE workspace_id = :w AND user_id = :u",
+        {"u": uuid.UUID(otto["user"]["id"])},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["message"] == "viewer role is read-only"
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 0
+    assert _no_blobs(data_dir)
+
+
+def test_upload_into_a_workspace_deleted_while_uploading_is_not_found(client, user, data_dir):
+    task_id = _add_task(client, user)
+    resp = _upload_racing(
+        client, user, user, task_id, "DELETE FROM workspaces WHERE id = :w", {}
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["message"] == "workspace not found"
+    assert _no_blobs(data_dir)
+
+
+def test_upload_runs_its_database_work_off_the_event_loop(client, user, monkeypatch):
+    import asyncio
+
+    from balu.routers import attachments as module
+
+    calls: list[tuple[str, bool]] = []
+
+    def spy(name):
+        original = getattr(module, name)
+
+        def wrapper(*args, **kwargs):
+            try:
+                asyncio.get_running_loop()
+                on_loop = True
+            except RuntimeError:
+                on_loop = False
+            calls.append((name, on_loop))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, wrapper)
+
+    for name in ("get_membership", "require_member_under_lock", "bump_version"):
+        spy(name)
+    task_id = _add_task(client, user)
+    calls.clear()
+    assert _upload(client, user, task_id).status_code == 201
+    assert {n for n, _ in calls} == {"get_membership", "require_member_under_lock", "bump_version"}
+    assert not [c for c in calls if c[1]]
+
+
+def test_removed_member_cannot_download(client, user):
+    task_id = _add_task(client, user)
+    att = _upload(client, user, task_id).json()
+    otto = _join(client, user)
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{otto['user']['id']}",
+        headers=user["headers"],
+    )
+    assert resp.status_code == 204
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{att['id']}/file",
+        headers=otto["headers"],
+    )
+    assert got.status_code == 403
+    assert got.json()["detail"]["code"] == "forbidden"
+
+
+def _commit_then_fail(monkeypatch, *, reach_server: bool) -> None:
+    """Make the upload's commit raise as a lost acknowledgement would.
+
+    With `reach_server` the commit really happens first (outcome: committed);
+    without it the commit never runs (outcome: definite rollback).
+    """
+    from sqlalchemy.orm import Session
+
+    real_commit = Session.commit
+
+    def commit(self):
+        # The row is already flushed when the upload commits: look in the identity map.
+        if any(isinstance(o, Attachment) for o in self.identity_map.values()):
+            if reach_server:
+                real_commit(self)
+            raise RuntimeError("connection lost before the acknowledgement")
+        return real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+
+
+def test_upload_whose_commit_outcome_is_unknown_keeps_the_blob_of_a_committed_row(
+    client, user, data_dir, db, monkeypatch
+):
+    from sqlalchemy import func, select
+
+    task_id = _add_task(client, user)
+    _commit_then_fail(monkeypatch, reach_server=True)
+    with pytest.raises(RuntimeError):
+        _upload(client, user, task_id)
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 1
+    blobs = [p for p in data_dir.rglob("*") if p.is_file()]
+    assert len(blobs) == 1
+
+
+def test_upload_that_fails_before_the_commit_removes_the_blob(
+    client, user, data_dir, db, monkeypatch
+):
+    from sqlalchemy import func, select
+
+    import balu.routers.attachments as attachments_router
+
+    task_id = _add_task(client, user)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("failed before the commit")
+
+    monkeypatch.setattr(attachments_router, "bump_version", boom)
+    with pytest.raises(RuntimeError):
+        _upload(client, user, task_id)
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 0
+    assert _no_blobs(data_dir)
+
+
+def test_upload_whose_commit_fails_before_reaching_the_server_keeps_the_blob(
+    client, user, data_dir, db, monkeypatch
+):
+    from sqlalchemy import func, select
+
+    task_id = _add_task(client, user)
+    _commit_then_fail(monkeypatch, reach_server=False)
+    with pytest.raises(RuntimeError):
+        _upload(client, user, task_id)
+    # Outcome unknown to the handler: an orphan blob is the lesser harm.
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 0
+    assert len([p for p in data_dir.rglob("*") if p.is_file()]) == 1
+
+
+def test_upload_whose_flush_fails_removes_the_blob(client, user, data_dir, db, monkeypatch):
+    from sqlalchemy import func, select
+    from sqlalchemy.orm import Session
+
+    task_id = _add_task(client, user)
+    real_flush = Session.flush
+
+    def flush(self, *args, **kwargs):
+        if any(isinstance(o, Attachment) for o in self.new):
+            raise RuntimeError("flush failed")
+        return real_flush(self, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "flush", flush)
+    with pytest.raises(RuntimeError):
+        _upload(client, user, task_id)
+    monkeypatch.undo()
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 0
+    assert _no_blobs(data_dir)
+
+
+def test_upload_cancelled_before_the_worker_starts_removes_the_blob(
+    client, user, data_dir, monkeypatch
+):
+    import balu.routers.attachments as attachments_router
+
+    task_id = _add_task(client, user)
+    real = attachments_router.run_in_threadpool
+    seen = []
+
+    async def cancelled(func, *args, **kwargs):
+        if func is attachments_router._store_attachment:
+            seen.append(args[3].exists())
+            raise asyncio.CancelledError
+        return await real(func, *args, **kwargs)
+
+    monkeypatch.setattr(attachments_router, "run_in_threadpool", cancelled)
+    with pytest.raises((asyncio.CancelledError, concurrent.futures.CancelledError)):
+        _upload(client, user, task_id)
+    assert seen == [True]
+    assert _no_blobs(data_dir)
+
+
+def test_upload_cancelled_after_the_worker_stored_keeps_the_blob(
+    client, user, data_dir, db, monkeypatch
+):
+    from sqlalchemy import func, select
+
+    import balu.routers.attachments as attachments_router
+
+    task_id = _add_task(client, user)
+    real = attachments_router.run_in_threadpool
+
+    async def store_then_cancel(func, *args, **kwargs):
+        result = await real(func, *args, **kwargs)
+        if func is attachments_router._store_attachment:
+            raise asyncio.CancelledError
+        return result
+
+    monkeypatch.setattr(attachments_router, "run_in_threadpool", store_then_cancel)
+    with pytest.raises((asyncio.CancelledError, concurrent.futures.CancelledError)):
+        _upload(client, user, task_id)
+    assert db.execute(select(func.count()).select_from(Attachment)).scalar_one() == 1
+    assert len([p for p in data_dir.rglob("*") if p.is_file()]) == 1
+
+
+def test_losing_worker_touches_neither_session_nor_blob_and_claim_is_exclusive(tmp_path):
+    from unittest.mock import MagicMock, patch
+
+    import balu.routers.attachments as attachments_router
+
+    blob = tmp_path / "blob"
+    blob.write_bytes(b"x")
+    claim = attachments_router._Claim()
+    assert claim.abandon() is True
+    assert claim.start() is False
+    with patch.object(attachments_router, "get_sessionmaker") as sm:
+        with pytest.raises(asyncio.CancelledError):
+            attachments_router._store_attachment(
+                uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), blob, "t", MagicMock(), claim
+            )
+    assert sm.mock_calls == []
+    assert blob.exists()
+
+    won = attachments_router._Claim()
+    assert won.start() is True
+    assert won.abandon() is False

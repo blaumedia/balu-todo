@@ -21,7 +21,11 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`, `internal_error`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`,
+  `unavailable` (503, carries `Retry-After`; a temporary database failure,
+  retryable - but for a non-sync write the outcome may be unknown, e.g. the connection
+  dropped during COMMIT, so re-read before retrying),
+  `internal_error`.
   Error messages are for humans and never carry internal detail (driver messages,
   the submitted body, transport hostnames) — that goes to the server log.
 
@@ -35,7 +39,7 @@ JWT bearer auth. `Authorization: Bearer <access_token>` on every authenticated r
 
 | Endpoint | Body | Response |
 |---|---|---|
-| `POST /auth/register` | `{email, password, name}` | `201 {user, access_token, refresh_token}` |
+| `POST /auth/register` | `{email, password, name}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) | `201 {user, access_token, refresh_token}` |
 | `POST /auth/login` | `{email, password}` | `200 {user, access_token, refresh_token}` |
 | `POST /auth/refresh` | `{refresh_token}` | `200 {access_token, refresh_token}` |
 | `POST /auth/logout` | `{refresh_token}` | `204` (invalidates the whole session family) |
@@ -46,6 +50,8 @@ Rules:
   → `403 registration_disabled`. **Invites do not bypass this gate**: `POST /invites/accept`
   resolves an authenticated user, so it can only add an account that already exists. With
   registration closed there is no route to a new account at all.
+- Registering an address that is taken, including by a registration racing this one →
+  `409 email_taken`.
 - `POST /auth/register` auto-creates a personal workspace named after the user — the
   full name, e.g. "Anna Maria Schmidt" — with the user as `owner`.
 - **Throttling (v1.2.1):** `/auth/login`, `/auth/register` and `/auth/refresh` are rate
@@ -57,19 +63,28 @@ Rules:
 - Password: min 8 chars, hashed with argon2id (fallback bcrypt acceptable if argon2 is a
   packaging problem — pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
-  invalidates the whole session family (replay defense).
-- Clients end a session only when `POST /auth/refresh` answers `401`. A network error, a timeout, `429` or `5xx` keeps the tokens and is retried. On that 401 the apps show their login screen and keep the local queue and replica: they sync once the same user signs in again, and are wiped first when a different user signs in on that device.
-- Clients must not refresh with the same refresh token twice at once, otherwise the replay defense above logs them all out: tabs sharing one storage re-read the stored tokens before refreshing and order refreshes (Web Locks where available, otherwise a best-effort, short-lived lease in the shared storage, since plain http has no Web Locks; it is re-checked right before the request but is not a hard guarantee). A single-realm client that owns its storage (mobile) uses the in-process single flight only. Stored tokens of a different user (JWT `sub`) are never adopted: a tab whose session was ended or replaced by another tab drops its in-memory state and re-reads storage.
+  invalidates the whole session family (replay defense), with one exception (v1.5.2):
+  the **immediately previous** token of a family, presented again within 60 seconds of
+  its rotation, is answered `200` with the **same** successor refresh token (plus a fresh
+  access token) and the family stays alive. This covers a lost response, a client timeout
+  followed by a retry, and two tabs refreshing at once. The successor must still be live
+  (not revoked, not expired). The server keeps that successor in memory for the 60 seconds
+  only, so after a server restart (or on another server process) the retry is a replay.
+  Any older token, and the predecessor after 60 seconds, is a replay (`401`, family
+  invalidated). Two refreshes presenting the same token at the same
+  time are serialised: one rotates it, the other gets that successor.
+- Clients end a session only when `POST /auth/refresh` answers `401`. A network error, a timeout, `429` or `5xx` keeps the tokens and is retried. A refresh whose answer was lost (timeout or network error) is repeated once with the same token, and both attempts finish within 50 seconds of the first, inside the reuse window above. On that 401 the apps show their login screen and keep the local queue and replica: they sync once the same user signs in again, and are wiped first when a different user signs in on that device.
+- Clients must not refresh with the same refresh token twice at once, otherwise the replay defense above logs them all out whenever the reuse window does not apply (e.g. after a server restart): tabs sharing one storage re-read the stored tokens before refreshing and order refreshes (Web Locks where available, otherwise a best-effort, short-lived lease in the shared storage, since plain http has no Web Locks; it is re-checked right before the request but is not a hard guarantee). A single-realm client that owns its storage (mobile) uses the in-process single flight only. Stored tokens of a different user (JWT `sub`) are never adopted: a tab whose session was ended or replaced by another tab drops its in-memory state and re-reads storage.
 
 ## 2. Account & workspaces (REST)
 
 | Endpoint | Response / notes |
 |---|---|
-| `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call |
-| `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` |
+| `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call. v1.5.2: an account that has no workspace at all (possible on servers before v1.5.2) gets a fresh default one on this call, owned by it and named like the one registration creates; `POST /auth/login` does the same. Parallel calls create exactly one. |
+| `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) |
 | `POST /workspaces` | `{name}` → `201 {workspace}`; creator becomes `owner` |
-| `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin |
-| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. |
+| `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin; a workspace deleted meanwhile → `404 not_found` |
+| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. An invite accepted while the delete is in flight either lands before it (and its member is covered by the rescue) or fails with `400 invalid_token`. |
 | `GET /healthz` | `200 {"status":"ok"}` — no auth, for compose healthchecks |
 
 Object shapes:
@@ -253,7 +268,7 @@ Files hanging off a task, any content type. **Metadata syncs, bytes do not.**
 
 | Endpoint | Notes |
 |---|---|
-| `POST /workspaces/{id}/attachments` | `multipart/form-data` with fields `task_id` and `file`. Membership + role ≥ member (`viewer` → `403 forbidden`). Unknown, deleted, or other-workspace `task_id` → `404 not_found`. Over the cap → `413 too_large`. A body that is not multipart, is malformed, is **truncated** (cut off before the closing boundary), or carries no file part / no `task_id`, → `422 validation_error` - a partial upload is never stored as a complete one. Field order is free: the `file` part may precede `task_id`. A zero-byte file is valid. → `201` with the attachment object above. |
+| `POST /workspaces/{id}/attachments` | `multipart/form-data` with fields `task_id` and `file`. Membership + role ≥ member (`viewer` → `403 forbidden`). Membership and role are checked before the body is read and **again before the upload is stored**: a caller removed (`403`) or demoted to viewer (`403`), or whose workspace was deleted (`404`), while the body was streaming is refused and the blob discarded. Unknown, deleted, or other-workspace `task_id` → `404 not_found`. Over the cap → `413 too_large`. A body that is not multipart, is malformed, is **truncated** (cut off before the closing boundary), or carries no file part / no `task_id`, → `422 validation_error` - a partial upload is never stored as a complete one. Field order is free: the `file` part may precede `task_id`. A zero-byte file is valid. → `201` with the attachment object above. |
 | `GET /workspaces/{id}/attachments/{attachment_id}/file` | Membership, **any role**. Streams the blob with `Content-Type: <content_type>`, `Content-Disposition: attachment; filename=<filename>` and `X-Content-Type-Options: nosniff`. Unknown/soft-deleted attachment, one from another workspace, or a row whose blob is missing → `404 not_found`. |
 
 Both take the normal `Authorization: Bearer <access_token>` header - there are no signed
@@ -321,9 +336,15 @@ effects of those commands) are returned.
 - `commands` (optional, max 100 per request): applied **in order, each in its own
   transaction**. One failing command does not abort the rest.
 - `uuid`: client-generated UUIDv4, the **idempotency key**, scoped to `(workspace, uuid)`.
-  The server persists processed uuids per workspace; a replayed uuid **in the same
-  workspace** is not re-applied and returns its stored status. The same uuid in another
-  workspace is a different command and is applied normally.
+  The server persists the uuids of **successfully applied** commands per workspace: a
+  replayed uuid **in the same workspace** whose command succeeded is not re-applied and
+  returns `"ok"` again, with its `temp_id_mapping` and `relocated` entries. A **rejected**
+  command is not remembered (v1.5.2): nothing of it was committed, so when the same uuid
+  arrives again it is evaluated afresh against the current state and may now succeed (for
+  example a `task_add` whose temp parent arrived meanwhile, or a viewer since promoted).
+  Rejections stored by earlier servers are treated the same way. Two requests carrying the
+  same uuid at the same time are serialised: one applies it, the other reports its `"ok"`.
+  The same uuid in another workspace is a different command and is applied normally.
 
 ### 5.2 Response
 
@@ -400,8 +421,18 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
 (id/temp_id unknown or deleted - the one exception is a `task_add` whose project,
-section or parent was deleted, §5.5), `forbidden` (viewer role; or comment edit/delete
-by a non-author non-admin), `name_taken` (labels).
+section or parent was deleted, §5.5; also the workspace itself, if it was deleted while
+the request was in flight), `forbidden` (viewer role; a caller removed from the workspace
+or demoted to viewer while the request was in flight - the role is checked per command,
+under the workspace lock; or comment edit/delete by a non-author non-admin), `name_taken` (labels).
+
+A temporary database failure while applying a command (restart, dropped or failed
+connection, pool or lock-wait timeout, deadlock, serialization failure, v1.5.2) is **not**
+a per-command error: the whole request fails with
+`503 {"detail": {"code": "unavailable", ...}}` and a `Retry-After` header. Commands that
+committed before the failure replay as `ok`; the rest are judged again when the client
+resends the same uuids. Clients keep their queue on any non-2xx response and must treat
+`503` as retryable, never as a rejection.
 
 Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
 comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.
@@ -480,9 +511,9 @@ Invites expire after 14 days.
 | `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. No mail is sent (the client shows/copies the link `/invite/<token>`), but when `email` is set the invite is **bound** to it — see accept. |
 | `GET /workspaces/{id}/invites` | `{invites: [...]}`, pending only; role ≥ admin |
 | `DELETE /workspaces/{id}/invites/{invite_id}` | revoke → `204`; role ≥ admin |
-| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. |
+| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. Concurrent accepts by the same user both get `200` and create one membership; an accept racing a revoke or a workspace delete either completes first or gets `400 invalid_token`. |
 | `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin, subject to the rank rules below; demoting the **last owner** → `400 last_owner` |
-| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. A member left with **no** workspace by the removal (or by leaving) immediately gets a fresh default one, exactly as after a workspace delete (§2). |
 
 **Rank rules (v1.2.1).** Roles rank `viewer < member < admin < owner`.
 
@@ -516,7 +547,7 @@ Per-user external channels — the self-hosted answer to app-store push relays.
 | Endpoint | Notes |
 |---|---|
 | `GET /me/channels` | `{channels: [...]}` |
-| `PUT /me/channels` | replaces the full list; validates per type |
+| `PUT /me/channels` | replaces the full list; validates per type; concurrent PUTs are serialised, so the stored list is exactly one of them |
 | `POST /me/channels/test` | body `{type}` → sends a test message → `204`; delivery failure → `400 channel_unavailable` |
 
 Channel shapes: `{"type": "ntfy", "url": "https://ntfy.sh/<topic>"}` ·
