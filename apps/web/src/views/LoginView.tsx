@@ -8,6 +8,7 @@ import { Icon } from "../components/Icon.js";
 
 export function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<void> }) {
   const locale = useApp((s) => s.locale);
+  const loginNotice = useApp((s) => s.loginNotice);
   const t = useMemo(() => makeT(locale), [locale]);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -116,6 +117,23 @@ export function LoginView({ onAuthenticated }: { onAuthenticated: () => Promise<
         <h1 style={{ margin: "0 0 20px", fontSize: "var(--text-title)", fontWeight: 600, color: "var(--text-primary)" }}>
           {mode === "login" ? t("auth.loginTitle") : t("auth.registerTitle")}
         </h1>
+
+        {loginNotice === "sessionExpired" && (
+          <div
+            role="status"
+            style={{
+              margin: "0 0 16px",
+              padding: "10px 12px",
+              borderRadius: "var(--radius-control)",
+              border: "1px solid var(--border)",
+              background: "var(--surface-raised)",
+              color: "var(--text-primary)",
+              fontSize: "var(--text-secondary-size)",
+            }}
+          >
+            {t("auth.sessionExpired")}
+          </div>
+        )}
 
         <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {mode === "register" && (

@@ -223,6 +223,7 @@ export const de: Record<TranslationKey, string> = {
   "auth.invalid_credentials": "E-Mail oder Passwort ist falsch.",
   "auth.email_taken": "Diese E-Mail ist bereits registriert.",
   "auth.registration_disabled": "Registrierung ist auf diesem Server deaktiviert.",
+  "auth.sessionExpired": "Deine Sitzung ist abgelaufen, bitte melde dich erneut an.",
 
   "project.newProject": "Neues Projekt",
   "project.newProjectName": "Projektname",

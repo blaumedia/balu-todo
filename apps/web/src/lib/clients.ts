@@ -14,7 +14,17 @@ import { relocatedMessage } from "./syncNotices.js";
 // One localStorage KV shared by both clients (structurally identical interfaces).
 const kv = localStorageKV();
 
-export const api: ApiClient = createApiClient({ baseUrl: "/api/v1", storage: kv });
+let sessionExpiredHandler: (() => void) | null = null;
+/** Registered by lib/boot.ts (a hook, not an import: boot.ts imports this module). */
+export function setSessionExpiredHandler(handler: () => void): void {
+  sessionExpiredHandler = handler;
+}
+
+export const api: ApiClient = createApiClient({
+  baseUrl: "/api/v1",
+  storage: kv,
+  onSessionExpired: () => sessionExpiredHandler?.(),
+});
 
 const RELOCATED_TOAST_MS = 5000;
 const REJECTED_TOAST_MS = 6000;

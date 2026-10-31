@@ -4,7 +4,9 @@ import { parseAppUrl, type ViewSel } from "../lib/url.js";
 
 export type { ViewSel };
 
-type Boot = "loading" | "login" | "ready";
+type Boot = "loading" | "login" | "unreachable" | "ready";
+
+export type LoginNotice = "sessionExpired";
 
 const THEME_KEY = "balu:theme";
 const WORKSPACE_KEY = "balu:workspace";
@@ -56,6 +58,9 @@ export interface AppState {
   toast: string | null;
   toastTone: ToastTone;
   showToast(message: string, opts?: ShowToastOptions): void;
+  /** Shown above the login form (lib/boot.ts expireSession). */
+  loginNotice: LoginNotice | null;
+  setLoginNotice(notice: LoginNotice | null): void;
 
   setBoot(b: Boot): void;
   setSession(user: User, memberships: Membership[], workspace: Workspace): void;
@@ -94,6 +99,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   toast: null,
   toastTone: "success",
+  loginNotice: null,
   showToast: (message, opts) => {
     const durationMs = opts?.durationMs ?? 2600;
     set({ toast: message, toastTone: opts?.tone ?? "success" });
@@ -103,9 +109,10 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setBoot: (boot) => set({ boot }),
+  setLoginNotice: (loginNotice) => set({ loginNotice }),
   setSession: (user, memberships, workspace) => {
     rememberWorkspaceId(workspace.id);
-    set({ user, memberships, workspace, locale: user.locale, boot: "ready" });
+    set({ user, memberships, workspace, locale: user.locale, boot: "ready", loginNotice: null });
   },
   setUser: (user) => set({ user, locale: user.locale }),
   setMemberships: (memberships) => set({ memberships }),
@@ -145,5 +152,6 @@ export const useApp = create<AppState>((set, get) => ({
       fullscreenTaskId: null,
       quickAddOpen: false,
       paletteOpen: false,
+      loginNotice: null,
     }),
 }));

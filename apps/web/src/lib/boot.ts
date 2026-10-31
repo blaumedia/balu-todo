@@ -1,4 +1,5 @@
-import { pickMembership } from "@balu/domain";
+import { ApiError } from "@balu/api-client";
+import { pickMembership, type MeResponse } from "@balu/domain";
 import type { AccessLost } from "@balu/sync-client";
 import { makeT } from "../i18n/index.js";
 import {
@@ -9,9 +10,37 @@ import {
   listStoredWorkspaceIds,
   purgeWorkspaceStorage,
   setAccessLostHandler,
+  setSessionExpiredHandler,
+  teardownSync,
 } from "./clients.js";
+import { adoptLocalDataFor } from "./localData.js";
 import { accessLostMessage } from "./syncNotices.js";
 import { lastWorkspaceId, useApp } from "../store/app.js";
+
+/**
+ * The server refused the refresh token, or /me answered 401: show the login
+ * screen with a notice. Unsynced changes stay stored - they go out when the same
+ * user signs in again, and are wiped by adoptLocalDataFor if someone else does.
+ * Idempotent: the api-client hook and bootSession's 401 branch can both call it.
+ */
+export async function expireSession(): Promise<void> {
+  teardownSync();
+  // Tokens are already cleared after a refused refresh; this removes a stale
+  // access token left without a refresh token. No network call when the
+  // refresh token is gone.
+  await api.logout().catch(() => {});
+  const st = useApp.getState();
+  const wasReady = st.boot === "ready";
+  st.reset();
+  st.setLoginNotice("sessionExpired");
+  // As in logout(): the address bar must not keep ids of a session that ended.
+  // Not during boot or the invite flow - /invite/:token must survive the login.
+  if (wasReady) globalThis.history?.replaceState(null, "", "/");
+}
+
+setSessionExpiredHandler(() => {
+  void expireSession();
+});
 
 /**
  * Boot the app into a workspace: fetch `/me`, choose a workspace (preferred →
@@ -20,8 +49,18 @@ import { lastWorkspaceId, useApp } from "../store/app.js";
  */
 export async function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
   const st = useApp.getState();
+  let me: MeResponse;
   try {
-    const me = await api.getMe();
+    me = await api.getMe();
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 401) await expireSession();
+    else st.setBoot("login");
+    return false;
+  }
+  try {
+    // Before anything reads local data: another user's queue must never be
+    // hydrated, let alone flushed, under this account.
+    adoptLocalDataFor(me.user.id, teardownSync);
     const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
       st.setBoot("login");

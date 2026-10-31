@@ -29,13 +29,11 @@ export function InviteAcceptView({ token, onDone }: { token: string; onDone: () 
       showToast(t("invite.joined"));
       onDone();
     } catch (e) {
-      if (e instanceof ApiError && (e.code === "invalid_token" || e.code === "token_expired")) {
-        setPhase("invalid");
-      } else if (e instanceof ApiError && e.status === 401) {
-        setPhase("needsAuth");
-      } else {
-        setPhase("invalid");
-      }
+      // 401 first: an ended session also says `invalid_token` (from
+      // /auth/refresh) and must lead to the login form, not "invalid invite".
+      // An invalid or expired invite itself is a 400 (contract §7).
+      if (e instanceof ApiError && e.status === 401) setPhase("needsAuth");
+      else setPhase("invalid");
     }
   }, [token, onDone, showToast, t]);
 
