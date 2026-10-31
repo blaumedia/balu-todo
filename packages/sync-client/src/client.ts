@@ -320,11 +320,11 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   const maxBatch = opts.maxBatch ?? 100;
   // After a request times out the next flush sends fewer commands (a slow server
   // is working through each one) and a body read gets twice the time; a success
-  // restores the body timeout. The batch grows back additively and stays below the size that
-  // timed out until CEILING_PROBE_OK batches in a row passed at the cap, then that
-  // size is tried once: doubling, or restoring the full size at once, alternated a
-  // batch that times out with a half one that passes and burned a full timeout on
-  // every second request.
+  // restores the body timeout. The batch grows back additively and stays below
+  // the size that timed out until CEILING_PROBE_OK batches in a row passed at the
+  // cap, then that size is tried once: doubling, or restoring the full size at
+  // once, alternated a batch that times out with a half one that passes and
+  // burned a full timeout on every second request.
   const minBatch = Math.min(10, maxBatch);
   const CEILING_PROBE_OK = 5;
   let batchSize = maxBatch;

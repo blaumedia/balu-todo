@@ -242,7 +242,7 @@ describe("slow links", () => {
     expect(calls).toBe(2);
   });
 
-  it("sends a smaller batch after a request timed out and restores it after a success", async () => {
+  it("sends a smaller batch after a request timed out and grows it back after a success", async () => {
     const ok = makeServer();
     const sizes: number[] = [];
     let first = true;
@@ -314,8 +314,7 @@ describe("batch size recovery", () => {
     await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 5_000 });
     expect(sizes.some((n) => n > 25)).toBe(true);
     // After the first timeout a size above 25 comes back only after 5 passes at the cap.
-    const firstBig = sizes.findIndex((n) => n > 25);
-    expect(sizes.slice(firstBig + 1).some((n) => n > 25)).toBe(true);
+    expect(sizes.slice(0, 11)).toEqual([40, 20, 30, 15, 20, 20, 20, 20, 20, 30, 15]);
     for (let i = 1; i < sizes.length; i++) expect(sizes[i]! > 25 && sizes[i - 1]! > 25).toBe(false);
   });
 
@@ -332,7 +331,8 @@ describe("batch size recovery", () => {
     s.sizes.length = 0;
     for (let i = 0; i < 100; i++) c.mutate({ type: "task_add", args: { title: `b${i}` } });
     await c.flush();
-    expect(s.sizes[0]).toBeLessThan(40); // 40 timed out and only single-command flushes passed since
+    // 40 timed out; since then only partial batches passed at the cap of 30.
+    expect(s.sizes).toEqual([30, 30, 30, 10]);
   });
 
   it("a timed-out pull does not shrink the next push", async () => {
