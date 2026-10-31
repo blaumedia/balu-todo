@@ -284,13 +284,35 @@ describe("batch size recovery", () => {
     return { sizes, fetch: fetchImpl };
   }
 
-  it("grows back by doubling, not straight to the maximum", async () => {
+  it("grows back step by step and stays below the size that timed out", async () => {
     const s = hangFirst(2);
     const c = track(createSyncClient(base({ fetch: s.fetch, maxBatch: 40, requestTimeoutMs: 30, retryBaseMs: 5 })));
     for (let i = 0; i < 100; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
     c.start();
     await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 3_000 });
-    expect(s.sizes.slice(0, 6)).toEqual([40, 20, 10, 20, 40, 30]);
+    // 40 and 20 time out; 10 passes and 20 is not tried again until 5 batches passed at the cap.
+    expect(s.sizes.slice(0, 7)).toEqual([40, 20, 10, 10, 10, 10, 10]);
+  });
+
+  it("never sends a size that timed out twice in a row", async () => {
+    const ok = makeServer();
+    const sizes: number[] = [];
+    const fetchImpl = ((u: any, init: any) => {
+      const n = JSON.parse(init.body).commands.length;
+      sizes.push(n);
+      if (n > 25) {
+        return new Promise((_, reject) => {
+          init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      }
+      return ok.fetch(u, init);
+    }) as unknown as typeof fetch;
+    const c = track(createSyncClient(base({ fetch: fetchImpl, maxBatch: 40, requestTimeoutMs: 30, retryBaseMs: 5 })));
+    for (let i = 0; i < 400; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
+    c.start();
+    await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 5_000 });
+    expect(sizes.some((n) => n > 25)).toBe(true);
+    for (let i = 1; i < sizes.length; i++) expect(sizes[i]! > 25 && sizes[i - 1]! > 25).toBe(false);
   });
 
   it("a timed-out pull does not shrink the next push", async () => {

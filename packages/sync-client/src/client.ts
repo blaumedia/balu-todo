@@ -320,9 +320,16 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   const maxBatch = opts.maxBatch ?? 100;
   // After a request times out the next flush sends fewer commands (a slow server
   // is working through each one) and a body read gets twice the time; a success
-  // restores both.
+  // restores both. The batch grows back additively and stays below the size that
+  // timed out until CEILING_PROBE_OK batches in a row passed at the cap, then that
+  // size is tried once: doubling, or restoring the full size at once, alternated a
+  // batch that times out with a half one that passes and burned a full timeout on
+  // every second request.
   const minBatch = Math.min(10, maxBatch);
+  const CEILING_PROBE_OK = 5;
   let batchSize = maxBatch;
+  let timedOutSize: number | null = null;
+  let okAtCap = 0;
   const BODY_TIMEOUT_CAP_MS = 600_000;
 
   const requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
@@ -736,11 +743,13 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     setStatus("syncing");
     const rejected: RejectedCommand[] = [];
     const relocated: RelocatedCommand[] = [];
+    let sentSize = 0; // size of the batch in flight, for the timeout reaction below
     const lost = await exclusive(async (): Promise<AccessLost["reason"] | null> => {
       try {
         if (accessLost || closed) return null;
         while (queue.length > 0) {
           const batch = queue.slice(0, batchSize);
+          sentSize = batch.length;
           const resp = await doSync(batch);
           if (closed) return null; // stopped for good meanwhile: keep the response out of storage
           relocated.push(...relocatedIn(batch, resp));
@@ -766,9 +775,14 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
           // redundant full sync.
           if (resp.full_sync) await clearNeedsFullSync();
           invalidate();
-          // Grow back step by step: restoring the full size at once alternated a
-          // full batch that times out with a half one that passes, on a slow server.
-          batchSize = Math.min(maxBatch, batchSize * 2);
+          const limit = timedOutSize === null ? maxBatch : Math.max(minBatch, timedOutSize - minBatch);
+          if (batchSize < limit) {
+            batchSize = Math.min(limit, batchSize + minBatch);
+          } else if (timedOutSize !== null && ++okAtCap >= CEILING_PROBE_OK) {
+            timedOutSize = null; // probe the size that timed out once more
+            okAtCap = 0;
+            batchSize = Math.min(maxBatch, batchSize + minBatch);
+          }
         }
         setStatus("synced");
         return null;
@@ -776,7 +790,11 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
         const reason = lostAccessReason(e);
         // A slow server is working through each command: send fewer. Only a push
         // shrinks the batch - a timed-out pull says nothing about its size.
-        if (e instanceof RequestTimeoutError) batchSize = Math.max(minBatch, Math.floor(batchSize / 2));
+        if (e instanceof RequestTimeoutError && sentSize > 0) {
+          timedOutSize = sentSize;
+          okAtCap = 0;
+          batchSize = Math.max(minBatch, Math.floor(sentSize / 2));
+        }
         if (!reason) setStatus(failed(e));
         return reason;
       } finally {
