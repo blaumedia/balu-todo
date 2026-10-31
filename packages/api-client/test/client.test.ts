@@ -468,6 +468,112 @@ describe("refresh across tabs sharing one storage", () => {
     expect(state.refreshCalls).toBe(1);
   });
 
+  /** The tab's storage, with a hook on every read and write for the lease tests. */
+  async function hookedTab(
+    base: ReturnType<typeof memoryKV>,
+    fetchImpl: typeof fetch,
+    hook: { get?: (k: string) => void; set?: (k: string) => void },
+  ) {
+    const storage: ReturnType<typeof memoryKV> = {
+      getItem: async (k) => {
+        hook.get?.(k);
+        return base.getItem(k);
+      },
+      setItem: async (k, v) => {
+        hook.set?.(k);
+        return base.setItem(k, v);
+      },
+      removeItem: (k) => base.removeItem(k),
+    };
+    const c = (await loadTab()).createApiClient({ storage, fetch: fetchImpl });
+    await c.hydrate();
+    return c;
+  }
+
+  it("a lease lost right before the request is re-acquired, and the retry stays single-flight", async () => {
+    const { storage, state, fetchImpl } = await twoTabs();
+    let armed = false;
+    const c = await hookedTab(storage, fetchImpl, {
+      get: (k) => {
+        if (k !== "balu:auth:refresh" || !armed) return;
+        armed = false; // first read inside the locked section
+        void storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 300 }));
+      },
+    });
+    armed = true;
+    const [t1, t2] = await Promise.all([c.refresh(), c.refresh()]);
+    expect(state.refreshCalls).toBe(1); // never POSTed without the lease, and only once after it
+    expect(t2).toBe(t1);
+    expect(state.burned).toBe(false);
+    expect(await storage.getItem("balu:auth:refreshLease")).toBeNull();
+  });
+
+  it("a lease that expired during a long settle is renewed instead of lost", async () => {
+    const { storage, state, fetchImpl } = await twoTabs();
+    let offset = 0;
+    const realNow = Date.now.bind(Date);
+    vi.spyOn(Date, "now").mockImplementation(() => realNow() + offset);
+    let leaseWrites = 0;
+    let jumped = false;
+    const c = await hookedTab(storage, fetchImpl, {
+      set: (k) => {
+        if (k === "balu:auth:refreshLease") leaseWrites += 1;
+      },
+      get: (k) => {
+        // The read after the first settle: the throttled tab slept past the expiry.
+        if (k === "balu:auth:refreshLease" && leaseWrites === 1 && !jumped) {
+          jumped = true;
+          offset += 60_000;
+        }
+      },
+    });
+    const started = realNow();
+    await c.refresh();
+    vi.restoreAllMocks();
+    expect(state.refreshCalls).toBe(1);
+    expect(leaseWrites).toBe(2);
+    expect(realNow() - started).toBeLessThan(1000);
+  });
+
+  it("releases its lease on pagehide while a refresh is running", async () => {
+    const ls = new Map<string, string>();
+    const handlers: Array<() => void> = [];
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => ls.get(k) ?? null,
+      setItem: (k: string, v: string) => void ls.set(k, v),
+      removeItem: (k: string) => void ls.delete(k),
+    });
+    vi.stubGlobal("addEventListener", (type: string, h: () => void) => {
+      if (type === "pagehide") handlers.push(h);
+    });
+    vi.stubGlobal("removeEventListener", () => undefined);
+    const storage: ReturnType<typeof memoryKV> = {
+      getItem: async (k) => ls.get(k) ?? null,
+      setItem: async (k, v) => void ls.set(k, v),
+      removeItem: async (k) => void ls.delete(k),
+    };
+    const server = rotatingServer();
+    const mod = await loadTab();
+    const first = mod.createApiClient({ storage, fetch: server.fetchImpl });
+    await first.login({ email: "d@example.com", password: "pw" });
+    let leaseDuringRequest: string | null = null;
+    const c = mod.createApiClient({
+      storage,
+      fetch: (async (u: any, init: any) => {
+        if (String(u).endsWith("/auth/refresh")) {
+          leaseDuringRequest = ls.get("balu:auth:refreshLease") ?? null;
+          for (const h of handlers) h(); // the page is going away mid-refresh
+        }
+        return server.fetchImpl(u, init);
+      }) as unknown as typeof fetch,
+    });
+    await c.hydrate();
+    const refreshing = c.refresh();
+    await vi.waitFor(() => expect(leaseDuringRequest).not.toBeNull());
+    expect(ls.get("balu:auth:refreshLease")).toBeUndefined(); // released by the handler, not by the finally
+    await refreshing;
+  });
+
   it("crossContextLock none refreshes without touching a lease", async () => {
     const { storage, state, fetchImpl } = await twoTabs();
     await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 20_000 }));

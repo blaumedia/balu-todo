@@ -83,7 +83,11 @@ const REFRESH_LOCK = "balu:auth:refresh";
 const REFRESH_LEASE = "balu:auth:refreshLease";
 const LEASE_SETTLE_MS = 50;
 const LEASE_POLL_MS = 100;
-/** Refresh queues of clients sharing one storage, for browsers without Web Locks. */
+/**
+ * In-page refresh queues of clients sharing one storage: the whole lock for
+ * `crossContextLock: "none"`, and the ordering ahead of the lease where Web Locks
+ * are missing.
+ */
 const chains = new WeakMap<object, Promise<unknown>>();
 
 /**
@@ -275,7 +279,11 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
       return mine(lease) && (lease?.exp ?? 0) > Date.now();
     };
     // A reload or closed tab mid-refresh would leave the lease for the next
-    // refresh to wait out. Storage is synchronous in a page; best effort.
+    // refresh to wait out. Storage is synchronous in a page; best effort. Reads
+    // `globalThis.localStorage` rather than `opts.storage` on purpose: the lease
+    // only exists for browsers, where the shared storage is localStorage, and an
+    // async storage could not finish a write during pagehide anyway. With any
+    // other storage this does nothing and the lease expires on its own.
     const onPageHide = (): void => {
       try {
         const ls = globalThis.localStorage;
@@ -336,25 +344,23 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
    */
   function exclusive<T>(fn: (stillHeld: () => Promise<boolean>) => Promise<T>): Promise<T> {
     const always = async (): Promise<boolean> => true;
-    if (opts.crossContextLock === "none") {
+    const chain = <R>(run: () => Promise<R>): Promise<R> => {
       const prev = chains.get(opts.storage) ?? Promise.resolve();
-      const run = prev.then(() => fn(always), () => fn(always));
-      chains.set(opts.storage, run.catch(() => undefined));
-      return run;
-    }
+      const next = prev.then(run, run);
+      chains.set(opts.storage, next.catch(() => undefined));
+      return next;
+    };
+    if (opts.crossContextLock === "none") return chain(() => fn(always));
     const locks = (globalThis as { navigator?: { locks?: { request<R>(n: string, cb: () => Promise<R>): Promise<R> } } })
       .navigator?.locks;
     if (locks?.request) return locks.request(REFRESH_LOCK, () => fn(always));
-    const prev = chains.get(opts.storage) ?? Promise.resolve();
-    const run = prev.then(() => withLease(fn), () => withLease(fn));
-    chains.set(opts.storage, run.catch(() => undefined));
-    return run;
+    return chain(() => withLease(fn));
   }
 
   async function refresh(): Promise<AuthTokens> {
     if (refreshInFlight) return refreshInFlight;
     if (!refreshToken) throw new ApiError("invalid_token", "No refresh token", 401);
-    refreshInFlight = exclusive(async (stillHeld) => {
+    const flight: Promise<AuthTokens> = exclusive(async (stillHeld) => {
       try {
         // Another tab may have rotated the tokens while we waited (or before we
         // noticed our access token expired): its refresh token is the live one and
@@ -415,11 +421,14 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
           }
         }
         throw e;
-      } finally {
-        refreshInFlight = null;
       }
+    }).finally(() => {
+      // Here, not in the callback: withLease may run the callback again after a
+      // lost lease, and an inner finally would clear a newer call's promise.
+      if (refreshInFlight === flight) refreshInFlight = null;
     });
-    return refreshInFlight;
+    refreshInFlight = flight;
+    return flight;
   }
 
   /**
