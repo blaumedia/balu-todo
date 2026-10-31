@@ -542,7 +542,7 @@ export default function SettingsScreen() {
             </Text>
           </View>
         </View>
-        <Pressable onPress={changeServer} style={styles.linkRow}>
+        <Pressable onPress={changeServer} disabled={leavingUi} style={[styles.linkRow, leavingUi && { opacity: 0.5 }]}>
           <Icon name="smartphone" size={16} color={theme.accent} strokeWidth={2} />
           <Text style={[styles.link, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
         </Pressable>
