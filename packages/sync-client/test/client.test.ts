@@ -601,7 +601,39 @@ describe("outage recovery (contract §6.7)", () => {
       expect(onAccessLost).not.toHaveBeenCalled();
     });
 
-    it("writesSettled() waits for a storage write already started, not for a request", async () => {
+    it("writesSettled() also waits for the purge after a lost access", async () => {
+    const server = makeErrorServer(403, { detail: { code: "forbidden", message: "x" } });
+    const kv = memoryKV();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let purging = false;
+    const storage = {
+      getItem: (k: string) => kv.getItem(k),
+      setItem: (k: string, v: string) => kv.setItem(k, v),
+      removeItem: async (k: string) => {
+        purging = true;
+        await gate;
+        return kv.removeItem(k);
+      },
+    };
+    const c = track(createSyncClient(base({ fetch: server.fetch, storage })));
+    const p = c.sync();
+    await vi.waitFor(() => expect(purging).toBe(true));
+    c.close();
+    let settled = false;
+    const w = c.writesSettled().then(() => {
+      settled = true;
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(settled).toBe(false); // the deletes are still running
+    release();
+    await w;
+    await p;
+  });
+
+  it("writesSettled() waits for a storage write already started, not for a request", async () => {
       const g = gated(); // the request never answers: its gate stays shut
       let finish: () => void = () => undefined;
       const slow = new Promise<void>((r) => {

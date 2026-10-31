@@ -368,7 +368,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
   // Storage writes started and not yet settled, for writesSettled().
   const pendingWrites = new Set<Promise<unknown>>();
-  function tracked(write: Promise<void>): Promise<void> {
+  function tracked<T>(write: Promise<T>): Promise<T> {
     pendingWrites.add(write);
     const done = (): void => {
       pendingWrites.delete(write);
@@ -571,7 +571,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     accessLost = true;
     const discarded = queue.length;
     stop();
-    await purgeWorkspaceData(opts.storage, opts.workspaceId);
+    await tracked(purgeWorkspaceData(opts.storage, opts.workspaceId));
     queue = []; // counted above; nothing will ever send them
     setStatus("error");
     invalidate();
