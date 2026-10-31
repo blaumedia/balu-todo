@@ -110,13 +110,13 @@ let syncWorkspaceId: string | null = null;
  * writes the old workspace's queue/replica/token when it lands - so a purge or an
  * adoption by another user must reach these too, not only the current client.
  */
-const retired = new Set<SyncClient>();
+const retired = new Map<SyncClient, string>();
 
 /** Stop `client` and keep it reachable until its running work has settled. */
-function retire(client: SyncClient | null): void {
-  if (!client) return;
+function retire(client: SyncClient | null, workspaceId: string | null): void {
+  if (!client || workspaceId === null) return;
   client.stop();
-  retired.add(client);
+  retired.set(client, workspaceId);
   const settled = (): void => {
     retired.delete(client);
   };
@@ -130,7 +130,12 @@ function retire(client: SyncClient | null): void {
  * fresh one hydrates from that workspace's own keys.
  */
 export function initSync(workspaceId: string, userId: string): SyncClient {
-  retire(sync);
+  // A stopped client of this same workspace (A -> B -> A) would still write the
+  // same keys the new client is about to own, and a late write would overwrite
+  // its newer state. Closing is safe: the server replays commands by uuid.
+  for (const [client, id] of retired) if (id === workspaceId) client.close();
+  if (syncWorkspaceId === workspaceId) sync?.close();
+  retire(sync, syncWorkspaceId);
   // Landing in a workspace again (re-invite) resets its loss bookkeeping.
   expectedLoss.delete(workspaceId);
   announcedLoss.delete(workspaceId);
@@ -181,14 +186,14 @@ export function getSyncWorkspaceId(): string | null {
  * and there is nothing to wait for.
  */
 export function closeSync(): void {
-  for (const client of retired) client.close();
+  for (const client of retired.keys()) client.close();
   sync?.close();
   sync = null;
   syncWorkspaceId = null;
 }
 
 export function teardownSync(): void {
-  retire(sync);
+  retire(sync, syncWorkspaceId);
   sync = null;
   syncWorkspaceId = null;
 }

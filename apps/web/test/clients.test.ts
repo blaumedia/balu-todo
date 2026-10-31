@@ -86,4 +86,22 @@ describe("closeSync reaches stopped clients", () => {
     closeSync();
     expect(w1!.closed).toBe(false); // settled and dropped: nothing left to close
   });
+
+  it("switching back to a workspace closes its stopped client, so two never share its keys", () => {
+    initSync("w1", "u1");
+    initSync("w2", "u1"); // w1 stopped, still winding down
+    initSync("w1", "u1");
+    const [oldW1, w2, newW1] = fakes.made;
+    expect(oldW1!.closed).toBe(true);
+    expect(w2!.closed).toBe(false); // another workspace: left to wind down
+    expect(newW1!.closed).toBe(false);
+  });
+
+  it("re-initialising the current workspace closes the client it replaces", () => {
+    initSync("w1", "u1");
+    initSync("w1", "u1");
+    const [first, second] = fakes.made;
+    expect(first!.closed).toBe(true);
+    expect(second!.closed).toBe(false);
+  });
 });

@@ -12,6 +12,7 @@ import { relocatedNotice } from './syncNotices';
 let api: ApiClient | null = null;
 let apiBaseUrl: string | null = null;
 let sync: SyncClient | null = null;
+let syncWorkspaceId: string | null = null;
 
 /**
  * Clients that were stopped (workspace switch, session expiry) but whose running
@@ -19,13 +20,13 @@ let sync: SyncClient | null = null;
  * writes the old workspace's queue/replica/token when it lands - so a purge or an
  * adoption by another user must reach these too, not only the current client.
  */
-const retired = new Set<SyncClient>();
+const retired = new Map<SyncClient, string>();
 
 /** Stop `client` and keep it reachable until its running work has settled. */
-function retire(client: SyncClient | null): void {
-  if (!client) return;
+function retire(client: SyncClient | null, workspaceId: string | null): void {
+  if (!client || workspaceId === null) return;
   client.stop();
-  retired.add(client);
+  retired.set(client, workspaceId);
   const settled = (): void => {
     retired.delete(client);
   };
@@ -156,7 +157,13 @@ export function getApi(): ApiClient | null {
 }
 
 export function initSync(serverUrl: string, workspaceId: string, userId: string): SyncClient {
-  retire(sync);
+  // A stopped client of this same workspace (A -> B -> A) would still write the
+  // same keys the new client is about to own, and a late write would overwrite
+  // its newer state. Closing is safe: the server replays commands by uuid.
+  for (const [stopped, id] of retired) if (id === workspaceId) stopped.close();
+  if (syncWorkspaceId === workspaceId) sync?.close();
+  retire(sync, syncWorkspaceId);
+  syncWorkspaceId = workspaceId;
   // Landing in a workspace again (re-invite) resets its loss bookkeeping.
   expectedLoss.delete(workspaceId);
   announcedLoss.delete(workspaceId);
@@ -196,21 +203,23 @@ export function getSync(): SyncClient | null {
 }
 
 export function teardownSync(): void {
-  retire(sync);
+  retire(sync, syncWorkspaceId);
   sync = null;
+  syncWorkspaceId = null;
   notifySyncClient();
 }
 
 /**
  * Close every sync client for good (the current one and any stopped one still
- * winding down), drop the current one, and wait for their running pull or flush
- * to settle. SQLite writes are async, so a purge must wait here: a late write
- * from a client that is merely stopped would land after it.
+ * winding down), drop the current one, and wait for their storage writes already
+ * started to settle. SQLite writes are async, so a purge must wait here. Closing
+ * stops every new write at once, so a slow network request is not waited for.
  */
 export async function teardownSyncSettled(): Promise<void> {
-  const all = [...retired, ...(sync ? [sync] : [])];
+  const all = [...retired.keys(), ...(sync ? [sync] : [])];
   for (const client of all) client.close();
   sync = null;
+  syncWorkspaceId = null;
   notifySyncClient();
-  await Promise.all(all.map((client) => client.idle().catch(() => {})));
+  await Promise.all(all.map((client) => client.writesSettled().catch(() => {})));
 }
