@@ -103,6 +103,44 @@ describe("auth", () => {
     return { c, storage, fetchImpl };
   }
 
+  it("a refresh that settles after logout leaves storage empty and stays silent", async () => {
+    const spy = vi.fn();
+    const { c, storage } = await expiredSession(
+      async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return json({ access_token: "a2", refresh_token: "r2" });
+      },
+      memoryKV(),
+      spy,
+    );
+    const me = c.getMe().catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 0)); // the 401 has started the refresh
+    await c.logout();
+    await me;
+    await new Promise((r) => setTimeout(r, 40));
+    expect(c.isAuthenticated()).toBe(false);
+    expect(await storage.getItem("balu:auth:access")).toBeNull();
+    expect(await storage.getItem("balu:auth:refresh")).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("a refresh refused after logout does not announce an expired session", async () => {
+    const spy = vi.fn();
+    const { c } = await expiredSession(
+      async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return json({ detail: { code: "invalid_token", message: "" } }, 401);
+      },
+      memoryKV(),
+      spy,
+    );
+    const me = c.getMe().catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 0));
+    await c.logout();
+    await me;
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("a network error during refresh keeps the tokens", async () => {
     const spy = vi.fn();
     const { c, storage, fetchImpl } = await expiredSession(
