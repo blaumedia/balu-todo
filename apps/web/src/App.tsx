@@ -50,6 +50,10 @@ export function App() {
     })();
   }, [inviteToken, setBoot]);
 
+  // Before the invite branch: a failed /me after accepting an invite loops in
+  // "unreachable", and the accept spinner would hide why nothing happens.
+  if (boot === "unreachable") return <UnreachableView />;
+
   if (inviteToken) {
     return (
       <InviteAcceptView
@@ -91,7 +95,6 @@ export function App() {
     );
   }
 
-  if (boot === "unreachable") return <UnreachableView />;
   if (boot === "login") return <LoginView onAuthenticated={authenticate} />;
   return <Shell />;
 }

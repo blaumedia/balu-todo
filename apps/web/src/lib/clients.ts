@@ -20,10 +20,17 @@ export function setSessionExpiredHandler(handler: () => void): void {
   sessionExpiredHandler = handler;
 }
 
+let sessionEndedElsewhereHandler: (() => void) | null = null;
+/** Registered by lib/boot.ts, like the expiry hook. */
+export function setSessionEndedElsewhereHandler(handler: () => void): void {
+  sessionEndedElsewhereHandler = handler;
+}
+
 export const api: ApiClient = createApiClient({
   baseUrl: "/api/v1",
   storage: kv,
   onSessionExpired: () => sessionExpiredHandler?.(),
+  onSessionEndedElsewhere: () => sessionEndedElsewhereHandler?.(),
 });
 
 const RELOCATED_TOAST_MS = 5000;

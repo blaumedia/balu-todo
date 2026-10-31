@@ -35,6 +35,8 @@ export interface ShowToastOptions {
   durationMs?: number;
   tone?: ToastTone;
 }
+/** The name the web lane's toast uses for the same options. */
+export type ToastOptions = ShowToastOptions;
 
 export interface AppState {
   boot: Boot;

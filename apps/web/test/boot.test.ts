@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // boot.ts owns the recovery from a lost workspace; clients.ts (sync client,
 // localStorage, api) is replaced by a small fake so the flows run in node.
@@ -11,12 +11,27 @@ const fake = vi.hoisted(() => {
     announced: new Set<string>(),
     purged: [] as string[],
     getMe: (async () => ({})) as () => Promise<any>,
+    accessToken: null as string | null,
+    loggedOut: 0,
+    hydrated: 0,
+    teardowns: 0,
   };
   return state;
 });
 
 vi.mock("../src/lib/clients.js", () => ({
-  api: { getMe: () => fake.getMe() },
+  api: {
+    getMe: () => fake.getMe(),
+    logout: async () => {
+      fake.loggedOut += 1;
+    },
+    hydrate: async () => {
+      fake.hydrated += 1;
+      fake.accessToken = globalThis.localStorage.getItem("balu:auth:refresh") ? "tok" : null;
+    },
+    isAuthenticated: () => fake.accessToken !== null,
+    getAccessToken: () => fake.accessToken,
+  },
   initSync: (id: string) => {
     fake.open = id;
   },
@@ -33,10 +48,22 @@ vi.mock("../src/lib/clients.js", () => ({
   },
   setAccessLostHandler: () => {},
   setSessionExpiredHandler: () => {},
-  teardownSync: () => {},
+  setSessionEndedElsewhereHandler: () => {},
+  teardownSync: () => {
+    fake.teardowns += 1;
+  },
 }));
 
-import { discardLostWorkspaces, handleAccessLost, moveOffLostWorkspace } from "../src/lib/boot.js";
+import { ApiError } from "@balu/api-client";
+import {
+  bootSession,
+  discardLostWorkspaces,
+  expireSession,
+  handleAccessLost,
+  moveOffLostWorkspace,
+  onStorageEvent,
+  reconcileSession,
+} from "../src/lib/boot.js";
 import { useApp } from "../src/store/app.js";
 
 const user = { id: "u1", name: "U", email: "u@x", locale: "en" } as any;
@@ -47,7 +74,42 @@ function me(...ids: string[]) {
   return { user, memberships: ids.map(mem) };
 }
 
+/** A fake JWT: only the payload matters to the code under test. */
+function jwt(sub: string): string {
+  const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${b64({ alg: "HS256" })}.${b64({ sub })}.sig`;
+}
+
+function fakeStorage(): Storage {
+  const m = new Map<string, string>();
+  return {
+    get length() {
+      return m.size;
+    },
+    key: (i: number) => [...m.keys()][i] ?? null,
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, v),
+    removeItem: (k: string) => void m.delete(k),
+    clear: () => m.clear(),
+  } as Storage;
+}
+
+const replaceState = vi.fn();
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
 beforeEach(() => {
+  vi.stubGlobal("localStorage", fakeStorage());
+  vi.stubGlobal("history", { replaceState });
+  replaceState.mockClear();
+  globalThis.localStorage.setItem("balu:auth:refresh", "r");
+  fake.accessToken = "tok";
+  fake.loggedOut = 0;
+  fake.hydrated = 0;
+  fake.teardowns = 0;
   fake.open = "lost";
   fake.stored = [];
   fake.discarded.clear();
@@ -135,5 +197,154 @@ describe("discardLostWorkspaces", () => {
     await discardLostWorkspaces(["a"]);
     expect(fake.purged).toEqual(["gone"]);
     expect(useApp.getState().toast).toBeNull();
+  });
+});
+
+describe("expireSession", () => {
+  it("stops sync, shows the login screen with the notice and clears the address", async () => {
+    useApp.setState({ boot: "ready" });
+    await expireSession();
+    const st = useApp.getState();
+    expect(fake.teardowns).toBe(1);
+    expect(fake.loggedOut).toBe(1);
+    expect(st.boot).toBe("login");
+    expect(st.loginNotice).toBe("sessionExpired");
+    expect(st.user).toBeNull();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+  });
+
+  it("leaves the address alone when it runs during boot", async () => {
+    useApp.setState({ boot: "loading" });
+    await expireSession();
+    expect(useApp.getState().boot).toBe("login");
+    expect(replaceState).not.toHaveBeenCalled();
+  });
+});
+
+describe("bootSession (attemptBoot classification)", () => {
+  const apiError = (status: number) => new ApiError("x", "x", status);
+
+  beforeEach(() => {
+    useApp.setState({ boot: "loading", user: null, workspace: null, memberships: [], loginNotice: null });
+    fake.getMe = async () => me("a");
+  });
+
+  it("a 401 goes to login with the expiry notice and is not retried", async () => {
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      throw apiError(401);
+    };
+    expect(await bootSession()).toBe(false);
+    expect(calls).toBe(1);
+    expect(useApp.getState().boot).toBe("login");
+    expect(useApp.getState().loginNotice).toBe("sessionExpired");
+  });
+
+  it("a 5xx shows the unreachable screen, retries, then becomes ready", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      if (calls === 1) throw apiError(503);
+      return me("a");
+    };
+    const booted = bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useApp.getState().boot).toBe("unreachable");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await booted).toBe(true);
+    expect(calls).toBe(2);
+    expect(useApp.getState().boot).toBe("ready");
+    expect(fake.open).toBe("a");
+  });
+
+  it("a network error is treated like a 5xx", async () => {
+    vi.useFakeTimers();
+    fake.getMe = async () => {
+      throw new TypeError("fetch failed");
+    };
+    void bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useApp.getState().boot).toBe("unreachable");
+    fake.getMe = async () => me("a");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(useApp.getState().boot).toBe("ready");
+  });
+
+  it("ends on the login screen, purging, when another tab logged out while unreachable", async () => {
+    vi.useFakeTimers();
+    globalThis.localStorage.setItem("balu:queue:w1", "[]");
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      throw apiError(502);
+    };
+    const booted = bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useApp.getState().boot).toBe("unreachable");
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await booted).toBe(false);
+    expect(calls).toBe(1); // never asked /me again with the stale access token
+    expect(useApp.getState().boot).toBe("login");
+    expect(useApp.getState().loginNotice).toBeNull();
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
+  });
+
+  it("does not even ask /me when the stored login is already gone", async () => {
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me("a");
+    };
+    expect(await bootSession()).toBe(false);
+    expect(calls).toBe(0);
+    expect(useApp.getState().boot).toBe("login");
+  });
+});
+
+describe("cross-tab session changes", () => {
+  beforeEach(() => {
+    useApp.setState({ boot: "ready", user, workspace: ws("a"), memberships: [mem("a")], loginNotice: null });
+    globalThis.localStorage.setItem("balu:owner", "u1");
+    globalThis.localStorage.setItem("balu:queue:w1", "[]");
+  });
+
+  it("logout in another tab: sync stops, data is purged, no expiry notice", async () => {
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    globalThis.localStorage.removeItem("balu:owner");
+    expect(await reconcileSession()).toBe(false);
+    expect(fake.teardowns).toBe(1);
+    expect(useApp.getState().boot).toBe("login");
+    expect(useApp.getState().loginNotice).toBeNull();
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
+  });
+
+  it("a storage event for a removed login reconciles at once", async () => {
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    globalThis.localStorage.removeItem("balu:owner");
+    onStorageEvent({ key: "balu:auth:refresh" });
+    await vi.waitFor(() => expect(useApp.getState().boot).toBe("login"));
+    expect(fake.teardowns).toBe(1);
+  });
+
+  it("another user signing in elsewhere: this tab restarts as that user", async () => {
+    globalThis.localStorage.setItem("balu:auth:access", jwt("u2"));
+    globalThis.localStorage.setItem("balu:owner", "u2");
+    fake.getMe = async () => ({ user: { ...user, id: "u2" }, memberships: [mem("z")] });
+    onStorageEvent({ key: "balu:owner" });
+    await vi.waitFor(() => expect(useApp.getState().user?.id).toBe("u2"));
+    expect(fake.teardowns).toBeGreaterThan(0);
+    expect(fake.hydrated).toBe(1);
+    expect(fake.open).toBe("z");
+  });
+
+  it("a token rotation by the same user is ignored", () => {
+    globalThis.localStorage.setItem("balu:auth:access", jwt("u1"));
+    onStorageEvent({ key: "balu:auth:refresh" });
+    expect(fake.teardowns).toBe(0);
+    expect(useApp.getState().boot).toBe("ready");
   });
 });

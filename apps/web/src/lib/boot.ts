@@ -1,4 +1,4 @@
-import { ApiError } from "@balu/api-client";
+import { ApiError, tokenSubject } from "@balu/api-client";
 import { pickMembership, type MeResponse } from "@balu/domain";
 import type { AccessLost } from "@balu/sync-client";
 import { makeT } from "../i18n/index.js";
@@ -10,11 +10,12 @@ import {
   listStoredWorkspaceIds,
   purgeWorkspaceStorage,
   setAccessLostHandler,
+  setSessionEndedElsewhereHandler,
   setSessionExpiredHandler,
   teardownSync,
 } from "./clients.js";
 import { bootRetryDelayMs, waitForRetry } from "./bootRetry.js";
-import { adoptLocalDataFor } from "./localData.js";
+import { adoptLocalDataFor, OWNER_KEY, purgeLocalData } from "./localData.js";
 import { accessLostMessage } from "./syncNotices.js";
 import { lastWorkspaceId, useApp } from "../store/app.js";
 
@@ -43,6 +44,63 @@ setSessionExpiredHandler(() => {
   void expireSession();
 });
 
+const REFRESH_KEY = "balu:auth:refresh";
+const ACCESS_KEY = "balu:auth:access";
+
+/** False only when this browser can tell the stored login is gone. */
+function loginStored(): boolean {
+  const ls = globalThis.localStorage;
+  return !ls || ls.getItem(REFRESH_KEY) !== null;
+}
+
+/**
+ * Another tab changed the stored login under this one (logged out, or a
+ * different user signed in). Stop syncing at once so nothing of this tab's
+ * user is written back, then follow storage: no login left means logout
+ * semantics (purge, no expiry notice); someone else's login means boot as that
+ * user from scratch - never carry this tab's store, queue or workspace over.
+ * Resolves true when the app booted as the user now stored.
+ */
+export async function reconcileSession(): Promise<boolean> {
+  teardownSync();
+  await api.hydrate();
+  if (!api.isAuthenticated()) {
+    purgeLocalData();
+    useApp.getState().reset();
+    globalThis.history?.replaceState(null, "", "/");
+    return false;
+  }
+  useApp.getState().reset();
+  useApp.getState().setBoot("loading");
+  return bootSession();
+}
+
+setSessionEndedElsewhereHandler(() => {
+  void reconcileSession();
+});
+
+/**
+ * Web storage event from another tab. Rotating tokens of the same user (a
+ * refresh there) is normal and ignored; a login that is gone, or one of a
+ * different user than this tab holds, is not.
+ */
+export function onStorageEvent(e: { key: string | null }): void {
+  const st = useApp.getState();
+  if (st.boot !== "ready" && st.boot !== "unreachable") return;
+  const ls = globalThis.localStorage;
+  if (!ls) return;
+  if (e.key !== null && e.key !== REFRESH_KEY && e.key !== OWNER_KEY) return;
+  if (ls.getItem(REFRESH_KEY) === null) {
+    if (ls.getItem(OWNER_KEY) === null || e.key === REFRESH_KEY || e.key === null) void reconcileSession();
+    return;
+  }
+  const theirs = tokenSubject(ls.getItem(ACCESS_KEY));
+  const mine = st.user?.id ?? tokenSubject(api.getAccessToken());
+  const owner = ls.getItem(OWNER_KEY);
+  if ((theirs && mine && theirs !== mine) || (owner && mine && owner !== mine)) void reconcileSession();
+}
+globalThis.addEventListener?.("storage", (e) => onStorageEvent(e as StorageEvent));
+
 type BootAttempt = "ready" | "login" | "unreachable";
 
 let bootLoop: Promise<boolean> | null = null;
@@ -69,6 +127,15 @@ export function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
 
 async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
   for (let attempt = 0; ; attempt += 1) {
+    // While retrying, another tab may have logged out. The access token this tab
+    // holds stays valid on the server, so /me would boot the logged-out user.
+    if (!loginStored()) {
+      await api.hydrate();
+      purgeLocalData();
+      useApp.getState().reset();
+      globalThis.history?.replaceState(null, "", "/");
+      return false;
+    }
     const outcome = await attemptBoot(preferredWorkspaceId);
     if (outcome !== "unreachable") return outcome === "ready";
     useApp.getState().setBoot("unreachable");
