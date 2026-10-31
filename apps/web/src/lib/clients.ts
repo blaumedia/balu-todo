@@ -153,10 +153,21 @@ export function getSyncWorkspaceId(): string | null {
   return syncWorkspaceId;
 }
 
-/** `teardownSync`, then wait for the stopped client's running pull or flush to finish writing. */
+/**
+ * Close the sync client for good (it never persists again, even for a pull or
+ * flush already in flight) and drop it. For when the stored data is about to be
+ * wiped or handed to another user; `teardownSync` only stops it.
+ */
+export function closeSync(): void {
+  sync?.close();
+  sync = null;
+  syncWorkspaceId = null;
+}
+
+/** `closeSync`, then wait for the closed client's running pull or flush to wind down. */
 export async function teardownSyncSettled(): Promise<void> {
   const old = sync;
-  teardownSync();
+  closeSync();
   await old?.idle();
 }
 

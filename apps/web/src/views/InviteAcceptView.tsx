@@ -25,9 +25,11 @@ export function InviteAcceptView({ token, onDone }: { token: string; onDone: () 
     setPhase("accepting");
     try {
       const workspace = await api.acceptInvite(token);
-      // false: the boot ended on the login screen (session gone meanwhile).
       if (!(await bootSession(workspace.id))) {
-        setPhase("needsAuth");
+        // false: the boot ended on the login screen. Only a session that is gone
+        // leads to the login form; a local failure or a missing membership with
+        // the login intact is an error here, not a reason to ask for a password.
+        setPhase(api.isAuthenticated() ? "invalid" : "needsAuth");
         return;
       }
       showToast(t("invite.joined"));

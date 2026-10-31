@@ -5,6 +5,7 @@ import { makeT } from "../i18n/index.js";
 import {
   api,
   claimAccessLossNotice,
+  closeSync,
   getSyncWorkspaceId,
   initSync,
   listStoredWorkspaceIds,
@@ -26,14 +27,13 @@ import { lastWorkspaceId, useApp } from "../store/app.js";
  * user signs in again, and are wiped by adoptLocalDataFor if someone else does.
  * Idempotent: the api-client hook and bootSession's 401 branch can both call it.
  */
-export async function expireSession(): Promise<void> {
+export async function expireSession(wasReady = useApp.getState().boot === "ready"): Promise<void> {
   teardownSync();
   // Tokens are already cleared after a refused refresh; this removes a stale
   // access token left without a refresh token. No network call when the
   // refresh token is gone.
   await api.logout().catch(() => {});
   const st = useApp.getState();
-  const wasReady = st.boot === "ready";
   st.reset();
   st.setLoginNotice("sessionExpired");
   // As in logout(): the address bar must not keep ids of a session that ended.
@@ -57,10 +57,10 @@ function loginStored(): boolean {
  * here - login screen with the notice, unsynced changes kept for the same user.
  * Without it the user logged out: purge, no notice.
  */
-async function loginGone(): Promise<void> {
+async function loginGone(wasReady?: boolean): Promise<void> {
   await api.hydrate();
   if (globalThis.localStorage?.getItem(OWNER_KEY)) {
-    await expireSession();
+    await expireSession(wasReady);
     return;
   }
   purgeLocalData();
@@ -70,24 +70,29 @@ async function loginGone(): Promise<void> {
 
 /**
  * Another tab changed the stored login under this one (logged out, or a
- * different user signed in). Stop syncing at once so nothing of this tab's
- * user is written back, then follow storage: no login left means logout
- * semantics (purge, no expiry notice) or, when the owner is still stored (the
- * session expired there), the expiry screen that keeps the data; someone else's login means boot as that
- * user from scratch - never carry this tab's store, queue or workspace over.
+ * different user signed in). Close the sync client for good so nothing of this
+ * tab's user is ever written back (not even by a pull or flush already in
+ * flight), and clear the screen at once. Then follow storage: no login left
+ * means logout semantics (purge, no expiry notice) or, when the owner is still
+ * stored (the session expired there), the expiry screen that keeps the data;
+ * someone else's login means boot as that user from scratch - never carry this
+ * tab's store, queue or workspace over.
  * Resolves true when the app booted as the user now stored.
  */
 export async function reconcileSession(): Promise<boolean> {
-  // Settled, not just stopped: an in-flight pull or flush would otherwise write
-  // the previous user's replica or queue after the next user's purge.
+  const wasReady = useApp.getState().boot === "ready";
+  // Before the first await: the previous user's data must not stay on screen
+  // while a request that cannot be cancelled winds down.
+  useApp.getState().reset();
+  useApp.getState().setBoot("loading");
+  // Closed, not just stopped: the other tab's adopt/purge may already have run,
+  // and a late write from this tab's client would land after it.
   await teardownSyncSettled();
   await api.hydrate();
   if (!api.isAuthenticated()) {
-    await loginGone();
+    await loginGone(wasReady);
     return false;
   }
-  useApp.getState().reset();
-  useApp.getState().setBoot("loading");
   return bootSession();
 }
 
@@ -117,7 +122,7 @@ export function onStorageEvent(e: { key: string | null }): void {
 }
 globalThis.addEventListener?.("storage", (e) => onStorageEvent(e as StorageEvent));
 
-type BootAttempt = "ready" | "login" | "unreachable" | "gone";
+type BootAttempt = "ready" | "login" | "unreachable" | "gone" | "replaced";
 
 let bootLoop: Promise<boolean> | null = null;
 
@@ -154,6 +159,11 @@ async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
       await loginGone();
       return false;
     }
+    if (outcome === "replaced") {
+      // Another user signed in while /me was in flight: pick up their tokens, ask again.
+      await api.hydrate();
+      continue;
+    }
     if (outcome !== "unreachable") return outcome === "ready";
     useApp.getState().setBoot("unreachable");
     await waitForRetry(bootRetryDelayMs(attempt));
@@ -174,11 +184,15 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
   // Logged out in another tab while /me was in flight: the answer was for a login
   // that no longer exists, and adopting its user would re-create the owner key.
   if (!loginStored()) return "gone";
+  // Logged out and signed in as someone else meanwhile: /me answered for the
+  // old login. Adopting its user would purge the new user's data.
+  const stored = tokenSubject(globalThis.localStorage?.getItem(ACCESS_KEY) ?? null);
+  if (stored && stored !== me.user.id) return "replaced";
   const st = useApp.getState();
   try {
     // Before anything reads local data: another user's queue must never be
     // hydrated, let alone flushed, under this account.
-    adoptLocalDataFor(me.user.id, teardownSync);
+    adoptLocalDataFor(me.user.id, closeSync);
     const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
       st.setBoot("login");

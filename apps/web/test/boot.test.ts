@@ -15,6 +15,8 @@ const fake = vi.hoisted(() => {
     loggedOut: 0,
     hydrated: 0,
     teardowns: 0,
+    closes: 0,
+    settle: null as Promise<void> | null,
   };
   return state;
 });
@@ -52,8 +54,13 @@ vi.mock("../src/lib/clients.js", () => ({
   teardownSync: () => {
     fake.teardowns += 1;
   },
+  closeSync: () => {
+    fake.closes += 1;
+  },
   teardownSyncSettled: async () => {
     fake.teardowns += 1;
+    fake.closes += 1;
+    await fake.settle;
   },
 }));
 
@@ -113,6 +120,8 @@ beforeEach(() => {
   fake.loggedOut = 0;
   fake.hydrated = 0;
   fake.teardowns = 0;
+  fake.closes = 0;
+  fake.settle = null;
   fake.open = "lost";
   fake.stored = [];
   fake.discarded.clear();
@@ -363,13 +372,60 @@ describe("cross-tab session changes", () => {
   });
 
   it("another user signing in elsewhere: this tab restarts as that user", async () => {
+    // As the other tab's adopt leaves storage: u1's data purged, owner = u2.
     globalThis.localStorage.setItem("balu:auth:access", jwt("u2"));
+    globalThis.localStorage.setItem("balu:owner", "u2");
+    globalThis.localStorage.removeItem("balu:queue:w1");
     fake.getMe = async () => ({ user: { ...user, id: "u2" }, memberships: [mem("z")] });
     onStorageEvent({ key: "balu:auth:refresh" });
     await vi.waitFor(() => expect(useApp.getState().user?.id).toBe("u2"));
+    // The old client was closed (it can never write u1's queue back), not merely stopped.
+    expect(fake.closes).toBe(1);
     expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
     expect(fake.teardowns).toBeGreaterThan(0);
     expect(fake.hydrated).toBe(1);
+    expect(fake.open).toBe("z");
+  });
+
+  it("clears the previous user's screen before the old client has settled", async () => {
+    let release: () => void = () => {};
+    fake.settle = new Promise<void>((r) => {
+      release = r;
+    });
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    globalThis.localStorage.removeItem("balu:owner");
+    const done = reconcileSession();
+    expect(useApp.getState().user).toBeNull();
+    expect(useApp.getState().boot).toBe("loading");
+    release();
+    expect(await done).toBe(false);
+    expect(useApp.getState().boot).toBe("login");
+  });
+
+  it("an expiry elsewhere still rewrites the address bar after the early reset", async () => {
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    await reconcileSession();
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/");
+  });
+
+  it("another user signing in while /me is in flight: asks again instead of adopting the old answer", async () => {
+    useApp.setState({ boot: "loading", user: null });
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      if (calls === 1) {
+        // This /me was for u1; meanwhile another tab logged u2 in.
+        globalThis.localStorage.setItem("balu:auth:access", jwt("u2"));
+        globalThis.localStorage.setItem("balu:owner", "u2");
+        globalThis.localStorage.removeItem("balu:queue:w1");
+        return me("a");
+      }
+      return { user: { ...user, id: "u2" }, memberships: [mem("z")] };
+    };
+    expect(await bootSession()).toBe(true);
+    expect(calls).toBe(2);
+    expect(useApp.getState().user?.id).toBe("u2");
+    expect(globalThis.localStorage.getItem("balu:owner")).toBe("u2");
     expect(fake.open).toBe("z");
   });
 
