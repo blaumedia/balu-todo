@@ -59,7 +59,7 @@ Rules:
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
   invalidates the whole session family (replay defense).
 - Clients end a session only when `POST /auth/refresh` answers `401`. A network error, a timeout, `429` or `5xx` keeps the tokens and is retried. On that 401 the apps show their login screen and keep the local queue and replica: they sync once the same user signs in again, and are wiped first when a different user signs in on that device.
-- Clients must not refresh with the same refresh token twice at once: tabs sharing one storage re-read the stored tokens before refreshing and serialise refreshes (Web Locks where available), otherwise the replay defense above logs them all out.
+- Clients must not refresh with the same refresh token twice at once: tabs sharing one storage re-read the stored tokens before refreshing and serialise refreshes (Web Locks where available, otherwise a short-lived lease in the shared storage, since plain http has no Web Locks), otherwise the replay defense above logs them all out. Stored tokens of a different user (JWT `sub`) are never adopted: a tab whose session was ended or replaced by another tab drops its in-memory state and re-reads storage.
 
 ## 2. Account & workspaces (REST)
 

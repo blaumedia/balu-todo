@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, createApiClient, type AsyncKV } from "../src/index.js";
 
 function memoryKV(): AsyncKV {
@@ -316,19 +316,35 @@ describe("notification channels (contract §8)", () => {
   });
 });
 
-describe("refresh across clients sharing one storage (two tabs)", () => {
+describe("refresh across tabs sharing one storage", () => {
+  // Node ships its own navigator.locks; plain http on a LAN address has none.
+  beforeEach(() => vi.stubGlobal("navigator", {}));
   afterEach(() => vi.unstubAllGlobals());
 
+  type Mod = typeof import("../src/index.js");
+
+  /** A page of its own: nothing is shared with other "tabs" except the storage. */
+  async function loadTab(): Promise<Mod> {
+    vi.resetModules();
+    return (await import("../src/index.js")) as Mod;
+  }
+
+  /** A fake JWT: only the payload matters to the client. */
+  function jwt(sub: string, n = 0): string {
+    const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    return `${b64({ alg: "HS256" })}.${b64({ sub, n })}.sig`;
+  }
+
   /** A server that rotates tokens and burns the family on a replayed refresh token. */
-  function rotatingServer() {
+  function rotatingServer(sub = "u1") {
     let current = "r1";
-    let access = "a1";
+    let access = jwt(sub, 1);
     let n = 1;
     const state = { refreshCalls: 0, burned: false };
     const fetchImpl = (async (u: any, init: any) => {
       const path = String(u);
       if (path.endsWith("/auth/login")) {
-        return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+        return json({ user: USER, access_token: access, refresh_token: "r1" });
       }
       if (path.endsWith("/auth/refresh")) {
         state.refreshCalls += 1;
@@ -339,7 +355,7 @@ describe("refresh across clients sharing one storage (two tabs)", () => {
         }
         n += 1;
         current = `r${n}`;
-        access = `a${n}`;
+        access = jwt(sub, n);
         return json({ access_token: access, refresh_token: current });
       }
       if (init.headers.authorization !== `Bearer ${access}`) {
@@ -347,24 +363,35 @@ describe("refresh across clients sharing one storage (two tabs)", () => {
       }
       return json({ user: USER, memberships: [] });
     }) as unknown as typeof fetch;
-    return { state, fetchImpl };
+    return { state, fetchImpl, currentAccess: () => access };
   }
 
   async function twoTabs() {
     const storage = memoryKV();
-    const { state, fetchImpl } = rotatingServer();
+    const server = rotatingServer();
     const expired = vi.fn();
-    const a = createApiClient({ storage, fetch: fetchImpl, onSessionExpired: expired });
+    const elsewhere = vi.fn();
+    const tabA = await loadTab();
+    const tabB = await loadTab();
+    expect(tabA).not.toBe(tabB); // separate module instances: no shared in-page queue
+    const mk = (m: Mod) =>
+      m.createApiClient({
+        storage,
+        fetch: server.fetchImpl,
+        onSessionExpired: expired,
+        onSessionEndedElsewhere: elsewhere,
+      });
+    const a = mk(tabA);
     await a.login({ email: "d@example.com", password: "pw" });
-    const b = createApiClient({ storage, fetch: fetchImpl, onSessionExpired: expired });
+    const b = mk(tabB);
     await b.hydrate();
-    return { a, b, state, expired };
+    return { a, b, storage, expired, elsewhere, ...server };
   }
 
   it.each([
-    ["fallback (no Web Locks)", false],
+    ["lease (no Web Locks)", false],
     ["Web Locks", true],
-  ])("concurrent expiry in two tabs - %s", async (_name, withLocks) => {
+  ])("a tab adopts the tokens another tab rotated - %s", async (_name, withLocks) => {
     if (withLocks) {
       let tail: Promise<unknown> = Promise.resolve();
       vi.stubGlobal("navigator", {
@@ -377,20 +404,18 @@ describe("refresh across clients sharing one storage (two tabs)", () => {
         },
       });
     }
-    const { a, b, state, expired } = await twoTabs();
-    // Rotate server-side so both tabs hold a stale access token.
+    const { a, b, state, expired, currentAccess } = await twoTabs();
     await a.refresh();
     expect(state.refreshCalls).toBe(1);
-    // b still has a1/r1 in memory; a's refresh stored a2/r2.
-    const me = await b.getMe();
+    const me = await b.getMe(); // b still holds the spent tokens
     expect(me.user.id).toBe("u1");
-    expect(state.refreshCalls).toBe(1); // b adopted the stored tokens, no replay
-    expect(b.getAccessToken()).toBe("a2");
+    expect(state.refreshCalls).toBe(1); // adopted, not replayed
+    expect(b.getAccessToken()).toBe(currentAccess());
     expect(state.burned).toBe(false);
     expect(expired).not.toHaveBeenCalled();
   });
 
-  it("simultaneous refresh() calls from two clients send one request", async () => {
+  it("simultaneous refresh() from two tabs without Web Locks sends one request", async () => {
     const { a, b, state, expired } = await twoTabs();
     const [ta, tb] = await Promise.all([a.refresh(), b.refresh()]);
     expect(state.refreshCalls).toBe(1);
@@ -399,9 +424,80 @@ describe("refresh across clients sharing one storage (two tabs)", () => {
     expect(expired).not.toHaveBeenCalled();
   });
 
+  it("three tabs refreshing at once still send one request", async () => {
+    const { a, b, storage, state, fetchImpl } = await twoTabs();
+    const c = (await loadTab()).createApiClient({ storage, fetch: fetchImpl });
+    await c.hydrate();
+    await Promise.all([a.refresh(), b.refresh(), c.refresh()]);
+    expect(state.refreshCalls).toBe(1);
+    expect(state.burned).toBe(false);
+  });
+
+  it("the lease is released after a refresh", async () => {
+    const { a, storage } = await twoTabs();
+    await a.refresh();
+    expect(await storage.getItem("balu:auth:refreshLease")).toBeNull();
+  });
+
+  it("an expired lease of a crashed tab does not block a refresh", async () => {
+    const { a, storage, state } = await twoTabs();
+    await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "dead-tab", exp: Date.now() - 1 }));
+    await a.refresh();
+    expect(state.refreshCalls).toBe(1);
+  });
+
+  it("waits while another tab holds a live lease, then refreshes", async () => {
+    const { a, storage, state } = await twoTabs();
+    await storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 60_000 }));
+    let done = false;
+    const refreshed = a.refresh().then(() => {
+      done = true;
+    });
+    await new Promise((r) => setTimeout(r, 350));
+    expect(done).toBe(false);
+    expect(state.refreshCalls).toBe(0);
+    await storage.removeItem("balu:auth:refreshLease");
+    await refreshed;
+    expect(state.refreshCalls).toBe(1);
+  });
+
+  it("does not adopt the tokens of a different user", async () => {
+    const { b, storage, state, expired, elsewhere } = await twoTabs();
+    // Another tab logged out and user u2 signed in there.
+    await storage.setItem("balu:auth:access", jwt("u2", 9));
+    await storage.setItem("balu:auth:refresh", "r-of-u2");
+    await expect(b.refresh()).rejects.toMatchObject({ status: 401 });
+    expect(state.refreshCalls).toBe(0); // no replay of the spent token
+    expect(b.getAccessToken()).toBeNull(); // not u2's, not u1's
+    expect(elsewhere).toHaveBeenCalledWith("replaced");
+    expect(expired).not.toHaveBeenCalled();
+    // u2's tokens are not ours to clear.
+    expect(await storage.getItem("balu:auth:refresh")).toBe("r-of-u2");
+  });
+
+  it("reports a logout in another tab as gone, without expiry and without clearing", async () => {
+    const { b, storage, expired, elsewhere } = await twoTabs();
+    await storage.removeItem("balu:auth:access");
+    await storage.removeItem("balu:auth:refresh");
+    await expect(b.refresh()).rejects.toMatchObject({ status: 401 });
+    expect(elsewhere).toHaveBeenCalledWith("gone");
+    expect(expired).not.toHaveBeenCalled();
+  });
+
   it("concurrent refresh() calls in one tab share one request", async () => {
     const { a, state } = await twoTabs();
     await Promise.all([a.refresh(), a.refresh(), a.refresh()]);
     expect(state.refreshCalls).toBe(1);
+  });
+});
+
+describe("tokenSubject", () => {
+  it("reads sub from the payload and tolerates anything else", async () => {
+    const { tokenSubject } = await import("../src/index.js");
+    const payload = btoa(JSON.stringify({ sub: "u9" })).replace(/=+$/, "");
+    expect(tokenSubject(`h.${payload}.s`)).toBe("u9");
+    expect(tokenSubject("a1")).toBeNull();
+    expect(tokenSubject("h.!!!.s")).toBeNull();
+    expect(tokenSubject(null)).toBeNull();
   });
 });

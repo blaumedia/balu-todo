@@ -37,6 +37,14 @@ export interface ApiClientOptions {
    * error, a timeout, a 5xx or a 429 - those keep the tokens.
    */
   onSessionExpired?: () => void;
+  /**
+   * Called when a refresh finds that another tab ended this tab's session: the
+   * stored tokens are gone (`"gone"`, the other tab logged out) or belong to a
+   * different user (`"replaced"`, someone else signed in there). The stored
+   * tokens are left alone - they are not this tab's to clear - and nothing is
+   * adopted. The app should drop what it holds in memory and re-read storage.
+   */
+  onSessionEndedElsewhere?: (cause: "gone" | "replaced") => void;
 }
 
 export class ApiError extends Error {
@@ -50,11 +58,42 @@ export class ApiError extends Error {
   }
 }
 
+/** Internal: the refresh found the stored session is not this tab's any more. */
+class SessionEndedElsewhere extends ApiError {
+  constructor(readonly endedBy: "gone" | "replaced") {
+    super("invalid_token", "Session ended in another tab", 401);
+  }
+}
+
 const ACCESS_KEY = "balu:auth:access";
 const REFRESH_KEY = "balu:auth:refresh";
 const REFRESH_LOCK = "balu:auth:refresh";
+/** Storage key of the lease that stands in for Web Locks across tabs. */
+const REFRESH_LEASE = "balu:auth:refreshLease";
+const LEASE_SETTLE_MS = 50;
+const LEASE_POLL_MS = 100;
 /** Refresh queues of clients sharing one storage, for browsers without Web Locks. */
 const chains = new WeakMap<object, Promise<unknown>>();
+
+/**
+ * The `sub` claim of a JWT, read from the payload only - the signature is the
+ * server's business and the token is never logged. Null when `token` is not a
+ * decodable JWT or has no string `sub`.
+ */
+export function tokenSubject(token: string | null | undefined): string | null {
+  const part = token?.split(".")[1];
+  if (!part) return null;
+  try {
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const claims = JSON.parse(globalThis.atob(padded)) as { sub?: unknown };
+    return typeof claims.sub === "string" ? claims.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface ApiClient {
   /** Load persisted tokens into memory. Call once at boot. */
@@ -199,21 +238,63 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     );
   }
 
+  function readLease(raw: string | null): { id: string; exp: number } | null {
+    if (!raw) return null;
+    try {
+      const v = JSON.parse(raw) as { id?: unknown; exp?: unknown };
+      return typeof v.id === "string" && typeof v.exp === "number" ? { id: v.id, exp: v.exp } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Lease lock on the shared storage, for contexts without Web Locks (plain http
+   * on a LAN address). Take it by writing our id and reading it back after a
+   * short settle: if another tab wrote in the same window, only one id survives
+   * and the other keeps waiting. The lease expires, so a tab that died holding
+   * it cannot block the others for longer than a refresh may take.
+   */
+  async function withLease<T>(fn: () => Promise<T>): Promise<T> {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const ttl = timeoutMs + 5000;
+    for (;;) {
+      const held = readLease(await opts.storage.getItem(REFRESH_LEASE));
+      if (!held || held.exp <= Date.now()) {
+        await opts.storage.setItem(REFRESH_LEASE, JSON.stringify({ id, exp: Date.now() + ttl }));
+        await sleep(LEASE_SETTLE_MS);
+        if (readLease(await opts.storage.getItem(REFRESH_LEASE))?.id === id) break;
+      }
+      await sleep(LEASE_POLL_MS + Math.random() * LEASE_POLL_MS);
+    }
+    try {
+      return await fn();
+    } finally {
+      try {
+        if (readLease(await opts.storage.getItem(REFRESH_LEASE))?.id === id) {
+          await opts.storage.removeItem(REFRESH_LEASE);
+        }
+      } catch {
+        /* it expires on its own */
+      }
+    }
+  }
+
   /**
    * Run `fn` while no other tab (or client on the same storage) refreshes.
    *
    * The server treats a second use of one refresh token as a replay and burns the
    * whole token family, so two tabs refreshing with the same token log both out.
    * Web Locks serialise across tabs where the browser offers them (secure
-   * contexts); otherwise refreshes of clients sharing one storage object are
-   * chained in this realm, and the re-read below narrows the cross-tab window.
+   * contexts). Without them a lease in the shared storage does the same; the
+   * in-page chain only orders clients of one page ahead of it.
    */
   function exclusive<T>(fn: () => Promise<T>): Promise<T> {
     const locks = (globalThis as { navigator?: { locks?: { request<R>(n: string, cb: () => Promise<R>): Promise<R> } } })
       .navigator?.locks;
     if (locks?.request) return locks.request(REFRESH_LOCK, fn);
     const prev = chains.get(opts.storage) ?? Promise.resolve();
-    const run = prev.then(fn, fn);
+    const run = prev.then(() => withLease(fn), () => withLease(fn));
     chains.set(opts.storage, run.catch(() => undefined));
     return run;
   }
@@ -229,13 +310,16 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
         const storedRefresh = await opts.storage.getItem(REFRESH_KEY);
         if (storedRefresh !== refreshToken) {
           const storedAccess = await opts.storage.getItem(ACCESS_KEY);
-          if (storedRefresh && storedAccess) {
+          const mine = tokenSubject(accessToken);
+          const theirs = tokenSubject(storedAccess);
+          if (storedRefresh && storedAccess && !(mine && theirs && mine !== theirs)) {
             accessToken = storedAccess;
             refreshToken = storedRefresh;
             return { access_token: storedAccess, refresh_token: storedRefresh };
           }
-          // Another tab ended the session (logout or a refused refresh).
-          throw new ApiError("invalid_token", "Session ended in another tab", 401);
+          // Another tab ended this session (logout, a refused refresh) or someone
+          // else signed in there: those tokens are not ours to adopt or clear.
+          throw new SessionEndedElsewhere(storedRefresh && storedAccess ? "replaced" : "gone");
         }
         const tokens = await timed(async (signal) =>
           parse<AuthTokens>(
@@ -250,6 +334,16 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
         await setTokens(tokens);
         return tokens;
       } catch (e) {
+        if (e instanceof SessionEndedElsewhere) {
+          accessToken = null;
+          refreshToken = null;
+          try {
+            opts.onSessionEndedElsewhere?.(e.endedBy);
+          } catch {
+            /* the app's hook must not replace the auth error */
+          }
+          throw e;
+        }
         // Only the server refusing the refresh token ends the session (401
         // invalid_token / token_expired). A network error, a timeout, a 5xx or a 429
         // during an outage says nothing about the token, and clearing it there logged
