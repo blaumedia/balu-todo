@@ -176,7 +176,8 @@ export interface SyncClient {
    * Stop for good: like `stop()`, and from now on the client never writes to
    * storage again (queue, token, replica, full-sync flag) and starts no new
    * network work. Work already in flight may still finish, but its results stay
-   * in memory. Use it when another user's data is about to be wiped or adopted.
+   * in memory. `mutate()` becomes a no-op (the edit is neither applied nor shown),
+   * and the rejected/relocated callbacks no longer fire. Use it when another user's data is about to be wiped or adopted.
    */
   close(): void;
   /**
@@ -619,6 +620,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
     if (needsFullSync) await pull();
     if (accessLost) return; // the recovery pull can discover the loss too
+    // Closed meanwhile (logout, another user): these notices belong to a session
+    // that is over and would show on the login screen or in the next user's.
+    if (closed) return;
     // Rejections first; a handler with a single message slot can show only one,
     // so apps that want both queue them (see apps/*/src/lib/clients.ts).
     if (rejected.length > 0) opts.onCommandsRejected?.(rejected);
@@ -689,7 +693,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     // The workspace is gone for this user: an edit could never be saved or sent,
     // so do not show it on screen either. A no-op (rather than a throw) keeps
     // every call site safe while the app moves away.
-    if (accessLost) return { uuid: uuid(), temp_id: tempId };
+    // A closed client is the same: it never writes again, so the edit would show
+    // as saved and be lost.
+    if (accessLost || closed) return { uuid: uuid(), temp_id: tempId };
     const args: Record<string, unknown> = { ...input.args };
     // Recurrence rolls forward from "today", and the optimistic apply uses the
     // *device's* calendar day. Stamping it here — rather than at each call site —

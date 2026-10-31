@@ -533,6 +533,46 @@ describe("outage recovery (contract §6.7)", () => {
       expect(g.writes).toEqual([]);
     });
 
+    it("a closed client does not apply an edit to the replica or the queue", () => {
+      const g = gated();
+      const c = track(createSyncClient(base({ fetch: g.fetchImpl, storage: g.storage })));
+      c.close();
+      c.mutate({ type: "task_add", args: { title: "x" } });
+      expect(c.getSnapshot().tasks).toEqual([]);
+      expect(c.getSnapshot().pending).toBe(0);
+    });
+
+    it("a client closed partway through a flush fires no rejected/relocated callbacks", async () => {
+      const server = makeServer({ relocate: () => ["project_deleted"] });
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let calls = 0;
+      const fetchImpl = (async (u: any, init: any) => {
+        calls += 1;
+        if (calls === 2) await gate;
+        return server.fetch(u, init);
+      }) as unknown as typeof fetch;
+      const onCommandsRelocated = vi.fn();
+      const onCommandsRejected = vi.fn();
+      const c = track(
+        createSyncClient(
+          base({ fetch: fetchImpl, maxBatch: 1, onCommandsRelocated, onCommandsRejected }),
+        ),
+      );
+      c.mutate({ type: "task_add", args: { title: "a" } });
+      c.mutate({ type: "task_add", args: { title: "b" } });
+      const p = c.flush();
+      await vi.waitFor(() => expect(calls).toBe(2));
+      c.close();
+      release();
+      await p;
+      await c.idle();
+      expect(onCommandsRelocated).not.toHaveBeenCalled();
+      expect(onCommandsRejected).not.toHaveBeenCalled();
+    });
+
     it("idle() also waits for a sync that was still hydrating when it was called", async () => {
       const g = gated();
       g.release();
