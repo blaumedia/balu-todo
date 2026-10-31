@@ -4,7 +4,12 @@ import { useApp } from "../store/app.js";
 import { Icon } from "../components/Icon.js";
 import { logout } from "../lib/logout.js";
 
-/** /me failed for a non-auth reason; lib/boot.ts keeps retrying and swaps this out once it answers. */
+/**
+ * Shown while lib/boot.ts keeps retrying: /me failed for a non-auth reason
+ * (`unreachable`), or answered with an account that has no workspace
+ * (`noWorkspace`). The loop swaps this out once /me answers usably; the logout
+ * button is the way out meanwhile.
+ */
 export function UnreachableView() {
   const locale = useApp((s) => s.locale);
   const noWorkspace = useApp((s) => s.boot === "noWorkspace");

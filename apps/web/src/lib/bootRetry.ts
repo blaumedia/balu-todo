@@ -20,6 +20,20 @@ export function wakeBootRetry(): void {
   wakeCurrent?.();
 }
 
+let epoch = 0;
+/** Counts logouts: a boot loop started under an older value belongs to a login that is gone. */
+export function bootEpoch(): number {
+  return epoch;
+}
+/**
+ * The user logged out: every boot loop in flight is over (it must stop at its next
+ * check, whatever its pending request answers) and one waiting on a retry wakes now.
+ */
+export function endBootAttempts(): void {
+  epoch += 1;
+  wakeBootRetry();
+}
+
 /**
  * Wait `ms`, or less if the browser reports it is back online or another tab
  * changed the stored login (so the boot loop notices a logout there).

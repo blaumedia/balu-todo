@@ -229,7 +229,7 @@ export const de: Record<TranslationKey, string> = {
   "boot.unreachableTitle": "Server nicht erreichbar - neuer Versuch läuft…",
   "boot.unreachableHint": "Du bleibst angemeldet. Balu öffnet sich, sobald der Server wieder antwortet.",
   "boot.noWorkspaceTitle": "Kein Arbeitsbereich gefunden - neuer Versuch läuft…",
-  "boot.noWorkspaceHint": "Dein Konto gehört noch zu keinem Arbeitsbereich. Du bleibst angemeldet; Balu versucht es erneut und legt bei Bedarf einen neuen an.",
+  "boot.noWorkspaceHint": "Dein Konto gehört noch zu keinem Arbeitsbereich. Du bleibst angemeldet und Balu fragt den Server weiter an. Unten kannst du dich abmelden.",
   "boot.logout": "Abmelden",
 
   "project.newProject": "Neues Projekt",

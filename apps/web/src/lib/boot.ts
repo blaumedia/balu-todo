@@ -5,6 +5,7 @@ import { makeT } from "../i18n/index.js";
 import {
   api,
   claimAccessLossNotice,
+  clearWorkspaceLossNotice,
   closeSync,
   getSyncWorkspaceId,
   initSync,
@@ -14,7 +15,7 @@ import {
   setSessionEndedElsewhereHandler,
   setSessionExpiredHandler,
 } from "./clients.js";
-import { bootRetryDelayMs, bootRetryWaitMs, waitForRetry } from "./bootRetry.js";
+import { bootEpoch, bootRetryDelayMs, bootRetryWaitMs, waitForRetry } from "./bootRetry.js";
 import { adoptLocalDataFor, OWNER_KEY, purgeLocalData } from "./localData.js";
 import { accessLostMessage } from "./syncNotices.js";
 import { lastWorkspaceId, useApp } from "../store/app.js";
@@ -139,6 +140,7 @@ type BootAttempt = "ready" | "login" | "unreachable" | "noWorkspace" | "gone" | 
 let lastRetryAfterMs: number | null = null;
 
 let bootLoop: Promise<boolean> | null = null;
+let bootLoopEpoch = 0;
 
 /**
  * Boot the app into a workspace: fetch `/me`, choose a workspace (preferred →
@@ -149,13 +151,17 @@ let bootLoop: Promise<boolean> | null = null;
  * retries with backoff until `/me` answers - the login was still valid, and
  * sending the user to the login form for a DB outage was the bug.
  * Resolves true once booted, false when it ended on the login screen. A call
- * while a retry loop runs joins that loop.
+ * while a retry loop runs joins that loop - unless a logout ended that loop (it
+ * belongs to a login that is gone), then it starts its own.
  */
 export function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
-  if (!bootLoop) {
-    bootLoop = runBootLoop(preferredWorkspaceId).finally(() => {
-      bootLoop = null;
+  if (!bootLoop || bootLoopEpoch !== bootEpoch()) {
+    const epoch = bootEpoch();
+    const run: Promise<boolean> = runBootLoop(preferredWorkspaceId, epoch).finally(() => {
+      if (bootLoop === run) bootLoop = null;
     });
+    bootLoop = run;
+    bootLoopEpoch = epoch;
   }
   return bootLoop;
 }
@@ -163,24 +169,37 @@ export function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
 /** Immediate re-asks of /me after another tab's sign-in, before backing off. */
 const FREE_REPLACED_RETRIES = 2;
 
-async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
+async function runBootLoop(preferredWorkspaceId: string | undefined, epoch: number): Promise<boolean> {
   let replaced = 0;
   let unreachable = 0;
+  // A logout since this loop started: whatever it is waiting on belongs to the old
+  // login, so it must neither touch the store nor purge what a new login stored.
+  const ended = (): boolean => epoch !== bootEpoch();
   for (;;) {
+    if (ended()) return false;
     // While retrying, another tab may have logged out. The access token this tab
     // holds stays valid on the server, so /me would boot the logged-out user.
     if (!loginStored()) {
       await loginGone();
       return false;
     }
+    const loginBefore = globalThis.localStorage?.getItem(REFRESH_KEY) ?? null;
     const outcome = await attemptBoot(preferredWorkspaceId);
+    if (ended()) return false;
     if (outcome === "gone") {
+      // Logged out and in again elsewhere while /me was in flight (a different
+      // login is stored now): boot as that login instead of purging it.
+      if (loginStored() && globalThis.localStorage?.getItem(REFRESH_KEY) !== loginBefore) {
+        await api.hydrate();
+        continue;
+      }
       await loginGone();
       return false;
     }
     if (outcome === "replaced") {
       // Another user signed in while /me was in flight: pick up their tokens, ask again.
       await api.hydrate();
+      if (ended()) return false;
       // A sign-in elsewhere settles within a round or two. If the stored token's
       // user and /me keep disagreeing (inconsistent storage), show the unreachable
       // screen and back off instead of calling /me in a tight loop with no screen.
@@ -189,12 +208,14 @@ async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
       if (replaced > FREE_REPLACED_RETRIES) {
         useApp.getState().setBoot("unreachable");
         await waitForRetry(bootRetryDelayMs(replaced - FREE_REPLACED_RETRIES - 1));
+        if (ended()) return false;
       }
       continue;
     }
     if (outcome !== "unreachable" && outcome !== "noWorkspace") return outcome === "ready";
     useApp.getState().setBoot(outcome);
     await waitForRetry(bootRetryWaitMs(unreachable, lastRetryAfterMs));
+    if (ended()) return false;
     unreachable += 1;
   }
 }
@@ -227,9 +248,10 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
     adoptLocalDataFor(me.user.id, closeSync);
     const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
-      // Valid tokens but no workspace (an account the old server left workspace-less;
-      // the server now sets one up on /me). Not a logout: showing the login form
-      // here looped the user back with no explanation. Say so and ask again.
+      // Valid tokens but no workspace. The server sets one up inside /me, so this
+      // means it could not (it answered for an account it cannot rescue). Not a
+      // logout: showing the login form here looped the user back with no
+      // explanation. Say so, keep asking with the usual backoff and offer the logout.
       lastRetryAfterMs = null;
       return "noWorkspace";
     }
@@ -256,10 +278,15 @@ export async function discardLostWorkspaces(liveIds: string[]): Promise<void> {
   const live = new Set(liveIds);
   const messages: string[] = [];
   for (const id of listStoredWorkspaceIds()) {
-    if (live.has(id)) continue;
-    const discarded = await purgeWorkspaceStorage(id);
+    if (live.has(id)) {
+      // Reachable again (re-invited before this boot): a notice an interrupted
+      // purge left for it would never be shown and would inflate a later loss.
+      await clearWorkspaceLossNotice(id);
+      continue;
+    }
+    const { discarded, reason } = await purgeWorkspaceStorage(id);
     if (discarded === 0 || !claimAccessLossNotice(id)) continue;
-    messages.push(accessLostMessage(makeT(useApp.getState().locale), "removed", discarded, null));
+    messages.push(accessLostMessage(makeT(useApp.getState().locale), reason, discarded, null));
   }
   if (messages.length > 0) {
     useApp.getState().showToast(messages.join(" "), { durationMs: ACCESS_LOST_TOAST_MS, tone: "error" });

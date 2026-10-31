@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
-import { composeTaskArgs, quickAddTarget, shouldNotifyInbox, wasSaved } from "../lib/quickadd.js";
+import { afterQuickAdd, composeTaskArgs, quickAddTarget } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { canWrite, useMyRole } from "../lib/role.js";
@@ -115,14 +115,12 @@ export function QuickAdd() {
       today,
     });
     const added = getSync()?.mutate({ type: "task_add", args });
+    const after = afterQuickAdd(added, target, args);
+    if (!after.clearInput) return; // dropped: keep the typed text, as mobile does
     setText("");
     persistDraft("");
     setQuickAdd(false);
-    // A dropped edit (access lost, client closed) was not saved: no success toast,
-    // which would also replace the notice that explains why.
-    if (wasSaved(added) && shouldNotifyInbox(target, args)) {
-      useApp.getState().showToast(t("quickadd.addedToInbox"));
-    }
+    if (after.notifyInbox) useApp.getState().showToast(t("quickadd.addedToInbox"));
   }
 
   if (!open) return null;

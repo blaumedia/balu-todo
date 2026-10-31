@@ -10,6 +10,8 @@ const fake = vi.hoisted(() => {
     expected: new Set<string>(),
     announced: new Set<string>(),
     purged: [] as string[],
+    cleared: [] as string[],
+    reasons: new Map<string, "removed" | "deleted">(),
     getMe: (async () => ({})) as () => Promise<any>,
     accessToken: null as string | null,
     loggedOut: 0,
@@ -40,7 +42,10 @@ vi.mock("../src/lib/clients.js", () => ({
   listStoredWorkspaceIds: () => fake.stored,
   purgeWorkspaceStorage: async (id: string) => {
     fake.purged.push(id);
-    return fake.discarded.get(id) ?? 0;
+    return { discarded: fake.discarded.get(id) ?? 0, reason: fake.reasons.get(id) ?? "removed" };
+  },
+  clearWorkspaceLossNotice: async (id: string) => {
+    fake.cleared.push(id);
   },
   claimAccessLossNotice: (id: string) => {
     if (fake.expected.has(id) || fake.announced.has(id)) return false;
@@ -68,6 +73,7 @@ import {
   onStorageEvent,
   reconcileSession,
 } from "../src/lib/boot.js";
+import { endBootAttempts } from "../src/lib/bootRetry.js";
 import { useApp } from "../src/store/app.js";
 
 const user = { id: "u1", name: "U", email: "u@x", locale: "en" } as any;
@@ -124,6 +130,8 @@ beforeEach(() => {
   fake.expected.clear();
   fake.announced.clear();
   fake.purged = [];
+  fake.cleared = [];
+  fake.reasons.clear();
   fake.getMe = async () => me("a", "b");
   useApp.setState({
     user,
@@ -205,6 +213,23 @@ describe("discardLostWorkspaces", () => {
     await discardLostWorkspaces(["a"]);
     expect(fake.purged).toEqual(["gone"]);
     expect(useApp.getState().toast).toBeNull();
+  });
+});
+
+describe("discardLostWorkspaces details (review f9966f34)", () => {
+  it("uses the recorded reason in the notice", async () => {
+    fake.stored = ["gone"];
+    fake.discarded.set("gone", 2);
+    fake.reasons.set("gone", "deleted");
+    await discardLostWorkspaces(["a"]);
+    expect(useApp.getState().toast).toContain("deleted");
+  });
+
+  it("drops a leftover loss notice of a workspace that is live again", async () => {
+    fake.stored = ["a", "gone"];
+    await discardLostWorkspaces(["a"]);
+    expect(fake.cleared).toEqual(["a"]);
+    expect(fake.purged).toEqual(["gone"]);
   });
 });
 
@@ -550,5 +575,48 @@ describe("Retry-After on the boot retry (what-if 7)", () => {
     expect(calls).toBe(1);
     await vi.advanceTimersByTimeAsync(5100);
     expect(calls).toBe(2);
+  });
+});
+
+describe("logout while a boot attempt is in flight (review f9966f34)", () => {
+  it("ends that loop; a later login starts its own and is not purged", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    fake.getMe = async () => {
+      if (++calls === 1) {
+        await gate;
+        throw new ApiError("signed_out", "Signed out", 401);
+      }
+      return me("a");
+    };
+    useApp.setState({ boot: "loading" } as any);
+    const first = bootSession();
+    // The user logs out (no owner key was ever written), then signs in again.
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    endBootAttempts();
+    globalThis.localStorage.setItem("balu:auth:refresh", "r2");
+    fake.accessToken = "tok";
+    const second = bootSession();
+    release();
+    expect(await first).toBe(false);
+    expect(await second).toBe(true);
+    expect(globalThis.localStorage.getItem("balu:auth:refresh")).toBe("r2");
+    expect(useApp.getState().boot).toBe("ready");
+  });
+
+  it("an unreachable answer arriving after the logout does not show the unreachable screen", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      throw new TypeError("network down");
+    };
+    useApp.setState({ boot: "login" } as any);
+    const run = bootSession();
+    endBootAttempts();
+    release();
+    expect(await run).toBe(false);
+    expect(useApp.getState().boot).toBe("login");
   });
 });

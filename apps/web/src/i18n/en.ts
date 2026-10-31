@@ -226,7 +226,7 @@ export const en = {
   "boot.unreachableTitle": "Server unreachable - retrying…",
   "boot.unreachableHint": "You stay signed in. Balu opens as soon as the server answers again.",
   "boot.noWorkspaceTitle": "No workspace found - retrying…",
-  "boot.noWorkspaceHint": "Your account does not belong to a workspace yet. You stay signed in; Balu retries and sets one up if needed.",
+  "boot.noWorkspaceHint": "Your account does not belong to a workspace yet. You stay signed in and Balu keeps asking the server. You can sign out below.",
   "boot.logout": "Log out",
 
   "project.newProject": "New project",

@@ -1,6 +1,6 @@
 import { useApp } from "../store/app.js";
 import { api, closeSync } from "./clients.js";
-import { wakeBootRetry } from "./bootRetry.js";
+import { endBootAttempts } from "./bootRetry.js";
 import { OWNER_KEY, purgeLocalData } from "./localData.js";
 
 /** The one logout path: stop syncing, revoke server-side, wipe local state. */
@@ -27,7 +27,9 @@ export async function logout(): Promise<void> {
   // screen. Shell unmounts with `reset()`, so useUrlSync's effect never runs to
   // rewrite it - do it here. replaceState, not assign(): no new history entry.
   globalThis.history?.replaceState(null, "", "/");
-  // A boot retry loop waiting on an unreachable server must notice at once.
-  wakeBootRetry();
+  // A boot loop in flight (waiting on an unreachable server, or on a /me or refresh
+  // that has not answered) must stop for good, so a later login neither joins it nor
+  // gets purged by it.
+  endBootAttempts();
   await revoked;
 }

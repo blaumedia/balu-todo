@@ -1,10 +1,12 @@
 import { createApiClient, type ApiClient } from "@balu/api-client";
 import {
+  clearLossNotice,
   createSyncClient,
   localStorageKV,
   purgeWorkspaceData,
   workspaceStorageKeys,
   type AccessLost,
+  type PurgedWorkspace,
   type SyncClient,
 } from "@balu/sync-client";
 import { makeT } from "../i18n/index.js";
@@ -97,9 +99,14 @@ export function setAccessLostHandler(handler: (info: AccessLost) => void): void 
   accessLostHandler = handler;
 }
 
-/** Delete one workspace's replica/queue/token; returns the discarded queue length. */
-export function purgeWorkspaceStorage(workspaceId: string): Promise<number> {
+/** Delete one workspace's replica/queue/token; returns the discarded queue length and why it was lost. */
+export function purgeWorkspaceStorage(workspaceId: string): Promise<PurgedWorkspace> {
   return purgeWorkspaceData(kv, workspaceId);
+}
+
+/** Drop a loss notice left for a workspace that is reachable again. */
+export function clearWorkspaceLossNotice(workspaceId: string): Promise<void> {
+  return clearLossNotice(kv, workspaceId);
 }
 
 let sync: SyncClient | null = null;
