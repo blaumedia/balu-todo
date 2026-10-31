@@ -37,10 +37,6 @@ export function dayMonth(iso: IsoDate, locale: Locale): string {
   return new Intl.DateTimeFormat(localeTag(locale), { day: "numeric", month: "short", timeZone: "UTC" }).format(dateAtNoon(iso));
 }
 
-export function monthLong(iso: IsoDate, locale: Locale): string {
-  return new Intl.DateTimeFormat(localeTag(locale), { month: "long", year: "numeric", timeZone: "UTC" }).format(dateAtNoon(iso));
-}
-
 const NAMES: DateNames = { weekdayShort, dayMonth };
 
 /** Human, calm relative label for a date (DESIGN §6). */

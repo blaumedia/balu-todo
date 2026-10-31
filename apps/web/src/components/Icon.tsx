@@ -12,6 +12,7 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Circle,
+  CircleAlert,
   CircleCheck,
   Clock,
   Copy,
@@ -56,6 +57,7 @@ import type { CSSProperties } from "react";
 // Lucide is the single icon system (DESIGN §6). We reference glyphs by the
 // kebab names used across the design system and inherit currentColor + size.
 const ICONS: Record<string, LucideIcon> = {
+  "alert-circle": CircleAlert,
   "align-left": AlignLeft,
   archive: Archive,
   "archive-restore": ArchiveRestore,

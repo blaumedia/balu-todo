@@ -1,7 +1,7 @@
 import type { Project } from "@balu/domain";
 import { parseQuickAdd } from "@balu/nl-parser";
 import { describe, expect, it } from "vitest";
-import { composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
+import { archivedViewProjectId, composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
 
 function project(over: Partial<Project>): Project {
   return {
@@ -100,5 +100,27 @@ describe("quickAddTarget + composeTaskArgs", () => {
 
   it("lets a #project token win", () => {
     expect(run("Buy milk #Work")["project_id"]).toBe("W1");
+  });
+});
+
+describe("archivedViewProjectId", () => {
+  const archived = project({ archived_at: "2026-07-02T00:00:00Z" });
+  it("returns the id of an archived project", () => {
+    expect(archivedViewProjectId(view("P1"), [archived], {})).toBe("P1");
+  });
+  it("returns null for a live project", () => {
+    expect(archivedViewProjectId(view("P1"), [project({})], {})).toBeNull();
+  });
+  it("returns null for an archived and deleted project", () => {
+    expect(archivedViewProjectId(view("P1"), [{ ...archived, is_deleted: true }], {})).toBeNull();
+  });
+  it("returns null for a missing project", () => {
+    expect(archivedViewProjectId(view("gone"), [archived], {})).toBeNull();
+  });
+  it("returns null for a list view", () => {
+    expect(archivedViewProjectId({ kind: "list", list: "today" }, [archived], {})).toBeNull();
+  });
+  it("follows a temp id alias", () => {
+    expect(archivedViewProjectId(view("tmp-a"), [archived], { "tmp-a": "P1" })).toBe("P1");
   });
 });

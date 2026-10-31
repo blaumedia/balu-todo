@@ -10,6 +10,7 @@ export const api: ApiClient = createApiClient({ baseUrl: "/api/v1", storage: kv 
 
 let sync: SyncClient | null = null;
 let syncWorkspaceId: string | null = null;
+let unsubToast: () => void = () => {};
 
 /**
  * (Re)instantiate the sync client for a workspace. The sync-client persists its
@@ -18,6 +19,7 @@ let syncWorkspaceId: string | null = null;
  * fresh one hydrates from that workspace's own keys.
  */
 export function initSync(workspaceId: string, userId: string): SyncClient {
+  unsubToast();
   sync?.stop();
   syncWorkspaceId = workspaceId;
   sync = createSyncClient({
@@ -36,7 +38,10 @@ export function initSync(workspaceId: string, userId: string): SyncClient {
       showToast(makeT(locale)("sync.rejected").replace("{n}", String(rejected.length)));
     },
   });
+  // Toast staleness follows the replica (e.g. a project unarchived elsewhere).
+  unsubToast = sync.subscribe(() => useApp.getState().revalidateToast());
   sync.start();
+  useApp.getState().revalidateToast();
   return sync;
 }
 
@@ -49,7 +54,10 @@ export function getSyncWorkspaceId(): string | null {
 }
 
 export function teardownSync(): void {
+  unsubToast();
+  unsubToast = () => {};
   sync?.stop();
   sync = null;
   syncWorkspaceId = null;
+  useApp.getState().revalidateToast();
 }

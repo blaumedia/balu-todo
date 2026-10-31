@@ -52,7 +52,7 @@
   --text-primary: #0F172A;
   --text-secondary: #475569;
   --text-tertiary: #94A3B8;
-  --accent: #0284C7;          /* balu-600 — AA on white */
+  --accent: #0284C7;          /* balu-600 - 4.1:1 on white: large text/UI only */
   --accent-hover: #0369A1;    /* balu-700 */
   --accent-wash: #F0F9FF;     /* balu-50 — selected-row wash */
   --accent-hover-wash: #E0F2FE; /* balu-100 */
