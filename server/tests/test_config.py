@@ -47,3 +47,9 @@ def test_cors_defaults_to_same_origin():
     assert Settings.model_construct(
         cors_origins="https://a.example, https://b.example"
     ).cors_origin_list == ["https://a.example", "https://b.example"]
+
+
+def test_engine_hides_sql_parameters():
+    from balu.db import get_engine
+
+    assert get_engine().hide_parameters is True

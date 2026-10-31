@@ -16,6 +16,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..attachments import remove_blob
@@ -76,8 +77,15 @@ class Ctx:
     temp_map: dict[str, str]  # in-request + persisted temp_id resolution cache
     events: list[Event] = field(default_factory=list)  # fire-and-forget, dispatched post-commit
 
+    # Memoised: process_commands bumps before the handler runs, so the workspace
+    # row lock is taken before any other lock or lookup; the handler's own call
+    # then returns the same version (one bump per command).
+    _version: int | None = field(default=None, init=False, repr=False)
+
     def bump(self) -> int:
-        return bump_version(self.session, self.workspace_id)
+        if self._version is None:
+            self._version = bump_version(self.session, self.workspace_id)
+        return self._version
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +98,27 @@ def _as_uuid(value: Any) -> uuid.UUID:
         return uuid.UUID(str(value))
     except (ValueError, AttributeError, TypeError) as exc:
         raise CommandError("not_found", f"unknown reference: {value!r}") from exc
+
+
+_INT32_MAX = 2**31 - 1
+_INT32_MIN = -(2**31)
+
+
+def _sort_order(value: Any) -> int:
+    """Parse a client sort_order into what the Integer column can hold.
+
+    Out of range used to reach Postgres as a DataError, whose logged text carried
+    the bound parameters (task titles and notes). It is clamped instead of rejected:
+    the clients append with max + 1000 without a cap, so once a container sits at
+    the int32 maximum every offline add would otherwise be thrown away.
+    """
+    # The clients only send JSON numbers. bool is an int subclass, floats would be
+    # truncated and strings are not sent, so all of those are rejected.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise CommandError("invalid_args", "sort_order must be an integer")
+    if isinstance(value, float) and not value.is_integer():  # also inf and NaN
+        raise CommandError("invalid_args", "sort_order must be an integer")
+    return max(_INT32_MIN, min(int(value), _INT32_MAX))
 
 
 def _require_str(args: dict, key: str, max_length: int = MAX_NAME) -> str:
@@ -181,7 +210,9 @@ def _max_sort_order(ctx: Ctx, model, **filters) -> int:
         stmt = stmt.where(col.is_(None) if value is None else col == value)
     stmt = stmt.where(model.is_deleted.is_(False))
     highest = ctx.session.execute(stmt).scalar()
-    return (highest or 0) + 1000
+    # Capped so an automatic sort order (a relocated offline add included) stays
+    # within the int32 column.
+    return min((highest or 0) + 1000, _INT32_MAX)
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +257,27 @@ def _get_attachment(ctx: Ctx, ref: Any) -> Attachment:
     obj = ctx.session.get(Attachment, _as_uuid(ref))
     if obj is None or obj.is_deleted or obj.workspace_id != ctx.workspace_id:
         raise CommandError("not_found", "attachment not found")
+    return obj
+
+
+# ---------------------------------------------------------------------------
+# Deleted-tolerant getter (task_add placement fallback only)
+# ---------------------------------------------------------------------------
+def _get_including_deleted[M: (Project, Section, Task)](
+    ctx: Ctx, model: type[M], ref: Any, what: str
+) -> M:
+    """Like the getters above, but a soft-deleted row is returned instead of raising.
+
+    Only for task_add's placement fallback (contract §5.5): every other caller must
+    keep treating a deleted object as not_found. Unknown ids and other workspaces
+    are still not_found.
+
+    Races with a concurrent project_delete are closed by the caller bumping the
+    workspace version before any lookup (process_commands takes the lock), not by a row lock here.
+    """
+    obj = ctx.session.get(model, _as_uuid(ref))
+    if obj is None or obj.workspace_id != ctx.workspace_id:
+        raise CommandError("not_found", f"{what} not found")
     return obj
 
 
@@ -323,7 +375,7 @@ def h_project_add(ctx: Ctx, args: dict) -> dict:
         workspace_id=ctx.workspace_id,
         name=name,
         color=color,
-        sort_order=int(sort_order),
+        sort_order=_sort_order(sort_order),
         version=version,
     )
     ctx.session.add(project)
@@ -337,7 +389,7 @@ def h_project_update(ctx: Ctx, args: dict) -> dict:
     if "color" in args:
         project.color = _validate_color(args.get("color"))
     if "sort_order" in args:
-        project.sort_order = int(args["sort_order"])
+        project.sort_order = _sort_order(args["sort_order"])
     if "archived_at" in args:
         project.archived_at = _parse_dt(args.get("archived_at"), "archived_at")
     project.version = ctx.bump()
@@ -430,7 +482,7 @@ def h_section_add(ctx: Ctx, args: dict) -> dict:
         workspace_id=ctx.workspace_id,
         project_id=project.id,
         name=name,
-        sort_order=int(sort_order),
+        sort_order=_sort_order(sort_order),
         version=version,
     )
     ctx.session.add(section)
@@ -442,7 +494,7 @@ def h_section_update(ctx: Ctx, args: dict) -> dict:
     if "name" in args:
         section.name = _require_str(args, "name")
     if "sort_order" in args:
-        section.sort_order = int(args["sort_order"])
+        section.sort_order = _sort_order(args["sort_order"])
     section.version = ctx.bump()
     return {}
 
@@ -463,17 +515,51 @@ def h_section_delete(ctx: Ctx, args: dict) -> dict:
 
 def h_task_add(ctx: Ctx, args: dict) -> dict:
     title = _require_str(args, "title", MAX_TITLE)
-    project_id = None
-    if args.get("project_id") is not None:
-        project_id = _get_project(ctx, args["project_id"]).id
-    section_id = None
-    if args.get("section_id") is not None:
-        section = _get_section(ctx, args["section_id"])
-        _check_section_in_project(section, project_id)
-        section_id = section.id
-    parent_task_id = _check_parent(ctx, args.get("parent_task_id"))
-
+    # process_commands has already taken the workspace lock (ctx.bump() is memoised),
+    # so every sync command is serialised against every other one. Under READ
+    # COMMITTED the lookups below see a committed delete, and a delete waiting on
+    # the lock sees our task in its cascade. Taking a project row lock before the
+    # bump would instead deadlock against project_delete and project_update.
     version = ctx.bump()
+    # An offline device can queue a task_add for a project, section or parent task a
+    # teammate deleted before it synced. Rejecting it would throw the typed task away
+    # (the client rolls back and full-syncs), so a deleted target is replaced by the
+    # nearest live container instead (contract §5.5). Only *deleted* targets qualify:
+    # unknown ids, other workspaces and I4 violations are still rejected (a
+    # `section_id` is not checked at all when the requested project is deleted).
+    relocated: list[str] = []
+
+    project_id = None
+    requested_project_id = None
+    if args.get("project_id") is not None:
+        project = _get_including_deleted(ctx, Project, args["project_id"], "project")
+        requested_project_id = project.id
+        if project.is_deleted:
+            relocated.append("project_deleted")
+        else:
+            project_id = project.id
+
+    section_id = None
+    project_deleted = "project_deleted" in relocated
+    if args.get("section_id") is not None and not project_deleted:
+        section = _get_including_deleted(ctx, Section, args["section_id"], "section")
+        _check_section_in_project(section, requested_project_id)  # raises with no project (I4)
+        if section.is_deleted:
+            relocated.append("section_deleted")
+        else:
+            section_id = section.id
+    # With the project deleted the task goes to the Inbox whatever the section is, so
+    # the section id is not looked up: it may be an unresolvable temp id whose
+    # section_add failed because of that same deleted project.
+
+    parent_task_id = None
+    if args.get("parent_task_id") is not None:
+        parent = _get_including_deleted(ctx, Task, args["parent_task_id"], "task")
+        if parent.is_deleted:
+            relocated.append("parent_deleted")
+        else:
+            parent_task_id = _check_parent(ctx, parent.id)
+
     task = Task(
         id=uuid.uuid4(),
         workspace_id=ctx.workspace_id,
@@ -487,7 +573,9 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     )
     _apply_task_fields(ctx, task, args)
     _record_assignment(ctx, task, previous=None)
-    sort_order = args.get("sort_order")
+    # The client computed sort_order for the container it asked for; appended to the
+    # one it actually lands in instead.
+    sort_order = None if relocated else args.get("sort_order")
     if sort_order is None:
         if parent_task_id is not None:
             sort_order = _max_sort_order(ctx, Task, parent_task_id=parent_task_id)
@@ -495,9 +583,12 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
             sort_order = _max_sort_order(
                 ctx, Task, project_id=project_id, section_id=section_id, parent_task_id=None
             )
-    task.sort_order = int(sort_order)
+    task.sort_order = _sort_order(sort_order)
     ctx.session.add(task)
-    return {"object_id": task.id}
+    result: dict = {"object_id": task.id}
+    if relocated:
+        result["relocated"] = relocated
+    return result
 
 
 def h_task_update(ctx: Ctx, args: dict) -> dict:
@@ -529,7 +620,7 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
         else:
             task.section_id = None
     if "sort_order" in args:
-        task.sort_order = int(args["sort_order"])
+        task.sort_order = _sort_order(args["sort_order"])
     task.version = ctx.bump()
     return {}
 
@@ -626,7 +717,7 @@ def h_task_reorder(ctx: Ctx, args: dict) -> dict:
         if not isinstance(item, dict) or "id" not in item or "sort_order" not in item:
             raise CommandError("invalid_args", "each item needs id and sort_order")
         task = _get_task(ctx, item["id"])
-        tasks.append((task, int(item["sort_order"])))
+        tasks.append((task, _sort_order(item["sort_order"])))
     version = ctx.bump()
     for task, sort_order in tasks:
         task.sort_order = sort_order
@@ -652,12 +743,15 @@ def h_label_add(ctx: Ctx, args: dict) -> dict:
     if _label_name_exists(ctx, name):
         raise CommandError("name_taken", "a label with that name already exists")
     version = ctx.bump()
+    sort_order = args.get("sort_order")
+    if sort_order is None:
+        sort_order = _max_sort_order(ctx, Label)
     label = Label(
         id=uuid.uuid4(),
         workspace_id=ctx.workspace_id,
         name=name,
         color=color,
-        sort_order=int(args.get("sort_order") or _max_sort_order(ctx, Label)),
+        sort_order=_sort_order(sort_order),
         version=version,
     )
     ctx.session.add(label)
@@ -674,7 +768,7 @@ def h_label_update(ctx: Ctx, args: dict) -> dict:
     if "color" in args:
         label.color = _validate_color(args.get("color"))
     if "sort_order" in args:
-        label.sort_order = int(args["sort_order"])
+        label.sort_order = _sort_order(args["sort_order"])
     label.version = ctx.bump()
     return {}
 
@@ -821,10 +915,15 @@ def process_commands(
     role: str,
     commands: list,
     event_sender: EventSender = send_to_channel,
+    relocated: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Apply commands in order, each in its own transaction.
 
     Returns (sync_status keyed by command uuid, temp_id_mapping).
+
+    When `relocated` is given, it is filled with `{command uuid: {"reasons": [...]}}`
+    for every task_add the server filed somewhere other than requested because its
+    target was deleted (contract §5.5); a replay reports the stored entry again.
     """
     sync_status: dict[str, Any] = {}
     temp_id_mapping: dict[str, str] = {}
@@ -857,6 +956,9 @@ def process_commands(
                 if stored_temp and stored_obj:
                     temp_map[stored_temp] = stored_obj
                     temp_id_mapping[stored_temp] = stored_obj
+                stored_relocated = existing.status_json.get("relocated")
+                if stored_relocated and relocated is not None:
+                    relocated[str(cmd_uuid)] = stored_relocated
                 continue
 
         handler = HANDLERS.get(command.type)
@@ -891,6 +993,10 @@ def process_commands(
                 role=role,
                 temp_map=temp_map,
             )
+            # Workspace lock first, before the handler reads or changes any row: a
+            # handler that flushed a row change or checked a parent before its own
+            # bump raced concurrent deletes and could deadlock against them.
+            ctx.bump()
             result = handler(ctx, resolved_args)
             status = "ok"
             if command.type in _ADD_COMMANDS and command.temp_id and result.get("object_id"):
@@ -908,6 +1014,9 @@ def process_commands(
             if object_id:
                 record["object_id"] = object_id
                 record["temp_id"] = command.temp_id
+            reasons = result.get("relocated")
+            if reasons:
+                record["relocated"] = {"reasons": list(reasons)}
             session.add(
                 SyncedCommand(
                     uuid=cmd_uuid_obj, workspace_id=workspace_id, status_json=record
@@ -915,6 +1024,14 @@ def process_commands(
             )
             session.commit()
             sync_status[str(cmd_uuid)] = status
+            if reasons:
+                if relocated is not None:
+                    relocated[str(cmd_uuid)] = record["relocated"]
+                logger.info(
+                    "command %s (%s) relocated in workspace %s (%s): task %s",
+                    cmd_uuid, command.type, workspace_id, ", ".join(reasons),
+                    result["object_id"],
+                )
             # Fire-and-forget: post-commit so rows are durable; never affects status.
             dispatch_events(sm, user_id, ctx.events, event_sender)
         except CommandError as exc:
@@ -922,14 +1039,22 @@ def process_commands(
             status = {"error_code": exc.code, "error": exc.message}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
-        except Exception:  # unexpected -> treat as invalid_args, keep going
+        except Exception as exc:  # unexpected -> treat as invalid_args, keep going
             session.rollback()
             # Never leak the driver/ORM message to the client: it carries table
             # names, constraint names and sometimes parameter values (S6).
-            logger.exception(
-                "command %s (%s) failed unexpectedly in workspace %s",
-                cmd_uuid, command.type, workspace_id,
-            )
+            # A StatementError's text can carry Postgres's "Failing row contains (...)"
+            # DETAIL, i.e. user content: log only its type.
+            if isinstance(exc, StatementError):
+                logger.error(
+                    "command %s (%s) failed unexpectedly in workspace %s: %s",
+                    cmd_uuid, command.type, workspace_id, type(exc).__name__,
+                )
+            else:
+                logger.exception(
+                    "command %s (%s) failed unexpectedly in workspace %s",
+                    cmd_uuid, command.type, workspace_id,
+                )
             status = {"error_code": "invalid_args", "error": "command could not be applied"}
             _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status

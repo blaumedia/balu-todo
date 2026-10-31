@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, StatementError
 
 from . import __version__
 from .config import get_settings
@@ -89,7 +90,57 @@ async def lifespan(app: FastAPI):
                 pass
 
 
+_INVITE_PATH = re.compile(r"(/invite/)[^/?#\s]+", re.IGNORECASE)
+
+
+class _RedactInviteTokens(logging.Filter):
+    """Blank the token in /invite/<token> request lines of the uvicorn access log.
+
+    The web invite link carries the token in the path and is served by the SPA
+    fallback, so the access log would otherwise store it in plain text.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _INVITE_PATH.sub(r"\1<redacted>", a) if isinstance(a, str) else a
+                for a in record.args
+            )
+        return True
+
+
+def _configure_app_logging() -> None:
+    """Give the `balu` logger tree INFO level and a stderr handler (idempotent).
+
+    Uvicorn only configures its own loggers, and the root logger defaults to WARNING,
+    so without this the app's info logs never surface.
+    """
+    app_logger = logging.getLogger("balu")
+    handler = next(
+        (h for h in app_logger.handlers if getattr(h, "_balu_app", False)), None
+    )
+    if handler is None:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(levelname)s:     %(name)s: %(message)s"))
+        handler._balu_app = True  # type: ignore[attr-defined]
+        app_logger.addHandler(handler)
+    app_logger.setLevel(logging.INFO)
+    # Migrations run in-process at boot; keep their "Running upgrade" lines visible.
+    # httpx logs "HTTP Request: POST https://api.telegram.org/bot<token>/..." at INFO;
+    # keep it (and httpcore) quiet even if a root handler is ever added.
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, _RedactInviteTokens) for f in access_logger.filters):
+        access_logger.addFilter(_RedactInviteTokens())
+    alembic_logger = logging.getLogger("alembic")
+    alembic_logger.setLevel(logging.INFO)
+    if handler not in alembic_logger.handlers:
+        alembic_logger.addHandler(handler)
+
+
 def create_app() -> FastAPI:
+    _configure_app_logging()
     settings = get_settings()
     app = FastAPI(title="Balu", version=__version__, lifespan=lifespan)
 
@@ -104,7 +155,7 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def _validation_handler(request: Request, exc: RequestValidationError):
         logger.info(
-            "validation error on %s: %s",
+            "validation error on %r: %s",
             request.url.path,
             _error_shape(exc),
         )
@@ -125,13 +176,26 @@ def create_app() -> FastAPI:
     @api.exception_handler(RequestValidationError)
     async def _api_validation_handler(request: Request, exc: RequestValidationError):
         logger.info(
-            "validation error on %s: %s",
+            "validation error on %r: %s",
             request.url.path,
             _error_shape(exc),
         )
         return JSONResponse(
             status_code=422,
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
+        )
+
+    @api.exception_handler(StatementError)
+    async def _db_error_handler(request: Request, exc: StatementError):
+        # Left to uvicorn, a StatementError is logged with its full traceback, and
+        # Postgres's DETAIL ("Failing row contains (...)") carries user content.
+        logger.error(
+            "database error on %s %r: %s",
+            request.method, request.url.path, type(exc).__name__,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": {"code": "internal_error", "message": "Internal server error"}},
         )
 
     api.include_router(auth_router.router)

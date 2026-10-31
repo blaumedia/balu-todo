@@ -17,7 +17,12 @@ from ..auth import get_current_user
 from ..db import get_db
 from ..errors import channel_unavailable, validation_error
 from ..models import User, UserChannel
-from ..notifications import ChannelUnavailable, send_to_channel, transport_available
+from ..notifications import (
+    ChannelUnavailable,
+    describe_failure,
+    send_to_channel,
+    transport_available,
+)
 from ..schemas.channel import ChannelIn, ChannelsIn, ChannelsResponse, ChannelTest
 from ..urlguard import UnsafeUrl, check_outbound_url
 
@@ -136,9 +141,11 @@ def test_channel(
         except Exception as exc:  # noqa: BLE001 - delivery failure -> channel_unavailable
             # Never surface the transport's exception text: it can carry internal
             # hostnames and doubles as an SSRF oracle (S3/S6).
+            # Nor may it reach the logs: httpx errors embed the request URL, which
+            # for Telegram contains the bot token.
             logger.warning(
-                "channel test delivery failed for user=%s type=%s", user.id, body.type,
-                exc_info=exc,
+                "channel test delivery failed for user=%s type=%s: %s",
+                user.id, body.type, describe_failure(exc),
             )
             raise channel_unavailable(f"{body.type} delivery failed") from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)

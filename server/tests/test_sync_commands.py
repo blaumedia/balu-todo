@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from tests.conftest import cmd, sync
 
 
@@ -526,3 +528,115 @@ def test_task_complete_ignores_an_implausible_client_day(client, user):
     task = next(t for t in r2["tasks"] if t["id"] == tid)
     # Clamped back to UTC today, so the next occurrence is simply tomorrow.
     assert task["start_date"] == (utc_today + timedelta(days=1)).isoformat()
+
+
+def test_sort_order_out_of_int32_range_is_clamped(client, user):
+    for n, (bad, expected) in enumerate(
+        ((3_000_000_000, 2**31 - 1), (-3_000_000_000, -(2**31)))
+    ):
+        add = cmd("task_add", temp_id=f"t{n}", title="Secret title", sort_order=bad)
+        body = sync(client, user, "*", [add])
+        assert body["sync_status"][add["uuid"]] == "ok"
+        task = next(t for t in body["tasks"] if t["id"] == body["temp_id_mapping"][f"t{n}"])
+        assert task["sort_order"] == expected
+
+
+def test_sort_order_at_int32_bounds_accepted(client, user):
+    add = cmd("task_add", temp_id="t", title="Edge", sort_order=2**31 - 1)
+    body = sync(client, user, "*", [add])
+    assert body["sync_status"][add["uuid"]] == "ok"
+
+
+def _sort_order_commands(ids: dict, bad):
+    return {
+        "project_add": cmd("project_add", temp_id="np", name="P", sort_order=bad),
+        "project_update": cmd("project_update", id=ids["p"], sort_order=bad),
+        "section_add": cmd(
+            "section_add", temp_id="ns", project_id=ids["p"], name="S", sort_order=bad
+        ),
+        "section_update": cmd("section_update", id=ids["s"], sort_order=bad),
+        "label_add": cmd("label_add", temp_id="nl", name="L2", sort_order=bad),
+        "label_update": cmd("label_update", id=ids["l"], sort_order=bad),
+        "task_add": cmd("task_add", temp_id="nt", title="T2", sort_order=bad),
+        "task_move": cmd("task_move", id=ids["t"], sort_order=bad),
+        "task_reorder": cmd("task_reorder", items=[{"id": ids["t"], "sort_order": bad}]),
+    }
+
+
+@pytest.mark.parametrize(
+    "bad,message",
+    [
+        (True, "must be an integer"),
+        (1.5, "must be an integer"),
+        ("12", "must be an integer"),
+    ],
+)
+def test_sort_order_is_validated_by_every_command_that_parses_it(client, user, bad, message):
+    setup = sync(client, user, "*", [
+        cmd("project_add", temp_id="p", name="P0"),
+        cmd("section_add", temp_id="s", project_id="p", name="S0"),
+        cmd("label_add", temp_id="l", name="L0"),
+        cmd("task_add", temp_id="t", title="T0"),
+    ])
+    ids = {k: setup["temp_id_mapping"][k] for k in ("p", "s", "l", "t")}
+    for name, command in _sort_order_commands(ids, bad).items():
+        body = sync(client, user, setup["sync_token"], [command])
+        status = body["sync_status"][command["uuid"]]
+        assert status["error_code"] == "invalid_args", name
+        assert message in status["error"], name
+
+
+# command -> (table in the payload, id key: an `ids` key for an update, the
+# add's temp_id for an add).
+_CLAMP_TARGETS = {
+    "project_add": ("projects", "np"), "project_update": ("projects", "p"),
+    "section_add": ("sections", "ns"), "section_update": ("sections", "s"),
+    "label_add": ("labels", "nl"), "label_update": ("labels", "l"),
+    "task_add": ("tasks", "nt"), "task_move": ("tasks", "t"), "task_reorder": ("tasks", "t"),
+}
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(3_000_000_000, 2**31 - 1), (-3_000_000_000, -(2**31))],
+)
+def test_sort_order_out_of_range_is_clamped_by_every_command(client, user, value, expected):
+    setup = sync(client, user, "*", [
+        cmd("project_add", temp_id="p", name="P0"),
+        cmd("section_add", temp_id="s", project_id="p", name="S0"),
+        cmd("label_add", temp_id="l", name="L0"),
+        cmd("task_add", temp_id="t", title="T0"),
+    ])
+    ids = {k: setup["temp_id_mapping"][k] for k in ("p", "s", "l", "t")}
+    token = setup["sync_token"]
+    for name, command in _sort_order_commands(ids, value).items():
+        body = sync(client, user, token, [command])
+        token = body["sync_token"]
+        assert body["sync_status"][command["uuid"]] == "ok", name
+        table, key = _CLAMP_TARGETS[name]
+        target = body["temp_id_mapping"].get(key) or ids[key]
+        row = next(r for r in body[table] if r["id"] == target)
+        assert row["sort_order"] == expected, name
+
+
+def test_label_add_keeps_an_explicit_zero_sort_order(client, user):
+    sync(client, user, "*", [cmd("label_add", temp_id="a", name="A", sort_order=5000)])
+    add = cmd("label_add", temp_id="b", name="B", sort_order=0)
+    body = sync(client, user, "*", [add])
+    label = next(x for x in body["labels"] if x["id"] == body["temp_id_mapping"]["b"])
+    assert label["sort_order"] == 0
+
+
+def test_whole_float_sort_order_is_accepted(client, user):
+    add = cmd("task_add", temp_id="t", title="Whole", sort_order=5.0)
+    assert sync(client, user, "*", [add])["sync_status"][add["uuid"]] == "ok"
+
+
+def test_computed_sort_order_is_capped_at_int32(client, user):
+    first = cmd("task_add", temp_id="a", title="Max", sort_order=2**31 - 1)
+    body = sync(client, user, "*", [first])
+    second = cmd("task_add", temp_id="b", title="After")
+    body = sync(client, user, body["sync_token"], [second])
+    assert body["sync_status"][second["uuid"]] == "ok"
+    task = next(t for t in body["tasks"] if t["id"] == body["temp_id_mapping"]["b"])
+    assert task["sort_order"] == 2**31 - 1

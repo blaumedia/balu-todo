@@ -21,7 +21,7 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`, `internal_error`.
   Error messages are for humans and never carry internal detail (driver messages,
   the submitted body, transport hostnames) — that goes to the server log.
 
@@ -145,7 +145,12 @@ Field semantics (these ARE the product decisions — implement precisely):
 - `priority`: `0` none, `1` = P1 (highest), `2` = P2, `3` = P3.
 - `sort_order`: integer ordering **within its container** (container = parent task if
   `parent_task_id` set, else (project, section) pair, else Inbox). Clients append with
-  `max + 1000`; reorders rewrite the affected set (§5.5 `task_reorder`).
+  `max + 1000`; reorders rewrite the affected set (§5.5 `task_reorder`). Must be a JSON
+  integer; whole-number floats (`2000.0`) are accepted, anything else (strings, booleans,
+  fractions) is `invalid_args`. This applies to every `sort_order` (projects, sections,
+  labels and tasks). A value outside the int32 range is clamped to the nearest bound (so
+  an append after `2147483647` is never lost), but clamped items then tie: their relative
+  order is unspecified, and clients should renumber the container.
 - Subtasks: one level only in v1 — server rejects a `parent_task_id` pointing at a task
   that itself has a parent (`invalid_args`).
 - `label_ids` order is not meaningful.
@@ -326,6 +331,7 @@ effects of those commands) are returned.
   "full_sync": false,
   "sync_status": {"9f1e…": "ok", "8c2d…": {"error_code": "not_found", "error": "…"}},
   "temp_id_mapping": {"tmp-a": "3d0f…"},
+  "relocated": {"7a3b…": {"reasons": ["project_deleted"]}},
   "projects": [...], "sections": [...], "tasks": [...], "labels": [...],
   "comments": [...], "attachments": [...], "members": [...]
 }
@@ -345,6 +351,14 @@ effects of those commands) are returned.
   id, so a repeat is a no-op), and never zero times. The reverse order - collecting rows
   before reading the counter - silently skips anything committing in between, forever,
   because the client persists the advanced token and only ever asks for versions above it.
+- **`relocated` (v1.5.1)**: present on every response, possibly `{}`, keyed by command
+  uuid. It lists the `task_add` commands the server accepted but filed somewhere other
+  than requested because their target was deleted (§5.5). `reasons` is an ordered subset
+  of `project_deleted`, `section_deleted`, `parent_deleted`. The command's `sync_status`
+  is still `"ok"`, its `temp_id_mapping` entry is returned as usual, and the task
+  arrives in `tasks` with its actual placement. Replaying the same uuid reports the same
+  entry. It is informational only: a client that ignores it still keeps the task, which
+  is the point.
 
 ### 5.3 `temp_id`
 
@@ -367,7 +381,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `section_add` | `temp_id`, `project_id`, `name`, `sort_order?` |
 | `section_update` | `id`, any of `name, sort_order` |
 | `section_delete` | `id` — its tasks move to the project body (section_id → null) |
-| `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. |
+| `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. If the target project, section or parent task was deleted meanwhile, the task is filed elsewhere instead of rejected (§5.5). |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
 | `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). |
 | `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) — see §3.3 for recurring behavior |
@@ -383,8 +397,9 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `attachment_delete` (v1.4) | `id` - soft-deletes the row and removes its blob; any role ≥ member. Uploading is REST (§3.7.1), so this is the only attachment command. |
 
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
-(id/temp_id unknown or deleted), `forbidden` (viewer role; or comment edit/delete by
-a non-author non-admin), `name_taken` (labels).
+(id/temp_id unknown or deleted - the one exception is a `task_add` whose project,
+section or parent was deleted, §5.5), `forbidden` (viewer role; or comment edit/delete
+by a non-author non-admin), `name_taken` (labels).
 
 Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
 comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.
@@ -400,8 +415,26 @@ whenever any command in a flush was rejected, then reports the failures to the a
 - Two clients patch different fields of one task → both patches survive (patch = only
   sent keys).
 - Two clients patch the same field → **last write wins** (server apply order).
-- Update/move/complete on a deleted object → `not_found`; the client drops the queued
-  command and reconciles from the pull.
+- Update/move/complete/comment on a deleted object → `not_found`; the client drops the queued command and reconciles from the pull. This includes a task soft-deleted by cascade (its project or parent was deleted): the server does **not** revive it, because that would undo a teammate's deliberate delete. A `task_move` *into* a deleted project or section is `not_found` too - the task still exists where it was, so nothing is lost.
+- **`task_add` into a deleted target is filed elsewhere, not rejected (v1.5.1).** An
+  offline device can queue a task for a project, section or parent task that a teammate
+  deletes before the device syncs; rejecting it would throw away what the user typed.
+  Instead: project deleted → Inbox (`project_id` and `section_id` null); project live
+  but section deleted → that project's body (`section_id` null), as `section_delete`
+  does; parent task deleted → a top-level task (`parent_task_id` null) placed by the same
+  two rules, so a subtask sent without `project_id` lands in the Inbox. The status is
+  `"ok"`, `temp_id_mapping` is returned, a client `sort_order` is ignored (the task is
+  appended, max + 1000, to its new container), and the command is listed in `relocated`
+  (§5.2). Only *deleted* targets qualify: an id unknown in this workspace (`not_found`),
+  a section of another project (`invalid_args`, I4, checked against the requested
+  project; not checked when the requested project itself is deleted, see below), a
+  *live* parent that is itself a subtask (`invalid_args`) and the viewer role
+  (`forbidden`) are still rejected. Archived projects are not deleted and are
+  unaffected. When the project is deleted the `section_id` is not looked up at all, so a
+  temp section id whose own `section_add` failed because of that deleted project does
+  not lose the task. Known limitation: a `parent_task_id` that cannot be resolved (for
+  example the temp id of a parent `task_add` that was rejected for another reason) is
+  still `not_found`.
 - Concurrent `task_move` + `task_complete` → both apply (orthogonal fields).
 - Reorder races: `task_reorder` is bulk LWW; a stale reorder may interleave orders —
   acceptable, next reorder heals it. No exotic merging in v1.

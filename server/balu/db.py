@@ -21,7 +21,16 @@ def get_engine():
     global _engine, _SessionLocal
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
+        _engine = create_engine(
+            settings.database_url,
+            pool_pre_ping=True,
+            future=True,
+            # Keep bound parameters (task titles, notes) out of SQLAlchemy's error
+            # text. Postgres's own DETAIL (e.g. "Failing row contains (...)") is not
+            # covered; handlers that log unexpected errors log only the type for
+            # StatementError (incl. DBAPIError).
+            hide_parameters=True,
+        )
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
     return _engine
 
