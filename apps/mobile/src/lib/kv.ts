@@ -74,4 +74,5 @@ export const SETTINGS = {
   session: 'balu:settings:session', // cached {user, workspace} for offline boot
   lastWorkspaceId: 'balu:settings:lastWorkspaceId', // boot preference (§7)
   remindersEnabled: 'balu:settings:remindersEnabled', // '1' | '0' — local reminders
+  knownWorkspaces: 'balu:settings:knownWorkspaces', // JSON string[]: workspaces with local sync data
 } as const;
