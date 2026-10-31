@@ -58,8 +58,8 @@ export function QuickAddSheet() {
   );
 
   const submit = (raw?: string) => {
-    // `raw` lets a caller submit text that state hasn't caught up with yet —
-    // the hardware-Return path below has the value before `setText` lands.
+    // `raw` is needed because applyChange has already cleared the ref on the
+    // hardware-Return path, so the ref no longer holds the text to submit.
     const trimmed = textToSubmit(raw, latestText).trim();
     if (!trimmed) return;
     // A hardware enter (BT keyboard, adb) fires onSubmitEditing twice on

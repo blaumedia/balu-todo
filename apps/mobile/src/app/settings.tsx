@@ -263,7 +263,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
-      <StackHeader title={t('settings.title')} />
+      <StackHeader title={t('settings.title')} backFallback="/today" />
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
