@@ -1,7 +1,7 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { type AccessibilityActionEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeOut } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
@@ -17,6 +17,9 @@ import { useTheme } from '../theme/ThemeProvider';
 import { duration, font, gutter, projectHex, radius, rowMin, space } from '../theme/tokens';
 import { Checkbox } from './Checkbox';
 import { Icon } from './Icon';
+
+/** Width (dp) of the left screen-edge strip left to the iOS back swipe. */
+const EDGE_BACK_ZONE = 24;
 
 export interface TaskRowProps {
   task: Task;
@@ -44,7 +47,19 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // gesture-handler cancels the row's Pressable - otherwise a sideways swipe
   // ends as a tap and opens the detail sheet. Vertical movement fails it, so
   // the list still scrolls. 10 px matches ReanimatedSwipeable's default drag offset.
-  const swipeGuard = useMemo(() => Gesture.Pan().activeOffsetX([-10, 10]).failOffsetY([-10, 10]), []);
+  //
+  // iOS back swipe: the native-stack back gesture is UIKit's edge-pan recognizer,
+  // which react-native-gesture-handler does not manage; RNGH only resolves
+  // relations between its own handlers and scroll views
+  // (RNGestureHandler.mm shouldRecognizeSimultaneously/RequireFailure), so UIKit's
+  // default (deepest view's recognizer first) would apply and this pan could win
+  // over the back swipe. That cannot be ruled out from source, so the guard
+  // ignores touches in the left edge zone (negative hitSlop shrinks its area).
+  // A sideways swipe that starts there is the back gesture, not a row swipe.
+  const swipeGuard = useMemo(
+    () => Gesture.Pan().hitSlop({ left: -EDGE_BACK_ZONE }).activeOffsetX([-10, 10]).failOffsetY([-10, 10]),
+    [],
+  );
 
   const completed = task.completed_at != null;
   const checked = completed || done;
@@ -72,6 +87,13 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     }
   };
 
+  // Swipes are unreachable with TalkBack/VoiceOver (they consume the gestures),
+  // so expose both swipe actions as accessibility actions.
+  const onAccessibilityAction = (e: AccessibilityActionEvent) => {
+    if (e.nativeEvent.actionName === 'complete') completeWithLinger();
+    else if (e.nativeEvent.actionName === 'schedule') openSchedule(task.id);
+  };
+
   // ── metadata chips ──
   const project = task.project_id ? projects.get(task.project_id) : undefined;
   const primaryDate = task.start_date ?? task.deadline;
@@ -87,6 +109,16 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
+      // Only rows with swipe actions: the same two actions as swipe right / left.
+      accessibilityActions={
+        swipeable && writable
+          ? [
+              { name: 'complete', label: t('row.complete') },
+              { name: 'schedule', label: t('schedule.title') },
+            ]
+          : undefined
+      }
+      onAccessibilityAction={swipeable && writable ? onAccessibilityAction : undefined}
       style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
       <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />

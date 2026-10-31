@@ -203,6 +203,7 @@ export const en = {
   'common.cancel': 'Cancel',
   'common.copy': 'Copy',
   'common.done': 'Done',
+  'row.complete': 'Complete',
   'common.delete': 'Delete',
   'common.save': 'Save',
 } as const;

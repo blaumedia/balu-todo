@@ -208,6 +208,7 @@ export const de: Record<TranslationKey, string> = {
   'common.cancel': 'Abbrechen',
   'common.copy': 'Kopieren',
   'common.done': 'Fertig',
+  'row.complete': 'Erledigen',
   'common.delete': 'Löschen',
   'common.save': 'Speichern',
 };
