@@ -1,8 +1,10 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
-import { useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeOut } from 'react-native-reanimated';
+import { useMemo, useRef, useState } from 'react';
+import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from 'expo-router';
+import Animated, { FadeOut, useSharedValue } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
   SwipeDirection,
   type SwipeableMethods,
@@ -10,12 +12,16 @@ import ReanimatedSwipeable, {
 import { completeTask, uncompleteTask } from '../lib/actions';
 import { relativeDate } from '../lib/format';
 import { hapticComplete } from '../lib/haptics';
+import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { duration, font, gutter, projectHex, radius, rowMin, space } from '../theme/tokens';
 import { Checkbox } from './Checkbox';
 import { Icon } from './Icon';
+
+/** Width (dp) of the left screen-edge strip left to the iOS back swipe. */
+const EDGE_BACK_ZONE = 24;
 
 export interface TaskRowProps {
   task: Task;
@@ -38,15 +44,73 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const openSchedule = useApp((s) => s.openSchedule);
   const swipeRef = useRef<SwipeableMethods>(null);
   const [done, setDone] = useState(false);
+  // Rows without swipe actions (viewers, list/search screens) still claim a
+  // horizontal pan. It does nothing itself, but when it activates
+  // gesture-handler cancels the row's Pressable - otherwise a sideways swipe
+  // ends as a tap and opens the detail sheet. Vertical movement fails it, so
+  // the list still scrolls. 10 px matches ReanimatedSwipeable's default drag offset.
+  //
+  // iOS back swipe: the native-stack back gesture is UIKit's edge-pan recognizer,
+  // which react-native-gesture-handler does not manage; RNGH only resolves
+  // relations between its own handlers and scroll views
+  // (RNGestureHandler.mm shouldRecognizeSimultaneously/RequireFailure), so UIKit's
+  // default (deepest view's recognizer first) would apply and this pan could win
+  // over the back swipe. That cannot be ruled out from source, so the guard
+  // ignores touches in the left edge zone (negative hitSlop shrinks its area).
+  // A sideways swipe that starts there is the back gesture, not a row swipe.
+  // Only on iOS and only where there is a screen to go back to: on Android and
+  // on tab roots the guard must keep covering the whole row. Tab navigators
+  // report canGoBack() (back goes to the first tab) but have no back swipe, so
+  // only a stack counts.
+  const navigation = useNavigation();
+  const edgeBack = Platform.OS === 'ios' && navigation.getState()?.type === 'stack' && navigation.canGoBack();
+  const swipeGuard = useMemo(() => {
+    const pan = Gesture.Pan();
+    if (edgeBack) pan.hitSlop({ left: -EDGE_BACK_ZONE });
+    return pan.activeOffsetX([-10, 10]).failOffsetY([-10, 10]);
+  }, [edgeBack]);
+  // Writer rows: ReanimatedSwipeable's own pan covers the whole row. A Manual
+  // gesture over the edge strip never activates (it fails when the finger
+  // lifts), and the swipeable requires it to fail first, so a drag that starts
+  // in the strip stays with the back swipe. Not the swipeable's hitSlop prop:
+  // that is a view-level slop and would also kill taps on the checkbox.
+  // It also fails as soon as the touch moves leftward or vertically (the back
+  // swipe is rightward only), so UIKit does not hold a swipeable activation
+  // until lift and replay it late. The callbacks must stay worklets (no
+  // runOnJS): GestureStateManager.fail() goes through Reanimated's
+  // setGestureState, which is a no-op with a warning on the JS thread. Worklets
+  // get a copy of captured variables, so the touch-down point lives in shared values.
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const edgeBlock = useMemo(
+    () =>
+      Gesture.Manual()
+        .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
+        .onTouchesDown((e) => {
+          startX.value = e.allTouches[0]?.x ?? 0;
+          startY.value = e.allTouches[0]?.y ?? 0;
+        })
+        .onTouchesMove((e, manager) => {
+          const touch = e.allTouches[0];
+          if (!touch) return;
+          if (touch.x - startX.value < -10 || Math.abs(touch.y - startY.value) > 10) manager.fail();
+        })
+        .onTouchesUp((_e, manager) => manager.fail())
+        .onTouchesCancelled((_e, manager) => manager.fail()),
+    [startX, startY],
+  );
 
   const completed = task.completed_at != null;
   const checked = completed || done;
 
   const completeWithLinger = () => {
     if (completed) {
+      setDone(false);
       uncompleteTask(task.id);
       return;
     }
+    // Checkbox and the accessibility action stay live during the linger: once only.
+    if (done) return;
     setDone(true);
     hapticComplete();
     // Row lingers ~600ms (DESIGN §5) before the mutation removes it from the list.
@@ -65,6 +129,12 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     }
   };
 
+  // Swipes are unreachable with TalkBack/VoiceOver (they consume the gestures),
+  // so expose both swipe actions as accessibility actions.
+  const onAccessibilityAction = (e: AccessibilityActionEvent) => {
+    dispatchRowAction(e.nativeEvent.actionName, { complete: completeWithLinger, schedule: () => openSchedule(task.id) });
+  };
+
   // ── metadata chips ──
   const project = task.project_id ? projects.get(task.project_id) : undefined;
   const primaryDate = task.start_date ?? task.deadline;
@@ -77,9 +147,17 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
   const hasComments = commentCount > 0;
 
+  // One computation drives both the listed actions and the handler, so they cannot diverge.
+  const a11yActions = rowAccessibilityActions(swipeable, writable, {
+    complete: t('row.complete'),
+    schedule: t('schedule.title'),
+  });
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
+      // Only rows with swipe actions: the same two actions as swipe right / left.
+      accessibilityActions={a11yActions}
+      onAccessibilityAction={a11yActions ? onAccessibilityAction : undefined}
       style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
       <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
@@ -150,33 +228,48 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
 
   if (!swipeable || !writable) {
     return (
-      <Animated.View exiting={FadeOut.duration(duration.medium)}>{content}</Animated.View>
+      <Animated.View exiting={FadeOut.duration(duration.medium)}>
+        <GestureDetector gesture={swipeGuard}>
+          <View collapsable={false}>{content}</View>
+        </GestureDetector>
+      </Animated.View>
     );
   }
 
+  const swipe = (
+    <ReanimatedSwipeable
+      ref={swipeRef}
+      requireExternalGestureToFail={edgeBack ? edgeBlock : undefined}
+      friction={2}
+      leftThreshold={56}
+      rightThreshold={56}
+      overshootLeft={false}
+      overshootRight={false}
+      onSwipeableOpen={onSwipeableOpen}
+      renderLeftActions={() => (
+        <View style={[styles.action, { backgroundColor: theme.success, alignItems: 'flex-start' }]}>
+          <Icon name="check" size={22} color="#fff" strokeWidth={2.5} />
+        </View>
+      )}
+      renderRightActions={() => (
+        <View style={[styles.action, { backgroundColor: theme.accent, alignItems: 'flex-end' }]}>
+          <Icon name="calendar" size={20} color={theme.onAccent} strokeWidth={2.2} />
+        </View>
+      )}
+    >
+      {content}
+    </ReanimatedSwipeable>
+  );
+
   return (
     <Animated.View exiting={FadeOut.duration(duration.medium)}>
-      <ReanimatedSwipeable
-        ref={swipeRef}
-        friction={2}
-        leftThreshold={56}
-        rightThreshold={56}
-        overshootLeft={false}
-        overshootRight={false}
-        onSwipeableOpen={onSwipeableOpen}
-        renderLeftActions={() => (
-          <View style={[styles.action, { backgroundColor: theme.success, alignItems: 'flex-start' }]}>
-            <Icon name="check" size={22} color="#fff" strokeWidth={2.5} />
-          </View>
-        )}
-        renderRightActions={() => (
-          <View style={[styles.action, { backgroundColor: theme.accent, alignItems: 'flex-end' }]}>
-            <Icon name="calendar" size={20} color={theme.onAccent} strokeWidth={2.2} />
-          </View>
-        )}
-      >
-        {content}
-      </ReanimatedSwipeable>
+      {edgeBack ? (
+        <GestureDetector gesture={edgeBlock}>
+          <View collapsable={false}>{swipe}</View>
+        </GestureDetector>
+      ) : (
+        swipe
+      )}
     </Animated.View>
   );
 }

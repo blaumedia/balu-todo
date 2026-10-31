@@ -103,11 +103,23 @@ function DetailBody({
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
 
+  // A role drop must not leave an unsaved draft behind: it would show as if
+  // kept and be committed by the next blur after a promotion back to writer.
+  useEffect(() => {
+    if (!writable) {
+      setTitle(task.title);
+      setNotes(task.notes);
+    }
+  }, [writable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A viewer must not write (the server rejects it).
   const commitTitle = () => {
+    if (!writable) return;
     const v = title.trim();
     if (v && v !== task.title) updateTask(task.id, { title: v });
   };
   const commitNotes = () => {
+    if (!writable) return;
     if (notes !== task.notes) updateTask(task.id, { notes });
   };
 
@@ -130,7 +142,7 @@ function DetailBody({
         />
       </View>
 
-      {/* Editable fields — inert for read-only viewers (server enforces too) */}
+      {/* Editable fields - inert for read-only viewers (server enforces too). pointerEvents blocks touch; each control is also disabled so TalkBack/VoiceOver do not offer it as actionable. */}
       <View pointerEvents={writable ? 'auto' : 'none'}>
       {/* Dates */}
       <DateField
@@ -138,18 +150,21 @@ function DetailBody({
         label={t('detail.startDate')}
         value={task.start_date}
         onChange={(v) => updateTask(task.id, v == null ? { start_date: null } : { start_date: v, someday: false })}
+        disabled={!writable}
       />
       <DateField
         icon="flag"
         label={t('detail.deadline')}
         value={task.deadline}
         onChange={(v) => updateTask(task.id, { deadline: v })}
+        disabled={!writable}
       />
 
       {/* Reminder — writes reminder_at (drives local notifications) */}
       <ReminderField
         value={task.reminder_at}
         onChange={(v) => updateTask(task.id, { reminder_at: v })}
+        disabled={!writable}
       />
 
       {/* Evening / Someday toggles */}
@@ -159,6 +174,7 @@ function DetailBody({
         value={task.evening}
         onValueChange={(v) => updateTask(task.id, { evening: v })}
         theme={theme}
+        disabled={!writable}
       />
       <ToggleRow
         icon="archive"
@@ -166,6 +182,7 @@ function DetailBody({
         value={task.someday}
         onValueChange={(v) => updateTask(task.id, v ? { someday: true, start_date: null } : { someday: false })}
         theme={theme}
+        disabled={!writable}
       />
 
       {/* Priority */}
@@ -180,6 +197,10 @@ function DetailBody({
               <Pressable
                 key={p}
                 onPress={() => updateTask(task.id, { priority: p })}
+                disabled={!writable}
+                accessibilityRole="button"
+                accessibilityLabel={`${t('detail.priority')} ${p === 0 ? t('detail.none') : `P${p}`}`}
+                accessibilityState={{ selected: active, disabled: !writable }}
                 style={[styles.segBtn, { borderColor: active ? color : theme.border, backgroundColor: active ? color + '22' : 'transparent' }]}
               >
                 <Text style={[styles.segText, { color: active ? color : theme.textTertiary }]}>
@@ -192,7 +213,13 @@ function DetailBody({
       </View>
 
       {/* Project move */}
-      <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowProjects((s) => !s)}>
+      <Pressable
+        style={[styles.row, { borderBottomColor: theme.border }]}
+        onPress={() => setShowProjects((s) => !s)}
+        disabled={!writable}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showProjects, disabled: !writable }}
+      >
         <Icon name="hash" size={20} color={theme.textTertiary} strokeWidth={2} />
         <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.project')}</Text>
         <View style={styles.value}>
@@ -204,6 +231,7 @@ function DetailBody({
       {showProjects ? (
         <View style={styles.subList}>
           <SubOption
+            disabled={!writable}
             label={t('detail.noProject')}
             active={task.project_id == null}
             onPress={() => {
@@ -217,6 +245,7 @@ function DetailBody({
             .filter((p) => !p.is_deleted && (p.archived_at == null || p.id === task.project_id))
             .map((p) => (
               <SubOption
+                disabled={!writable}
                 key={p.id}
                 label={p.archived_at != null ? `${p.name} ${t('project.archivedSuffix')}` : p.name}
                 dot={projectHex(p.color)}
@@ -234,7 +263,13 @@ function DetailBody({
       {/* Section move - within the current project only */}
       {sections.length > 0 ? (
         <>
-          <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowSections((s) => !s)}>
+          <Pressable
+            style={[styles.row, { borderBottomColor: theme.border }]}
+            onPress={() => setShowSections((s) => !s)}
+            disabled={!writable}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showSections, disabled: !writable }}
+          >
             <Icon name="layers" size={20} color={theme.textTertiary} strokeWidth={2} />
             <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.section')}</Text>
             <View style={styles.value}>
@@ -247,6 +282,7 @@ function DetailBody({
           {showSections ? (
             <View style={styles.subList}>
               <SubOption
+                disabled={!writable}
                 label={t('detail.noSection')}
                 active={task.section_id == null}
                 onPress={() => {
@@ -258,6 +294,7 @@ function DetailBody({
               />
               {sections.map((s) => (
                 <SubOption
+                  disabled={!writable}
                   key={s.id}
                   label={s.name}
                   active={task.section_id === s.id}
@@ -276,7 +313,13 @@ function DetailBody({
       {/* Assignee — only in shared workspaces (contract §4) */}
       {multiMember ? (
         <>
-          <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowAssignee((s) => !s)}>
+          <Pressable
+            style={[styles.row, { borderBottomColor: theme.border }]}
+            onPress={() => setShowAssignee((s) => !s)}
+            disabled={!writable}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showAssignee, disabled: !writable }}
+          >
             <Icon name="user" size={20} color={theme.textTertiary} strokeWidth={2} />
             <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.assignee')}</Text>
             <View style={styles.value}>
@@ -294,6 +337,7 @@ function DetailBody({
           {showAssignee ? (
             <View style={styles.subList}>
               <SubOption
+                disabled={!writable}
                 label={t('detail.unassigned')}
                 active={task.assigned_to == null}
                 onPress={() => {
@@ -304,6 +348,7 @@ function DetailBody({
               />
               {members.map((m) => (
                 <SubOption
+                  disabled={!writable}
                   key={m.id}
                   label={user && m.id === user.id ? t('detail.assigneeMe').replace('{name}', m.name) : m.name}
                   active={task.assigned_to === m.id}
@@ -320,7 +365,13 @@ function DetailBody({
       ) : null}
 
       {/* Recurrence */}
-      <Pressable style={[styles.row, { borderBottomColor: theme.border }]} onPress={() => setShowRecurrence((s) => !s)}>
+      <Pressable
+        style={[styles.row, { borderBottomColor: theme.border }]}
+        onPress={() => setShowRecurrence((s) => !s)}
+        disabled={!writable}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showRecurrence, disabled: !writable }}
+      >
         <Icon name="repeat" size={20} color={theme.textTertiary} strokeWidth={2} />
         <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.recurrence')}</Text>
         <View style={styles.value}>
@@ -334,6 +385,7 @@ function DetailBody({
         <View style={styles.subList}>
           {RECURRENCE_OPTIONS.map((o) => (
             <SubOption
+              disabled={!writable}
               key={o.label}
               label={o.value ?? t('detail.none')}
               active={(task.recurrence ?? null) === o.value}
@@ -364,6 +416,9 @@ function DetailBody({
                       const next = active ? task.label_ids.filter((x) => x !== l.id) : [...task.label_ids, l.id];
                       updateTask(task.id, { label_ids: next });
                     }}
+                    disabled={!writable}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: active, disabled: !writable }}
                     style={[styles.chip, { borderColor: active ? color : theme.border, backgroundColor: active ? color + '22' : 'transparent' }]}
                   >
                     <Text style={[styles.chipText, { color: active ? color : theme.textSecondary }]}>@{l.name}</Text>
@@ -426,12 +481,14 @@ function ToggleRow({
   value,
   onValueChange,
   theme,
+  disabled,
 }: {
   icon: 'sunset' | 'archive';
   label: string;
   value: boolean;
   onValueChange: (v: boolean) => void;
   theme: ReturnType<typeof useTheme>;
+  disabled: boolean;
 }) {
   return (
     <View style={[styles.row, { borderBottomColor: theme.border }]}>
@@ -441,6 +498,9 @@ function ToggleRow({
         style={styles.switch}
         value={value}
         onValueChange={onValueChange}
+        disabled={disabled}
+        accessibilityLabel={label}
+        accessibilityState={{ checked: value, disabled }}
         trackColor={{ true: theme.accent, false: theme.border }}
         thumbColor="#fff"
       />
@@ -657,15 +717,23 @@ function SubOption({
   active,
   onPress,
   theme,
+  disabled,
 }: {
   label: string;
   dot?: string;
   active: boolean;
   onPress: () => void;
   theme: ReturnType<typeof useTheme>;
+  disabled: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.subOpt, pressed && { backgroundColor: theme.accentWash }]}>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active, disabled }}
+      style={({ pressed }) => [styles.subOpt, pressed && { backgroundColor: theme.accentWash }]}
+    >
       {dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : <View style={styles.dotSpacer} />}
       <Text style={[styles.subText, { color: active ? theme.accent : theme.textPrimary }]} numberOfLines={1}>
         {label}

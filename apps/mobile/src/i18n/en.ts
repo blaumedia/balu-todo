@@ -92,6 +92,8 @@ export const en = {
   'priority.p2': 'P2',
   'priority.p3': 'P3',
 
+  'row.complete': 'Complete',
+
   'schedule.title': 'Schedule',
   'schedule.today': 'Today',
   'schedule.evening': 'This evening',
@@ -200,7 +202,9 @@ export const en = {
   'date.yesterday': 'Yesterday',
   'date.overdue': 'Overdue',
 
+  'common.back': 'Back',
   'common.cancel': 'Cancel',
+  'common.ok': 'OK',
   'common.copy': 'Copy',
   'common.done': 'Done',
   'common.delete': 'Delete',
