@@ -1,8 +1,9 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeOut } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
   SwipeDirection,
   type SwipeableMethods,
@@ -38,6 +39,12 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const openSchedule = useApp((s) => s.openSchedule);
   const swipeRef = useRef<SwipeableMethods>(null);
   const [done, setDone] = useState(false);
+  // Rows without swipe actions (viewers, list/search screens) still claim a
+  // horizontal pan. It does nothing itself, but when it activates
+  // gesture-handler cancels the row's Pressable - otherwise a sideways swipe
+  // ends as a tap and opens the detail sheet. Vertical movement fails it, so
+  // the list still scrolls. 10 px matches ReanimatedSwipeable's default drag offset.
+  const swipeGuard = useMemo(() => Gesture.Pan().activeOffsetX([-10, 10]).failOffsetY([-10, 10]), []);
 
   const completed = task.completed_at != null;
   const checked = completed || done;
@@ -150,7 +157,11 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
 
   if (!swipeable || !writable) {
     return (
-      <Animated.View exiting={FadeOut.duration(duration.medium)}>{content}</Animated.View>
+      <Animated.View exiting={FadeOut.duration(duration.medium)}>
+        <GestureDetector gesture={swipeGuard}>
+          <View collapsable={false}>{content}</View>
+        </GestureDetector>
+      </Animated.View>
     );
   }
 
