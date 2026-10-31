@@ -31,6 +31,15 @@ export interface ApiClientOptions {
   /** Give up on a JSON request (including a token refresh) after this long. Attachment upload/download are exempt. Default 30 000. */
   requestTimeoutMs?: number;
   /**
+   * Give up on the `/auth/refresh` request after this long. Default 90 000, longer
+   * than `requestTimeoutMs` on purpose: the server rotates the token when it
+   * commits, not when it answers, and a client that gave up on a slow refresh
+   * would present the already-rotated token next time - which the server treats
+   * as a replay and answers by revoking the whole session. The cross-tab lease
+   * lasts this long plus 5 s.
+   */
+  refreshTimeoutMs?: number;
+  /**
    * Called once when the server refuses the refresh token (401 from
    * `/auth/refresh`), right after the stored tokens were cleared: the session is
    * over and the app should show its login screen. Never called for a network
@@ -189,6 +198,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? "/api/v1";
   const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const timeoutMs = opts.requestTimeoutMs ?? 30_000;
+  const refreshTimeoutMs = opts.refreshTimeoutMs ?? 90_000;
 
   function timed<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
     return withTimeout(timeoutMs, run, () => new ApiError("timeout", "Request timed out", 0));
@@ -295,7 +305,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
    */
   async function withLease<T>(fn: (stillHeld: () => Promise<boolean>) => Promise<T>): Promise<T> {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const ttl = timeoutMs + 5000;
+    const ttl = refreshTimeoutMs + 5000;
     const mine = (lease: { id: string; exp: number } | null): boolean => lease?.id === id;
     const stillHeld = async (): Promise<boolean> => {
       const lease = readLease(await opts.storage.getItem(REFRESH_LEASE));
@@ -409,15 +419,18 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
           // else signed in there: those tokens are not ours to adopt or clear.
           throw new SessionEndedElsewhere(storedRefresh && storedAccess ? "replaced" : "gone");
         }
-        const tokens = await timed(async (signal) =>
-          parse<AuthTokens>(
-            await fetchImpl(url("/auth/refresh"), {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ refresh_token: refreshToken }),
-              signal,
-            }),
-          ),
+        const tokens = await withTimeout(
+          refreshTimeoutMs,
+          async (signal) =>
+            parse<AuthTokens>(
+              await fetchImpl(url("/auth/refresh"), {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+                signal,
+              }),
+            ),
+          () => new ApiError("timeout", "Request timed out", 0),
         );
         if (sessionGen !== startedGen) throw new ApiError("signed_out", "Signed out", 401);
         if (!(await setTokens(tokens))) throw new ApiError("signed_out", "Signed out", 401);
@@ -525,10 +538,16 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
       // starts meanwhile fails at once instead of racing the revocation into a
       // real 401. The server revokes the whole token family on logout, so posting
       // the pre-rotation token is enough.
+      // The stored tokens go before the request, not after it: the post can take
+      // the whole timeout during an outage, and a tab closed meanwhile would
+      // otherwise reopen signed in. Callers that purge local data can start this
+      // and purge before awaiting it (clearTokens removes the first key
+      // synchronously).
       sessionGen++;
       const token = refreshToken;
       accessToken = null;
       refreshToken = null;
+      await clearTokens();
       if (token) {
         try {
           await post<void>("/auth/logout", { refresh_token: token });
@@ -536,7 +555,6 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
           /* best-effort */
         }
       }
-      await clearTokens();
     },
 
     getMe: () => authed<MeResponse>("/me", { method: "GET" }),

@@ -320,6 +320,55 @@ describe("auth", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("logout removes the stored tokens before the post finishes", async () => {
+    const inner = memoryKV();
+    let releasePost!: () => void;
+    const postGate = new Promise<void>((r) => (releasePost = r));
+    const fetchImpl = (async (u: any) => {
+      if (String(u).endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      await postGate;
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage: inner, fetch: fetchImpl });
+    await c.login({ email: "d@example.com", password: "pw" });
+    const out = c.logout();
+    await new Promise((r) => setTimeout(r, 0)); // the post is pending (an outage)
+    expect(await inner.getItem("balu:auth:access")).toBeNull();
+    expect(await inner.getItem("balu:auth:refresh")).toBeNull();
+    releasePost();
+    await out;
+  });
+
+  it("a refresh slower than the request timeout still completes (own, longer timeout)", async () => {
+    const storage = memoryKV();
+    const fetchImpl = (async (u: any) => {
+      const path = String(u);
+      if (path.endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      if (path.endsWith("/auth/refresh")) {
+        await new Promise((r) => setTimeout(r, 60));
+        return json({ access_token: "a2", refresh_token: "r2" });
+      }
+      return json({ user: USER, memberships: [] });
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl, requestTimeoutMs: 20, refreshTimeoutMs: 500 });
+    await c.login({ email: "d@example.com", password: "pw" });
+    await expect(c.refresh()).resolves.toMatchObject({ refresh_token: "r2" });
+    expect(await storage.getItem("balu:auth:refresh")).toBe("r2");
+  });
+
+  it("a refresh past its own timeout gives up and keeps the tokens", async () => {
+    const storage = memoryKV();
+    const fetchImpl = (async (u: any) => {
+      const path = String(u);
+      if (path.endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      return new Promise<Response>(() => {});
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl, refreshTimeoutMs: 30 });
+    await c.login({ email: "d@example.com", password: "pw" });
+    await expect(c.refresh()).rejects.toMatchObject({ code: "timeout" });
+    expect(await storage.getItem("balu:auth:refresh")).toBe("r1");
+  });
+
   it("a network error during refresh keeps the tokens", async () => {
     const spy = vi.fn();
     const { c, storage, fetchImpl } = await expiredSession(
