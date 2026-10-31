@@ -16,10 +16,10 @@ function memoryKV(): AsyncKV {
   };
 }
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...headers },
   });
 }
 
@@ -367,6 +367,19 @@ describe("auth", () => {
     await c.login({ email: "d@example.com", password: "pw" });
     await expect(c.refresh()).rejects.toMatchObject({ code: "timeout" });
     expect(await storage.getItem("balu:auth:refresh")).toBe("r1");
+  });
+
+  it("carries a 503's Retry-After on the error", async () => {
+    const mk = (value: string | null) =>
+      createApiClient({
+        storage: memoryKV(),
+        fetch: (async () =>
+          json({ detail: { code: "unavailable", message: "db" } }, 503, value ? { "retry-after": value } : {})) as unknown as typeof fetch,
+      });
+    await expect(mk("7").getMe()).rejects.toMatchObject({ status: 503, retryAfterMs: 7000 });
+    await expect(mk(null).getMe()).rejects.toMatchObject({ retryAfterMs: null });
+    await expect(mk("soon").getMe()).rejects.toMatchObject({ retryAfterMs: null });
+    await expect(mk("99999").getMe()).rejects.toMatchObject({ retryAfterMs: 300_000 });
   });
 
   it("a network error during refresh keeps the tokens", async () => {

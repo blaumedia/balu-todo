@@ -69,10 +69,23 @@ export class ApiError extends Error {
     readonly code: string,
     message: string,
     readonly status: number,
+    /** The server's `Retry-After` in ms (clamped to 5 min), when it sent a usable one. */
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+const RETRY_AFTER_CAP_MS = 300_000;
+
+/** `Retry-After` as ms: delta-seconds or an HTTP date; null when absent or unusable. */
+function parseRetryAfter(res: Response): number | null {
+  const raw = res.headers?.get("retry-after")?.trim();
+  if (!raw) return null;
+  const secs = /^\d+$/.test(raw) ? Number(raw) : (Date.parse(raw) - Date.now()) / 1000;
+  if (!Number.isFinite(secs) || secs < 0) return null;
+  return Math.min(secs * 1000, RETRY_AFTER_CAP_MS);
 }
 
 /** Internal: the lease was lost between taking it and using it; take it again. */
@@ -259,7 +272,12 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     } catch {
       /* not the envelope; fall back to the status text */
     }
-    return new ApiError(detail.code ?? "error", detail.message ?? res.statusText, res.status);
+    return new ApiError(
+      detail.code ?? "error",
+      detail.message ?? res.statusText,
+      res.status,
+      parseRetryAfter(res),
+    );
   }
 
   async function parse<T>(res: Response): Promise<T> {
