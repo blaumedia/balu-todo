@@ -1,12 +1,56 @@
 import { createApiClient, type ApiClient } from "@balu/api-client";
-import { createSyncClient, localStorageKV, type SyncClient } from "@balu/sync-client";
+import {
+  createSyncClient,
+  localStorageKV,
+  purgeWorkspaceData,
+  type AccessLost,
+  type SyncClient,
+} from "@balu/sync-client";
 import { makeT } from "../i18n/index.js";
 import { useApp } from "../store/app.js";
+import { relocatedMessage } from "./syncNotices.js";
 
 // One localStorage KV shared by both clients (structurally identical interfaces).
 const kv = localStorageKV();
 
 export const api: ApiClient = createApiClient({ baseUrl: "/api/v1", storage: kv });
+
+const RELOCATED_TOAST_MS = 5000;
+
+// Workspaces whose loss the app caused itself (delete, leave): the sync client's
+// 403/404 for them must not tell the user what they just did.
+const expectedLoss = new Set<string>();
+// Losses already announced this session, so the live path (sync client) and the
+// boot path (/me without the last-used workspace) never both report one.
+const announcedLoss = new Set<string>();
+
+export function expectAccessLoss(workspaceId: string): void {
+  expectedLoss.add(workspaceId);
+}
+export function clearExpectedAccessLoss(workspaceId: string): void {
+  expectedLoss.delete(workspaceId);
+}
+export function isAccessLossExpected(workspaceId: string): boolean {
+  return expectedLoss.has(workspaceId);
+}
+/** True when the user should be told about losing `workspaceId`; marks it told. */
+export function claimAccessLossNotice(workspaceId: string): boolean {
+  if (expectedLoss.has(workspaceId) || announcedLoss.has(workspaceId)) return false;
+  announcedLoss.add(workspaceId);
+  return true;
+}
+
+let accessLostHandler: ((info: AccessLost) => void) | null = null;
+/** Registered by lib/boot.ts, which owns the recovery. A hook rather than an
+ *  import because boot.ts imports this module. */
+export function setAccessLostHandler(handler: (info: AccessLost) => void): void {
+  accessLostHandler = handler;
+}
+
+/** Delete one workspace's replica/queue/token; returns the discarded queue length. */
+export function purgeWorkspaceStorage(workspaceId: string): Promise<number> {
+  return purgeWorkspaceData(kv, workspaceId);
+}
 
 let sync: SyncClient | null = null;
 let syncWorkspaceId: string | null = null;
@@ -19,6 +63,9 @@ let syncWorkspaceId: string | null = null;
  */
 export function initSync(workspaceId: string, userId: string): SyncClient {
   sync?.stop();
+  // Landing in a workspace again (re-invite) resets its loss bookkeeping.
+  expectedLoss.delete(workspaceId);
+  announcedLoss.delete(workspaceId);
   syncWorkspaceId = workspaceId;
   sync = createSyncClient({
     baseUrl: "/api/v1",
@@ -35,6 +82,12 @@ export function initSync(workspaceId: string, userId: string): SyncClient {
       const { locale, showToast } = useApp.getState();
       showToast(makeT(locale)("sync.rejected").replace("{n}", String(rejected.length)));
     },
+    onCommandsRelocated: (relocated) => {
+      const { locale, showToast } = useApp.getState();
+      const message = relocatedMessage(makeT(locale), relocated);
+      if (message) showToast(message, RELOCATED_TOAST_MS);
+    },
+    onAccessLost: (info) => accessLostHandler?.(info),
   });
   sync.start();
   return sync;

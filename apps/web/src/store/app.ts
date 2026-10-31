@@ -47,7 +47,7 @@ export interface AppState {
 
   // ambient toast (contract §7 accept flow, copy confirmations)
   toast: string | null;
-  showToast(message: string): void;
+  showToast(message: string, durationMs?: number): void;
 
   setBoot(b: Boot): void;
   setSession(user: User, memberships: Membership[], workspace: Workspace): void;
@@ -85,11 +85,11 @@ export const useApp = create<AppState>((set, get) => ({
   focusedIndex: -1,
 
   toast: null,
-  showToast: (message) => {
+  showToast: (message, durationMs = 2600) => {
     set({ toast: message });
     globalThis.setTimeout(() => {
       if (get().toast === message) set({ toast: null });
-    }, 2600);
+    }, durationMs);
   },
 
   setBoot: (boot) => set({ boot }),
