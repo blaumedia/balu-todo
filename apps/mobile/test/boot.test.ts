@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // boot.ts owns the recovery from a lost workspace; the sync wiring, sqlite and
 // the React Native modules are replaced by fakes so the flows run in node.
@@ -22,6 +22,7 @@ const fake = vi.hoisted(() => ({
   canDismiss: false,
   inited: [] as string[],
   events: [] as string[],
+  logoutGate: null as Promise<void> | null,
 }));
 
 const fakeApi = {
@@ -30,6 +31,9 @@ const fakeApi = {
   isAuthenticated: () => fake.authed,
   logout: async () => {
     fake.logouts += 1;
+    fake.events.push('post start');
+    await fake.logoutGate;
+    fake.events.push('post done');
   },
 };
 
@@ -139,6 +143,7 @@ beforeEach(() => {
   fake.canDismiss = false;
   fake.inited = [];
   fake.events = [];
+  fake.logoutGate = null;
   fake.getMe = async () => me('a', 'b');
   useApp.setState({
     user,
@@ -299,7 +304,7 @@ describe('establishSession foreign data', () => {
 describe('logout', () => {
   it('lets the closed sync clients settle before the user data is purged', async () => {
     await logout();
-    expect(fake.events).toEqual(['settle:start', 'settle:end', 'purge']);
+    expect(fake.events).toEqual(['settle:start', 'settle:end', 'post start', 'purge', 'post done']);
     expect(fake.logouts).toBe(1);
   });
 
@@ -324,5 +329,66 @@ describe('logout', () => {
     await expect(logout()).rejects.toThrow('sqlite');
     expect(useApp.getState().boot).toBe('onboarding');
     expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+});
+
+describe('logout during an outage (what-if 3)', () => {
+  it('purges and leaves the screen before the revoke request has finished', async () => {
+    let release!: () => void;
+    fake.logoutGate = new Promise<void>((r) => (release = r));
+    fake.canDismiss = true;
+    const out = logout();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fake.events).toContain('purge');
+    expect(fake.events).not.toContain('post done');
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    release();
+    await out;
+    expect(fake.events.indexOf('purge')).toBeLessThan(fake.events.indexOf('post done'));
+  });
+});
+
+describe('accounts without a workspace (what-if 6)', () => {
+  beforeEach(() => {
+    fake.kv.set('serverUrl', 'https://x');
+    useApp.setState({ boot: 'loading', loginNotice: null, workspace: null, user: null } as any);
+  });
+
+  it('asks /me once more and boots when the server set a workspace up', async () => {
+    let calls = 0;
+    fake.getMe = async () => (++calls === 1 ? me() : me('a'));
+    await bootApp();
+    expect(calls).toBe(2);
+    expect(useApp.getState().boot).toBe('ready');
+    expect(fake.alerts).toHaveLength(0);
+  });
+
+  it('explains itself instead of showing the login step silently', async () => {
+    fake.getMe = async () => me();
+    await bootApp();
+    expect(fake.alerts).toHaveLength(1);
+    expect(fake.alerts[0]![0]).toBe('No workspace found');
+    expect(useApp.getState().boot).toBe('onboarding');
+  });
+});
+
+describe('landing outside a lost workspace while /me fails (what-if 11)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('keeps retrying instead of dropping a signed-in user on onboarding', async () => {
+    vi.useFakeTimers();
+    useApp.setState({ memberships: [mem('lost')] } as any); // offline boot: nothing else known
+    let calls = 0;
+    fake.getMe = async () => {
+      if (++calls <= 3) throw new TypeError('503 blip');
+      return me('a');
+    };
+    const moving = moveOffLostWorkspace('lost');
+    await vi.advanceTimersByTimeAsync(60_000);
+    await moving;
+    expect(calls).toBe(4);
+    expect(open()).toBe('a');
+    expect(useApp.getState().boot).not.toBe('onboarding');
   });
 });
