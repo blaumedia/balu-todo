@@ -12,23 +12,52 @@ const fake = vi.hoisted(() => ({
   kv: new Map<string, string>(),
   alerts: [] as Array<[string, string]>,
   getMe: (async () => ({})) as () => Promise<any>,
+  authed: true,
+  logouts: 0,
+  teardowns: 0,
+  remindersStopped: 0,
+  purgeCalls: [] as unknown[],
+  nav: [] as string[],
+  canDismiss: false,
+  inited: [] as string[],
 }));
+
+const fakeApi = {
+  getMe: () => fake.getMe(),
+  hydrate: async () => {},
+  isAuthenticated: () => fake.authed,
+  logout: async () => {
+    fake.logouts += 1;
+  },
+};
 
 vi.mock('react-native', () => ({
   Alert: { alert: (title: string, body: string) => fake.alerts.push([title, body]) },
 }));
-vi.mock('expo-router', () => ({ router: { canDismiss: () => false, dismissAll: () => {} } }));
+vi.mock('expo-router', () => ({
+  router: {
+    canDismiss: () => fake.canDismiss,
+    dismissAll: () => void fake.nav.push('dismissAll'),
+    replace: (to: string) => void fake.nav.push(`replace:${to}`),
+  },
+}));
 vi.mock('../src/lib/notifications', () => ({
   getReminderPermissionGranted: async () => false,
   startReminderScheduler: () => {},
-  stopReminderScheduler: () => {},
+  stopReminderScheduler: () => {
+    fake.remindersStopped += 1;
+  },
 }));
 vi.mock('../src/lib/kv', () => ({
   SETTINGS: {
+    serverUrl: 'serverUrl',
+    theme: 'theme',
+    locale: 'locale',
+    remindersEnabled: 'remindersEnabled',
     lastWorkspaceId: 'last',
     session: 'session',
   },
-  purgeUserData: async () => {},
+  purgeUserData: async (opts: unknown) => void fake.purgeCalls.push(opts),
   sqliteKV: {
     getItem: async (k: string) => fake.kv.get(k) ?? null,
     setItem: async (k: string, v: string) => void fake.kv.set(k, v),
@@ -36,13 +65,16 @@ vi.mock('../src/lib/kv', () => ({
   },
 }));
 vi.mock('../src/lib/clients', () => ({
-  getApi: () => ({ getMe: () => fake.getMe() }),
+  getApi: () => fakeApi,
   getSync: () => null,
-  initApi: () => null,
+  initApi: () => fakeApi,
   initSync: (_url: string, id: string) => {
     fake.open = id;
+    fake.inited.push(id);
   },
-  teardownSync: () => {},
+  teardownSync: () => {
+    fake.teardowns += 1;
+  },
   listKnownWorkspaceIds: async () => fake.known,
   purgeWorkspaceStorage: async (id: string) => {
     fake.purged.push(id);
@@ -57,7 +89,15 @@ vi.mock('../src/lib/clients', () => ({
   setSessionExpiredHandler: () => {},
 }));
 
-import { discardLostWorkspaces, handleAccessLost, moveOffLostWorkspace } from '../src/lib/boot';
+import { ApiError } from '@balu/api-client';
+import {
+  bootApp,
+  discardLostWorkspaces,
+  establishSession,
+  expireSession,
+  handleAccessLost,
+  moveOffLostWorkspace,
+} from '../src/lib/boot';
 import { useApp } from '../src/store/app';
 
 const user = { id: 'u1', name: 'U', email: 'u@x', locale: 'en' } as any;
@@ -75,6 +115,14 @@ beforeEach(() => {
   fake.purged = [];
   fake.kv.clear();
   fake.alerts = [];
+  fake.authed = true;
+  fake.logouts = 0;
+  fake.teardowns = 0;
+  fake.remindersStopped = 0;
+  fake.purgeCalls = [];
+  fake.nav = [];
+  fake.canDismiss = false;
+  fake.inited = [];
   fake.getMe = async () => me('a', 'b');
   useApp.setState({
     user,
@@ -133,5 +181,83 @@ describe('discardLostWorkspaces', () => {
     expect(fake.alerts[0]![1]).toContain('5 unsynced change(s)');
     await discardLostWorkspaces(['a', 'b']);
     expect(fake.alerts).toHaveLength(1);
+  });
+});
+
+describe('expireSession', () => {
+  it('while ready: stops sync, shows the notice and navigates to onboarding', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    fake.canDismiss = true;
+    await expireSession();
+    const st = useApp.getState();
+    expect(fake.remindersStopped).toBe(1);
+    expect(fake.teardowns).toBe(1);
+    expect(fake.logouts).toBe(1);
+    expect(st.boot).toBe('onboarding');
+    expect(st.loginNotice).toBe('sessionExpired');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('during boot: no navigation, the index gate redirects on its own', async () => {
+    useApp.setState({ boot: 'loading' } as any);
+    await expireSession();
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(useApp.getState().loginNotice).toBe('sessionExpired');
+    expect(fake.nav).toEqual([]);
+  });
+});
+
+describe('bootApp', () => {
+  const cached = JSON.stringify({ user, workspace: ws('a') });
+  beforeEach(() => {
+    fake.kv.set('serverUrl', 'https://x');
+    fake.kv.set('session', cached);
+    useApp.setState({ boot: 'loading', loginNotice: null, workspace: null, user: null } as any);
+  });
+
+  it('a 401 from /me expires the session instead of booting the cached one', async () => {
+    fake.getMe = async () => {
+      throw new ApiError('invalid_token', 'x', 401);
+    };
+    await bootApp();
+    const st = useApp.getState();
+    expect(st.boot).toBe('onboarding');
+    expect(st.loginNotice).toBe('sessionExpired');
+    expect(fake.inited).toEqual([]);
+    expect(st.user).toBeNull();
+  });
+
+  it('a network failure still boots the cached session offline', async () => {
+    fake.getMe = async () => {
+      throw new TypeError('network');
+    };
+    await bootApp();
+    const st = useApp.getState();
+    expect(st.boot).toBe('ready');
+    expect(st.workspace?.id).toBe('a');
+    expect(fake.inited).toEqual(['a']);
+    expect(st.loginNotice).toBeNull();
+  });
+});
+
+describe('establishSession foreign data', () => {
+  const api = fakeApi as any;
+
+  it("purges another account's local data (keeping the new tokens) before using it", async () => {
+    fake.kv.set('session', JSON.stringify({ user: { id: 'someone-else' }, workspace: ws('x') }));
+    fake.getMe = async () => me('a');
+    expect(await establishSession('https://x', api)).toBe(true);
+    expect(fake.purgeCalls).toEqual([{ keepAuth: true }]);
+    expect(fake.remindersStopped).toBe(1);
+    expect(fake.teardowns).toBe(1);
+    expect(fake.inited).toEqual(['a']);
+  });
+
+  it("keeps the same user's data", async () => {
+    fake.kv.set('session', JSON.stringify({ user, workspace: ws('x') }));
+    fake.getMe = async () => me('a');
+    await establishSession('https://x', api);
+    expect(fake.purgeCalls).toEqual([]);
+    expect(fake.teardowns).toBe(0);
   });
 });
