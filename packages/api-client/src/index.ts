@@ -48,8 +48,8 @@ export interface ApiClientOptions {
    * Accepted residual risks: (1) the aborted first request is not cancelled
    * server-side; if it is only processed after the second one rotated the token,
    * more than 60 s after that rotation, the server sees a replay and burns the
-   * session the client just refreshed. (2) Both attempts can lose their answer, and the
-   * successor is then only recoverable inside the grace window.
+   * session the client just refreshed. (2) Both attempts can lose their
+   * answer, and the successor is then only recoverable inside the grace window.
    */
   refreshTimeoutMs?: number;
   /**

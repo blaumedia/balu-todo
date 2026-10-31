@@ -312,7 +312,6 @@ describe("batch size recovery", () => {
     for (let i = 0; i < 400; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
     c.start();
     await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 5_000 });
-    expect(sizes.some((n) => n > 25)).toBe(true);
     // After the first timeout a size above 25 comes back only after 5 passes at the cap.
     expect(sizes.slice(0, 11)).toEqual([40, 20, 30, 15, 20, 20, 20, 20, 20, 30, 15]);
     for (let i = 1; i < sizes.length; i++) expect(sizes[i]! > 25 && sizes[i - 1]! > 25).toBe(false);
