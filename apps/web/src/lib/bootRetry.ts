@@ -6,6 +6,21 @@ export function bootRetryDelayMs(attempt: number): number {
 }
 
 /**
+ * How long to wait before boot retry `attempt`: the backoff with +-20% jitter, so
+ * clients that failed together do not return together, and never less than the
+ * server's Retry-After.
+ */
+export function bootRetryWaitMs(attempt: number, retryAfterMs: number | null = null): number {
+  return Math.max(bootRetryDelayMs(attempt) * (0.8 + Math.random() * 0.4), retryAfterMs ?? 0);
+}
+
+let wakeCurrent: (() => void) | null = null;
+/** End a running `waitForRetry` now (the user logged out while the screen was waiting). */
+export function wakeBootRetry(): void {
+  wakeCurrent?.();
+}
+
+/**
  * Wait `ms`, or less if the browser reports it is back online or another tab
  * changed the stored login (so the boot loop notices a logout there).
  */
@@ -16,12 +31,14 @@ export function waitForRetry(ms: number): Promise<void> {
       if (key === null || key === REFRESH_KEY) done();
     };
     const done = (): void => {
+      if (wakeCurrent === done) wakeCurrent = null;
       clearTimeout(timer);
       globalThis.removeEventListener?.("online", done);
       globalThis.removeEventListener?.("storage", onStorage);
       resolve();
     };
     const timer = setTimeout(done, ms);
+    wakeCurrent = done;
     globalThis.addEventListener?.("online", done);
     globalThis.addEventListener?.("storage", onStorage);
   });

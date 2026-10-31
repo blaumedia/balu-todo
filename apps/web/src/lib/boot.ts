@@ -13,9 +13,8 @@ import {
   setAccessLostHandler,
   setSessionEndedElsewhereHandler,
   setSessionExpiredHandler,
-  teardownSync,
 } from "./clients.js";
-import { bootRetryDelayMs, waitForRetry } from "./bootRetry.js";
+import { bootRetryDelayMs, bootRetryWaitMs, waitForRetry } from "./bootRetry.js";
 import { adoptLocalDataFor, OWNER_KEY, purgeLocalData } from "./localData.js";
 import { accessLostMessage } from "./syncNotices.js";
 import { lastWorkspaceId, useApp } from "../store/app.js";
@@ -27,12 +26,24 @@ import { lastWorkspaceId, useApp } from "../store/app.js";
  * Idempotent: the api-client hook and bootSession's 401 branch can both call it.
  */
 export async function expireSession(wasReady = useApp.getState().boot === "ready"): Promise<void> {
-  teardownSync();
+  // Closed, not just stopped: a pull still in flight has a valid access token and
+  // would persist its replica after another tab's logout purged the data - with
+  // no owner key, for the next user of this workspace to adopt. Nothing is lost:
+  // edits are stored when they are made.
+  closeSync();
   // Tokens are already cleared after a refused refresh; this removes a stale
   // access token left without a refresh token. No network call when the
   // refresh token is gone.
   await api.logout().catch(() => {});
   const st = useApp.getState();
+  // A running tab with no owner key left: the user logged out in another tab
+  // (logout removes the key first). That is a logout, not an expiry - wipe, no notice.
+  if (wasReady && !globalThis.localStorage?.getItem(OWNER_KEY)) {
+    purgeLocalData();
+    st.reset();
+    globalThis.history?.replaceState(null, "", "/");
+    return;
+  }
   st.reset();
   st.setLoginNotice("sessionExpired");
   // As in logout(): the address bar must not keep ids of a session that ended.
@@ -122,7 +133,10 @@ export function onStorageEvent(e: { key: string | null }): void {
 }
 globalThis.addEventListener?.("storage", (e) => onStorageEvent(e as StorageEvent));
 
-type BootAttempt = "ready" | "login" | "unreachable" | "gone" | "replaced";
+type BootAttempt = "ready" | "login" | "unreachable" | "noWorkspace" | "gone" | "replaced";
+
+/** The `Retry-After` of the /me failure that made the last attempt "unreachable". */
+let lastRetryAfterMs: number | null = null;
 
 let bootLoop: Promise<boolean> | null = null;
 
@@ -178,9 +192,9 @@ async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
       }
       continue;
     }
-    if (outcome !== "unreachable") return outcome === "ready";
-    useApp.getState().setBoot("unreachable");
-    await waitForRetry(bootRetryDelayMs(unreachable));
+    if (outcome !== "unreachable" && outcome !== "noWorkspace") return outcome === "ready";
+    useApp.getState().setBoot(outcome);
+    await waitForRetry(bootRetryWaitMs(unreachable, lastRetryAfterMs));
     unreachable += 1;
   }
 }
@@ -196,6 +210,7 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
     }
     // Logged out while /me was in flight: not an outage, nothing to retry.
     if (e instanceof ApiError && e.code === "signed_out") return "gone";
+    lastRetryAfterMs = e instanceof ApiError ? e.retryAfterMs : null;
     return "unreachable";
   }
   // Logged out in another tab while /me was in flight: the answer was for a login
@@ -212,8 +227,11 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
     adoptLocalDataFor(me.user.id, closeSync);
     const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
-      st.setBoot("login");
-      return "login";
+      // Valid tokens but no workspace (an account the old server left workspace-less;
+      // the server now sets one up on /me). Not a logout: showing the login form
+      // here looped the user back with no explanation. Say so and ask again.
+      lastRetryAfterMs = null;
+      return "noWorkspace";
     }
     initSync(membership.workspace.id, me.user.id);
     st.setSession(me.user, me.memberships, membership.workspace);

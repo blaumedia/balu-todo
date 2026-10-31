@@ -52,7 +52,7 @@ export function App() {
 
   // Before the invite branch: a failed /me after accepting an invite loops in
   // "unreachable", and the accept spinner would hide why nothing happens.
-  if (boot === "unreachable") return <UnreachableView />;
+  if (boot === "unreachable" || boot === "noWorkspace") return <UnreachableView />;
 
   if (inviteToken) {
     return (

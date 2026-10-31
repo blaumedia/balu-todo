@@ -4,7 +4,7 @@ import { parseAppUrl, type ViewSel } from "../lib/url.js";
 
 export type { ViewSel };
 
-type Boot = "loading" | "login" | "unreachable" | "ready";
+type Boot = "loading" | "login" | "unreachable" | "noWorkspace" | "ready";
 
 export type LoginNotice = "sessionExpired";
 

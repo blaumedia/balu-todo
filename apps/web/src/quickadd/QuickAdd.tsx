@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
-import { composeTaskArgs, quickAddTarget, shouldNotifyInbox } from "../lib/quickadd.js";
+import { composeTaskArgs, quickAddTarget, shouldNotifyInbox, wasSaved } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { canWrite, useMyRole } from "../lib/role.js";
@@ -114,11 +114,15 @@ export function QuickAdd() {
       labels: snapshot.labels,
       today,
     });
-    getSync()?.mutate({ type: "task_add", args });
+    const added = getSync()?.mutate({ type: "task_add", args });
     setText("");
     persistDraft("");
     setQuickAdd(false);
-    if (shouldNotifyInbox(target, args)) useApp.getState().showToast(t("quickadd.addedToInbox"));
+    // A dropped edit (access lost, client closed) was not saved: no success toast,
+    // which would also replace the notice that explains why.
+    if (wasSaved(added) && shouldNotifyInbox(target, args)) {
+      useApp.getState().showToast(t("quickadd.addedToInbox"));
+    }
   }
 
   if (!open) return null;

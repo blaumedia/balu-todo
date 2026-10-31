@@ -228,6 +228,9 @@ export const de: Record<TranslationKey, string> = {
   "auth.sessionExpired": "Deine Sitzung ist abgelaufen, bitte melde dich erneut an.",
   "boot.unreachableTitle": "Server nicht erreichbar - neuer Versuch läuft…",
   "boot.unreachableHint": "Du bleibst angemeldet. Balu öffnet sich, sobald der Server wieder antwortet.",
+  "boot.noWorkspaceTitle": "Kein Arbeitsbereich gefunden - neuer Versuch läuft…",
+  "boot.noWorkspaceHint": "Dein Konto gehört noch zu keinem Arbeitsbereich. Du bleibst angemeldet; Balu versucht es erneut und legt bei Bedarf einen neuen an.",
+  "boot.logout": "Abmelden",
 
   "project.newProject": "Neues Projekt",
   "project.newProjectName": "Projektname",

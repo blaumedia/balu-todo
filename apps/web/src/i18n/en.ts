@@ -225,6 +225,9 @@ export const en = {
   "auth.sessionExpired": "Your session expired, please log in again.",
   "boot.unreachableTitle": "Server unreachable - retrying…",
   "boot.unreachableHint": "You stay signed in. Balu opens as soon as the server answers again.",
+  "boot.noWorkspaceTitle": "No workspace found - retrying…",
+  "boot.noWorkspaceHint": "Your account does not belong to a workspace yet. You stay signed in; Balu retries and sets one up if needed.",
+  "boot.logout": "Log out",
 
   "project.newProject": "New project",
   "project.newProjectName": "Project name",

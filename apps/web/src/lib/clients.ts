@@ -60,7 +60,8 @@ export function listStoredWorkspaceIds(): string[] {
   const ls = globalThis.localStorage;
   const ids = new Set<string>();
   if (!ls) return [];
-  const prefixes = ["queue", "replica", "token"].map((k) => workspaceStorageKeys("")[k as "queue"]);
+  // lossNotice too: a purge killed after the queue was removed leaves only that key.
+  const prefixes = ["queue", "replica", "token", "lossNotice"].map((k) => workspaceStorageKeys("")[k as "queue"]);
   for (let i = 0; i < ls.length; i++) {
     const key = ls.key(i);
     const prefix = key ? prefixes.find((p) => key.startsWith(p)) : undefined;

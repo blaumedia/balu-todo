@@ -30,6 +30,15 @@ export function quickAddTarget(
   return resolveQuickAddContext(contextOf(view), projects, aliases, confirmed);
 }
 
+/**
+ * Whether `mutate()` actually saved the edit. A client without access (or closed,
+ * or none at all) drops it: say nothing then - a success toast would be false and
+ * would replace the notice that explains the loss.
+ */
+export function wasSaved(result: { dropped?: boolean } | undefined): boolean {
+  return result !== undefined && !result.dropped;
+}
+
 /** Whether to toast that the task landed in the Inbox: only when the view's
  *  project was redirected and the user did not name a project via `#`. */
 export function shouldNotifyInbox(target: QuickAddTarget, args: Record<string, unknown>): boolean {
