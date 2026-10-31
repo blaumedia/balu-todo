@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { combineDayAndTime, firstReminderPickerStep, reminderDialogStep } from '../src/lib/reminderPicker';
+import { combineDayAndTime, firstReminderPickerStep, formatReminderTime, reminderDialogStep } from '../src/lib/reminderPicker';
 
 describe('firstReminderPickerStep', () => {
   it('starts Android with the date dialog', () => {
@@ -43,5 +43,26 @@ describe('reminderDialogStep', () => {
   });
   it('closes without committing when the date dialog is dismissed', () => {
     expect(reminderDialogStep('date', null, 'dismissed', undefined)).toEqual({ next: null, day: null, commit: null });
+  });
+});
+
+describe('time zone change between the dialogs', () => {
+  it('stores the picked day at local noon so combineDayAndTime keeps it', () => {
+    const picked = new Date(2026, 10, 3, 0, 5); // dialog result right after local midnight
+    const r = reminderDialogStep('date', null, 'set', picked);
+    expect(r.day?.getHours()).toBe(12);
+    const combined = combineDayAndTime(r.day as Date, new Date(2020, 0, 1, 9, 0));
+    expect(combined.getDate()).toBe(3);
+    expect(combined.getHours()).toBe(9);
+  });
+});
+
+describe('formatReminderTime', () => {
+  const d = new Date(2026, 10, 3, 14, 30);
+  it('formats 24h for de', () => {
+    expect(formatReminderTime(d, 'de')).toBe('14:30');
+  });
+  it('formats 12h for en-US', () => {
+    expect(formatReminderTime(d, 'en-US')).toMatch(/^2:30\s?PM$/);
   });
 });

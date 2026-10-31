@@ -29,6 +29,14 @@ export interface ReminderDialogResult {
  */
 export function reminderDialogStep(step: ReminderPickerStep, day: Date | null, eventType: string, d?: Date): ReminderDialogResult {
   if (eventType !== 'set' || !d) return { next: null, day: null, commit: null };
-  if (step === 'date') return { next: 'time', day: d, commit: null };
+  // Local noon, not the instant the dialog returned: if the time zone changes
+  // while the time dialog is open, combineDayAndTime must still read the day the
+  // user picked (a 00:00-01:00 instant would land on the previous day).
+  if (step === 'date') return { next: 'time', day: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12), commit: null };
   return { next: null, day: null, commit: day ? combineDayAndTime(day, d) : d };
+}
+
+/** Time of day for the reminder row, in the user's locale (12h or 24h as that locale/device formats it). */
+export function formatReminderTime(d: Date, locale: string): string {
+  return d.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
 }
