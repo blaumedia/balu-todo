@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // "write" would have landed.
 const fakes = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
+  options: [] as Array<Record<string, any>>,
   made: [] as Array<{
     workspaceId: string;
     closed: boolean;
@@ -22,6 +23,7 @@ vi.mock("@balu/sync-client", async (orig) => ({
     removeItem: () => {},
   }),
   createSyncClient: (opts: { workspaceId: string }) => {
+    fakes.options.push(opts);
     let release: () => void = () => {};
     const flight = new Promise<void>((r) => {
       release = r;
@@ -56,6 +58,7 @@ import { useApp } from "../src/store/app.js";
 beforeEach(() => {
   closeSync();
   fakes.made.length = 0;
+  fakes.options.length = 0;
   fakes.listeners.clear();
   useApp.getState().dismissToast();
 });
@@ -157,6 +160,54 @@ describe("clients toast wiring", () => {
     initSync("w2", "u1");
     expect(fakes.listeners.size).toBe(1);
     expect(useApp.getState().toast).toBeNull();
+  });
+});
+
+describe("clients sync notice tone", () => {
+  const relocated = [{ command: { uuid: "c1" }, reasons: ["project_deleted"] }];
+  const rejected = [{ command: { uuid: "c2" }, error_code: "x", error: "x" }];
+  const flushTick = () => Promise.resolve();
+
+  it("a relocation-only notice is info", async () => {
+    initSync("w1", "u1");
+    fakes.options[0]!.onCommandsRelocated(relocated);
+    await flushTick();
+    expect(useApp.getState().toast).toBeTruthy();
+    expect(useApp.getState().toastTone).toBe("info");
+  });
+
+  it("a rejection-only notice is error", async () => {
+    initSync("w1", "u1");
+    fakes.options[0]!.onCommandsRejected(rejected);
+    await flushTick();
+    expect(useApp.getState().toast).toBeTruthy();
+    expect(useApp.getState().toastTone).toBe("error");
+  });
+
+  it.each(["rejected first", "relocated first"])("rejected and relocated in one tick are one error toast (%s)", async (order) => {
+    initSync("w1", "u1");
+    const o = fakes.options[0]!;
+    if (order === "rejected first") {
+      o.onCommandsRejected(rejected);
+      o.onCommandsRelocated(relocated);
+    } else {
+      o.onCommandsRelocated(relocated);
+      o.onCommandsRejected(rejected);
+    }
+    await flushTick();
+    const { toast, toastTone } = useApp.getState();
+    expect(toastTone).toBe("error");
+    // separate single-notice toasts, for comparing the combined text against
+    useApp.getState().dismissToast();
+    fakes.options[0]!.onCommandsRelocated(relocated);
+    await flushTick();
+    const relocatedOnly = useApp.getState().toast!;
+    useApp.getState().dismissToast();
+    fakes.options[0]!.onCommandsRejected(rejected);
+    await flushTick();
+    const rejectedOnly = useApp.getState().toast!;
+    expect(toast).toContain(relocatedOnly);
+    expect(toast).toContain(rejectedOnly);
   });
 });
 
