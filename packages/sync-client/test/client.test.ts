@@ -465,6 +465,86 @@ describe("outage recovery (contract §6.7)", () => {
     expect(calls).toBe(3);
   });
 
+  describe("close()", () => {
+    function gated() {
+      const server = makeServer();
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let calls = 0;
+      const fetchImpl = (async (u: any, init: any) => {
+        calls += 1;
+        await gate;
+        return server.fetch(u, init);
+      }) as unknown as typeof fetch;
+      const kv = memoryKV();
+      const writes: string[] = [];
+      const storage = {
+        getItem: (k: string) => kv.getItem(k),
+        setItem: (k: string, v: string) => {
+          writes.push(k);
+          return kv.setItem(k, v);
+        },
+        removeItem: (k: string) => {
+          writes.push(k);
+          return kv.removeItem(k);
+        },
+      };
+      return { fetchImpl, release, storage, writes, calls: () => calls };
+    }
+
+    it("a pull answered after close() writes nothing", async () => {
+      const g = gated();
+      const c = track(createSyncClient(base({ fetch: g.fetchImpl, storage: g.storage })));
+      const p = c.sync();
+      await vi.waitFor(() => expect(g.calls()).toBe(1));
+      c.close();
+      g.release();
+      await p;
+      await c.idle();
+      expect(g.writes).toEqual([]);
+    });
+
+    it("a flush answered after close() writes nothing", async () => {
+      const g = gated();
+      const c = track(createSyncClient(base({ fetch: g.fetchImpl, storage: g.storage })));
+      c.mutate({ type: "task_add", args: { title: "x" } });
+      g.writes.length = 0; // the optimistic persist happened before close
+      const p = c.flush();
+      await vi.waitFor(() => expect(g.calls()).toBe(1));
+      c.close();
+      g.release();
+      await p;
+      await c.idle();
+      expect(g.writes).toEqual([]);
+    });
+
+    it("a closed client starts no network work and does not persist edits", async () => {
+      const g = gated();
+      g.release();
+      const c = track(createSyncClient(base({ fetch: g.fetchImpl, storage: g.storage })));
+      c.close();
+      await c.sync();
+      await c.flush();
+      c.mutate({ type: "task_add", args: { title: "x" } });
+      await c.idle();
+      expect(g.calls()).toBe(0);
+      expect(g.writes).toEqual([]);
+    });
+
+    it("idle() also waits for a sync that was still hydrating when it was called", async () => {
+      const g = gated();
+      g.release();
+      const c = track(createSyncClient(base({ fetch: g.fetchImpl, storage: g.storage })));
+      const p = c.sync(); // still awaiting hydrate(): not on the lane yet
+      await c.idle();
+      expect(g.calls()).toBe(1);
+      expect(c.getStatus()).toBe("synced");
+      await p;
+    });
+  });
+
   it("stop() cancels a pending retry", async () => {
     let calls = 0;
     const fetchImpl = (() => {

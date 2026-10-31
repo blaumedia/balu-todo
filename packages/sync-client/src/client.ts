@@ -173,9 +173,17 @@ export interface SyncClient {
   start(): void;
   stop(): void;
   /**
+   * Stop for good: like `stop()`, and from now on the client never writes to
+   * storage again (queue, token, replica, full-sync flag) and starts no new
+   * network work. Work already in flight may still finish, but its results stay
+   * in memory. Use it when another user's data is about to be wiped or adopted.
+   */
+  close(): void;
+  /**
    * Resolves once the network work already running (a pull or flush) has settled
    * and written what it was writing. `stop()` does not cancel that work; wait here
    * before wiping this client's storage, or its late write lands after the wipe.
+   * Waits for work that joins the lane meanwhile too (not only the work running now).
    */
   idle(): Promise<void>;
   /** The app regained attention (focus, visible, online, foreground): reset the retry backoff and sync now. */
@@ -255,6 +263,8 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   let hasSynced = false;
   let idAliases: Record<string, string> = {};
   let accessLost = false;
+  let closed = false;
+  const syncs = new Set<Promise<void>>(); // sync() calls running, including their hydrate phase
   let started = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelay = 0;
@@ -349,15 +359,15 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   async function persistQueue(): Promise<void> {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     await opts.storage.setItem(qKey, JSON.stringify(queue));
   }
   async function persistToken(): Promise<void> {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     await opts.storage.setItem(tKey, syncToken);
   }
   async function persistReplica(): Promise<void> {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     await opts.storage.setItem(rKey, JSON.stringify(serializeReplica(replica)));
   }
 
@@ -368,7 +378,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
    * connection mid-flush and a restart.
    */
   async function markNeedsFullSync(): Promise<void> {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     // Deliberately does NOT touch `syncToken`: `applyResponse` overwrites it
     // with the response's delta token on the very next statement, which is how
     // the first version of this fix ended up asking for a delta and never
@@ -379,6 +389,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
   async function clearNeedsFullSync(): Promise<void> {
     needsFullSync = false;
+    if (closed) return;
     await opts.storage.removeItem(nKey);
   }
 
@@ -537,7 +548,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   async function loseAccess(reason: AccessLost["reason"]): Promise<void> {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     accessLost = true;
     const discarded = queue.length;
     stop();
@@ -549,17 +560,18 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   async function flush(): Promise<void> {
-    if (accessLost || flushing || queue.length === 0) return;
+    if (accessLost || closed || flushing || queue.length === 0) return;
     flushing = true;
     setStatus("syncing");
     const rejected: RejectedCommand[] = [];
     const relocated: RelocatedCommand[] = [];
     const lost = await exclusive(async (): Promise<AccessLost["reason"] | null> => {
       try {
-        if (accessLost) return null;
+        if (accessLost || closed) return null;
         while (queue.length > 0) {
           const batch = queue.slice(0, maxBatch);
           const resp = await doSync(batch);
+          if (closed) return null; // stopped for good meanwhile: keep the response out of storage
           relocated.push(...relocatedIn(batch, resp));
           const batchRejected = rejectedIn(batch, resp);
           if (batchRejected.length > 0) {
@@ -614,12 +626,13 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   async function pull(): Promise<void> {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     setStatus("syncing");
     const lost = await exclusive(async (): Promise<AccessLost["reason"] | null> => {
-      if (accessLost) return null;
+      if (accessLost || closed) return null;
       try {
         const resp = await doSync([]);
+        if (closed) return null;
         // Nothing was sent, so everything queued is still pending.
         applyResponse(resp, queue);
         await persistToken();
@@ -640,9 +653,20 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     if (lost) await loseAccess(lost);
   }
 
-  async function sync(): Promise<void> {
+  function sync(): Promise<void> {
+    const run = syncOnce();
+    syncs.add(run);
+    const done = (): void => {
+      syncs.delete(run);
+    };
+    run.then(done, done);
+    return run;
+  }
+
+  async function syncOnce(): Promise<void> {
+    if (closed) return;
     await hydrate();
-    if (accessLost) return;
+    if (accessLost || closed) return;
     if (queue.length > 0) await flush();
     else await pull();
     // A rejection recorded in an earlier session (or an earlier failed attempt)
@@ -651,7 +675,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   function scheduleFlush(): void {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     if (flushTimer) clearTimeout(flushTimer);
     flushTimer = setTimeout(() => {
       flushTimer = null;
@@ -717,7 +741,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   };
 
   function start(): void {
-    if (accessLost) return;
+    if (accessLost || closed) return;
     started = true;
     void hydrate().then(() => void sync());
     if (autoTimer) clearInterval(autoTimer);
@@ -743,6 +767,19 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     globalThis.document?.removeEventListener("visibilitychange", onVisibility);
   }
 
+  async function idle(): Promise<void> {
+    let seen: Promise<unknown>;
+    do {
+      seen = lane;
+      await Promise.allSettled([seen, ...syncs]);
+    } while (lane !== seen || syncs.size > 0);
+  }
+
+  function close(): void {
+    closed = true;
+    stop();
+  }
+
   return {
     getSnapshot() {
       if (!snapshot) snapshot = buildSnapshot();
@@ -759,7 +796,8 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     hydrate,
     start,
     stop,
-    idle: () => lane.then(() => undefined),
+    close,
+    idle,
     wake,
   };
 }
