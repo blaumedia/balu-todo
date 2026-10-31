@@ -275,7 +275,7 @@ describe("bootSession (attemptBoot classification)", () => {
       if (calls <= 3) return me("a"); // disagrees with the stored u2: replaced rounds
       throw apiError(503);
     };
-    void bootSession();
+    const booted = bootSession();
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toBe(3);
     await vi.advanceTimersByTimeAsync(1000); // the replaced backoff ends, the outage starts
@@ -286,6 +286,10 @@ describe("bootSession (attemptBoot classification)", () => {
     };
     await vi.advanceTimersByTimeAsync(1000); // the first outage wait is 1 s, not 8 s
     expect(calls).toBe(5);
+    fake.getMe = async () => me("a");
+    globalThis.localStorage.setItem("balu:auth:access", jwt("u1"));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await booted).toBe(true); // leave no loop running for the next test
   });
 
   it("a 5xx shows the unreachable screen, retries, then becomes ready", async () => {
