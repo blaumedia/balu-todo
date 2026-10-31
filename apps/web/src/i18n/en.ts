@@ -137,6 +137,7 @@ export const en = {
   "members.leave": "Leave workspace",
   "members.removeConfirm": "Remove {name} from this workspace?",
   "members.leaveConfirm": "Leave this workspace?",
+  "members.leaveUnsynced": "{n} unsynced changes - reconnect before leaving.",
   "members.lastOwner": "A workspace must keep at least one owner.",
   "members.forbidden": "You don't have permission to change this member.",
   "members.pending": "Pending invites",

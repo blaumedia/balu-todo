@@ -101,7 +101,15 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
 
   async function leaveWorkspace(id: string, selfId: string) {
     // Push what is still queued while we are a member; afterwards the server refuses it.
-    await getSync()?.flush().catch(() => {});
+    const sync = getSync();
+    await sync?.flush().catch(() => {});
+    // flush() never rejects; a failed one leaves the queue non-empty, and removing
+    // the membership now would make the server refuse (and us discard) those changes.
+    const pending = sync?.getSnapshot().pending ?? 0;
+    if (pending > 0) {
+      showToast(t("members.leaveUnsynced").replace("{n}", String(pending)), { tone: "error", durationMs: 6000 });
+      return;
+    }
     // The client's own 403 after leaving is not news to the user.
     expectAccessLoss(id);
     try {

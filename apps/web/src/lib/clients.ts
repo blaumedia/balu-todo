@@ -3,6 +3,7 @@ import {
   createSyncClient,
   localStorageKV,
   purgeWorkspaceData,
+  workspaceStorageKeys,
   type AccessLost,
   type SyncClient,
 } from "@balu/sync-client";
@@ -16,6 +17,40 @@ const kv = localStorageKV();
 export const api: ApiClient = createApiClient({ baseUrl: "/api/v1", storage: kv });
 
 const RELOCATED_TOAST_MS = 5000;
+const REJECTED_TOAST_MS = 6000;
+
+// A flush can report rejected and relocated commands in the same tick, and the
+// toast has one slot: the second would replace the first unseen. Collect what
+// arrives in one tick and show it as a single message.
+let pendingToast: { parts: string[]; durationMs: number; tone: "success" | "error" } | null = null;
+function queueSyncToast(message: string, durationMs: number, tone: "success" | "error"): void {
+  if (pendingToast) {
+    pendingToast.parts.push(message);
+    pendingToast.durationMs = Math.max(pendingToast.durationMs, durationMs);
+    if (tone === "error") pendingToast.tone = "error";
+    return;
+  }
+  pendingToast = { parts: [message], durationMs, tone };
+  queueMicrotask(() => {
+    const t = pendingToast;
+    pendingToast = null;
+    if (t) useApp.getState().showToast(t.parts.join(" "), { durationMs: t.durationMs, tone: t.tone });
+  });
+}
+
+/** Storage ids of every workspace this browser holds local sync data for. */
+export function listStoredWorkspaceIds(): string[] {
+  const ls = globalThis.localStorage;
+  const ids = new Set<string>();
+  if (!ls) return [];
+  const prefixes = ["queue", "replica", "token"].map((k) => workspaceStorageKeys("")[k as "queue"]);
+  for (let i = 0; i < ls.length; i++) {
+    const key = ls.key(i);
+    const prefix = key ? prefixes.find((p) => key.startsWith(p)) : undefined;
+    if (key && prefix && key.length > prefix.length) ids.add(key.slice(prefix.length));
+  }
+  return [...ids];
+}
 
 // Workspaces whose loss the app caused itself (delete, leave): the sync client's
 // 403/404 for them must not tell the user what they just did.
@@ -29,9 +64,6 @@ export function expectAccessLoss(workspaceId: string): void {
 }
 export function clearExpectedAccessLoss(workspaceId: string): void {
   expectedLoss.delete(workspaceId);
-}
-export function isAccessLossExpected(workspaceId: string): boolean {
-  return expectedLoss.has(workspaceId);
 }
 /** True when the user should be told about losing `workspaceId`; marks it told. */
 export function claimAccessLossNotice(workspaceId: string): boolean {
@@ -79,13 +111,16 @@ export function initSync(workspaceId: string, userId: string): SyncClient {
     onCommandsRejected: (rejected) => {
       // The replica has already been re-pulled; tell the user their optimistic
       // change did not stick instead of letting it vanish silently.
-      const { locale, showToast } = useApp.getState();
-      showToast(makeT(locale)("sync.rejected").replace("{n}", String(rejected.length)));
+      const { locale } = useApp.getState();
+      queueSyncToast(
+        makeT(locale)("sync.rejected").replace("{n}", String(rejected.length)),
+        REJECTED_TOAST_MS,
+        "error",
+      );
     },
     onCommandsRelocated: (relocated) => {
-      const { locale, showToast } = useApp.getState();
-      const message = relocatedMessage(makeT(locale), relocated);
-      if (message) showToast(message, RELOCATED_TOAST_MS);
+      const message = relocatedMessage(makeT(useApp.getState().locale), relocated);
+      if (message) queueSyncToast(message, RELOCATED_TOAST_MS, "success");
     },
     onAccessLost: (info) => accessLostHandler?.(info),
   });

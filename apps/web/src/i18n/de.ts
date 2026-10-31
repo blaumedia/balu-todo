@@ -140,6 +140,7 @@ export const de: Record<TranslationKey, string> = {
   "members.leave": "Workspace verlassen",
   "members.removeConfirm": "{name} aus diesem Workspace entfernen?",
   "members.leaveConfirm": "Diesen Workspace verlassen?",
+  "members.leaveUnsynced": "{n} nicht synchronisierte Änderungen - vor dem Verlassen wieder verbinden.",
   "members.lastOwner": "Ein Workspace braucht mindestens eine Inhaberin oder einen Inhaber.",
   "members.forbidden": "Du darfst diese Mitgliedschaft nicht ändern.",
   "members.pending": "Offene Einladungen",

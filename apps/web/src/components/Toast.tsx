@@ -4,6 +4,7 @@ import { Icon } from "./Icon.js";
 /** Ambient bottom-center toast (DESIGN §3 — calm, non-modal). */
 export function Toast() {
   const toast = useApp((s) => s.toast);
+  const tone = useApp((s) => s.toastTone);
   if (!toast) return null;
   return (
     <div
@@ -28,7 +29,11 @@ export function Toast() {
         maxWidth: "90vw",
       }}
     >
-      <Icon name="check-circle" size={16} color="var(--success)" />
+      {tone === "success" ? (
+        <Icon name="check-circle" size={16} color="var(--success)" />
+      ) : (
+        <Icon name="circle" size={16} color={tone === "error" ? "var(--danger)" : "var(--text-secondary)"} />
+      )}
       {toast}
     </div>
   );

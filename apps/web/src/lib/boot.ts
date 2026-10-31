@@ -6,7 +6,7 @@ import {
   claimAccessLossNotice,
   getSyncWorkspaceId,
   initSync,
-  isAccessLossExpected,
+  listStoredWorkspaceIds,
   purgeWorkspaceStorage,
   setAccessLostHandler,
 } from "./clients.js";
@@ -22,7 +22,6 @@ export async function bootSession(preferredWorkspaceId?: string): Promise<boolea
   const st = useApp.getState();
   try {
     const me = await api.getMe();
-    const previous = lastWorkspaceId();
     const membership = pickMembership(me.memberships, preferredWorkspaceId, lastWorkspaceId());
     if (!membership) {
       st.setBoot("login");
@@ -30,12 +29,7 @@ export async function bootSession(preferredWorkspaceId?: string): Promise<boolea
     }
     initSync(membership.workspace.id, me.user.id);
     st.setSession(me.user, me.memberships, membership.workspace);
-    // The workspace this browser last had open is no longer in /me: access was
-    // revoked or it was deleted while the app was closed. Its queue would sit in
-    // localStorage forever, so discard it and say how much was lost.
-    if (previous && !me.memberships.some((m) => m.workspace.id === previous)) {
-      void discardLostWorkspace(previous);
-    }
+    void discardLostWorkspaces(me.memberships.map((m) => m.workspace.id));
     return true;
   } catch {
     st.setBoot("login");
@@ -45,46 +39,77 @@ export async function bootSession(preferredWorkspaceId?: string): Promise<boolea
 
 const ACCESS_LOST_TOAST_MS = 8000;
 
-async function discardLostWorkspace(workspaceId: string): Promise<void> {
-  const discarded = await purgeWorkspaceStorage(workspaceId);
-  if (discarded === 0 || !claimAccessLossNotice(workspaceId)) return;
-  const st = useApp.getState();
-  st.showToast(accessLostMessage(makeT(st.locale), "removed", discarded, null), ACCESS_LOST_TOAST_MS);
+/**
+ * Every workspace this browser holds local data for that /me no longer lists was
+ * revoked or deleted while the app was closed. Its queue would sit in
+ * localStorage forever, so discard it and say how much was lost - once, in one
+ * toast, however many workspaces it was.
+ */
+export async function discardLostWorkspaces(liveIds: string[]): Promise<void> {
+  const live = new Set(liveIds);
+  const messages: string[] = [];
+  for (const id of listStoredWorkspaceIds()) {
+    if (live.has(id)) continue;
+    const discarded = await purgeWorkspaceStorage(id);
+    if (discarded === 0 || !claimAccessLossNotice(id)) continue;
+    messages.push(accessLostMessage(makeT(useApp.getState().locale), "removed", discarded, null));
+  }
+  if (messages.length > 0) {
+    useApp.getState().showToast(messages.join(" "), { durationMs: ACCESS_LOST_TOAST_MS, tone: "error" });
+  }
+}
+
+/** Whether `workspaceId` is the workspace the app currently has open. */
+function isOpen(workspaceId: string): boolean {
+  return (getSyncWorkspaceId() ?? useApp.getState().workspace?.id) === workspaceId;
 }
 
 /** The sync client lost access to a workspace (403/404): tell the user, move on. */
 export async function handleAccessLost(info: AccessLost): Promise<void> {
-  if (isAccessLossExpected(info.workspaceId)) return;
   const st = useApp.getState();
+  // An expected loss (delete, leave) only suppresses the notice; the app still
+  // has to leave the workspace if the caller's own flow did not get that far.
   if (claimAccessLossNotice(info.workspaceId)) {
     const name =
       st.memberships.find((m) => m.workspace.id === info.workspaceId)?.workspace.name ??
       (st.workspace?.id === info.workspaceId ? st.workspace.name : null);
-    st.showToast(
-      accessLostMessage(makeT(st.locale), info.reason, info.discarded, name),
-      ACCESS_LOST_TOAST_MS,
-    );
+    st.showToast(accessLostMessage(makeT(st.locale), info.reason, info.discarded, name), {
+      durationMs: ACCESS_LOST_TOAST_MS,
+      tone: "error",
+    });
   }
   // A client the app already replaced (switch) reports too; only the open one moves.
-  if (getSyncWorkspaceId() !== info.workspaceId) return;
+  if (!isOpen(info.workspaceId)) return;
   await moveOffLostWorkspace(info.workspaceId);
 }
+
+const moving = new Map<string, Promise<void>>();
 
 /**
  * Leave a workspace the user can no longer reach (revoked, deleted, left): land
  * in another one from /me and delete the lost one's local data. The server never
  * leaves an account workspace-less (§2, §7), so /me always has a survivor.
+ * Concurrent calls for one workspace (the client's 403 and the caller's own
+ * flow) share one move.
  */
-export async function moveOffLostWorkspace(lostId: string): Promise<void> {
-  await landOutside(lostId);
-  // After landing: initSync has stopped the lost workspace's client, so nothing
-  // re-persists behind the purge.
-  await purgeWorkspaceStorage(lostId);
+export function moveOffLostWorkspace(lostId: string): Promise<void> {
+  const running = moving.get(lostId);
+  if (running) return running;
+  const run = (async () => {
+    await landOutside(lostId);
+    // After landing: initSync has stopped the lost workspace's client, so nothing
+    // re-persists behind the purge.
+    await purgeWorkspaceStorage(lostId);
+  })().finally(() => moving.delete(lostId));
+  moving.set(lostId, run);
+  return run;
 }
 
 async function landOutside(lostId: string): Promise<void> {
   try {
     const me = await api.getMe();
+    // The user may have switched workspace while /me was in flight: keep that.
+    if (!isOpen(lostId)) return;
     const memberships = me.memberships.filter((m) => m.workspace.id !== lostId);
     const next = pickMembership(memberships);
     if (next) {
@@ -97,6 +122,7 @@ async function landOutside(lostId: string): Promise<void> {
   } catch {
     /* server unreachable: fall back to what the store already knows */
   }
+  if (!isOpen(lostId)) return;
   const st = useApp.getState();
   const survivors = st.memberships.filter((m) => m.workspace.id !== lostId);
   if (st.user && survivors[0]) {
