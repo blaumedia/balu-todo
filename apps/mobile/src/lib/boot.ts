@@ -402,10 +402,11 @@ export async function expireSession(): Promise<void> {
   teardownSync();
   await getApi()?.logout().catch(() => {}); // no network call once the refresh token is gone
   const st = useApp.getState();
-  const wasReady = st.boot === 'ready';
+  // The notice screens sit on top of the tabs, so the user is past the gate there too.
+  const pastGate = st.boot === 'ready' || st.boot === 'reconnecting' || st.boot === 'noWorkspace';
   st.reset();
   st.setLoginNotice('sessionExpired');
-  if (!wasReady) return; // during boot the index gate redirects on its own
+  if (!pastGate) return; // during boot the index gate redirects on its own
   try {
     if (router.canDismiss()) router.dismissAll();
     router.replace('/onboarding');

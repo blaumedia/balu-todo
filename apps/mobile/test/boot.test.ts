@@ -226,6 +226,14 @@ describe('expireSession', () => {
     expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
   });
 
+  it.each(['reconnecting', 'noWorkspace'] as const)('while the %s notice shows: navigates to onboarding too', async (state) => {
+    useApp.setState({ boot: state } as any);
+    fake.canDismiss = true;
+    await expireSession();
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
   it('during boot: no navigation, the index gate redirects on its own', async () => {
     useApp.setState({ boot: 'loading' } as any);
     await expireSession();
@@ -386,7 +394,9 @@ describe('accounts without a workspace (what-if 6)', () => {
     };
     await bootApp();
     expect(useApp.getState().boot).toBe('noWorkspace');
-    useApp.getState().reset();
+    const out = logout(); // what the notice's button calls
+    await vi.advanceTimersByTimeAsync(10);
+    await out;
     await vi.advanceTimersByTimeAsync(120_000);
     expect(calls).toBe(1);
     expect(useApp.getState().boot).toBe('onboarding');
@@ -440,6 +450,8 @@ describe('landing outside a lost workspace while /me fails (what-if 11)', () => 
     fake.getMe = async () => me();
     await moveOffLostWorkspace('lost');
     expect(useApp.getState().boot).toBe('noWorkspace');
+    useApp.getState().reset(); // the user leaves: the retry loop ends
+    await vi.advanceTimersByTimeAsync(60_000);
   });
 });
 
