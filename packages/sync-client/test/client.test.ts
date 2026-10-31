@@ -989,7 +989,7 @@ describe("lost access (contract §6.8)", () => {
     await storage.setItem(k1.needsFullSync, "1");
     await storage.setItem(k2.queue, JSON.stringify([{}]));
     await storage.setItem(k2.token, "v9");
-    expect(await purgeWorkspaceData(storage, "w1")).toBe(2);
+    expect((await purgeWorkspaceData(storage, "w1")).discarded).toBe(2);
     for (const k of Object.values(k1)) expect(await storage.getItem(k)).toBeNull();
     expect(await storage.getItem(k2.queue)).not.toBeNull();
     expect(await storage.getItem(k2.token)).toBe("v9");

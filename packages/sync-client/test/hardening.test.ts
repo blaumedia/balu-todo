@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSyncClient,
   memoryKV,
+  clearLossNotice,
   purgeWorkspaceData,
+  wasSaved,
   workspaceStorageKeys,
   type AsyncKV,
   type SyncClient,
@@ -136,6 +138,50 @@ describe("busy server (503/429)", () => {
     expect(calls).toBe(2);
   });
 
+  it("holds back the debounced flush, the interval and a wake until the Retry-After is over", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      if (calls === 1) return json({ detail: { code: "unavailable", message: "busy" } }, 429, { "retry-after": "10" });
+      return json(emptyFull());
+    }) as unknown as typeof fetch;
+    const c = track(createSyncClient(base({ fetch: fetchImpl, flushDebounceMs: 100, autoSyncMs: 1_000, retryBaseMs: 500 })));
+    c.mutate({ type: "task_add", args: { title: "a" } });
+    c.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+    c.mutate({ type: "task_add", args: { title: "typing" } });
+    void c.wake();
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(1_300);
+    expect(calls).toBe(2);
+  });
+
+  it("a longer Retry-After moves a pending shorter retry timer", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      if (calls === 1) return json({ detail: { code: "unavailable", message: "db" } }, 503);
+      return json({ detail: { code: "unavailable", message: "busy" } }, 429, { "retry-after": "30" });
+    }) as unknown as typeof fetch;
+    const c = track(createSyncClient(base({ fetch: fetchImpl, flushDebounceMs: 100, retryBaseMs: 2_000 })));
+    c.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1); // 503: retry timer of about 2 s pending
+    c.mutate({ type: "task_add", args: { title: "a" } });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(calls).toBe(2); // 429 asks for 30 s
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(calls).toBe(3);
+  });
+
   it("a 500 is still a sync error", async () => {
     const fetchImpl = (async () => json({ detail: { code: "error", message: "x" } }, 500)) as unknown as typeof fetch;
     const c = track(createSyncClient(base({ fetch: fetchImpl })));
@@ -220,6 +266,70 @@ describe("slow links", () => {
   });
 });
 
+describe("batch size recovery", () => {
+  function hangFirst(n: number) {
+    const ok = makeServer();
+    const sizes: number[] = [];
+    let hung = 0;
+    const fetchImpl = ((u: any, init: any) => {
+      sizes.push(JSON.parse(init.body).commands.length);
+      if (hung < n) {
+        hung += 1;
+        return new Promise((_, reject) => {
+          init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        });
+      }
+      return ok.fetch(u, init);
+    }) as unknown as typeof fetch;
+    return { sizes, fetch: fetchImpl };
+  }
+
+  it("grows back by doubling, not straight to the maximum", async () => {
+    const s = hangFirst(2);
+    const c = track(createSyncClient(base({ fetch: s.fetch, maxBatch: 40, requestTimeoutMs: 30, retryBaseMs: 5 })));
+    for (let i = 0; i < 100; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
+    c.start();
+    await vi.waitFor(() => expect(c.getSnapshot().pending).toBe(0), { timeout: 3_000 });
+    expect(s.sizes.slice(0, 6)).toEqual([40, 20, 10, 20, 40, 30]);
+  });
+
+  it("a timed-out pull does not shrink the next push", async () => {
+    const s = hangFirst(1);
+    const c = track(createSyncClient(base({ fetch: s.fetch, maxBatch: 40, requestTimeoutMs: 30, retryBaseMs: 5 })));
+    c.start();
+    // The first pull hangs and times out; the retry pull succeeds.
+    await vi.waitFor(() => expect(s.sizes.length).toBeGreaterThanOrEqual(2), { timeout: 2_000 });
+    await c.idle();
+    for (let i = 0; i < 45; i++) c.mutate({ type: "task_add", args: { title: `t${i}` } });
+    await c.flush();
+    expect(s.sizes.slice(0, 3)).toEqual([0, 0, 40]);
+  });
+});
+
+describe("purge details", () => {
+  it("returns the reason a loss notice recorded", async () => {
+    const storage = memoryKV();
+    const keys = workspaceStorageKeys("w1");
+    await storage.setItem(keys.lossNotice, JSON.stringify({ reason: "deleted", discarded: 3 }));
+    expect(await purgeWorkspaceData(storage, "w1")).toEqual({ discarded: 3, reason: "deleted" });
+  });
+
+  it("clearLossNotice removes only that workspace's notice", async () => {
+    const storage = memoryKV();
+    await storage.setItem(workspaceStorageKeys("w1").lossNotice, "{}");
+    await storage.setItem(workspaceStorageKeys("w2").lossNotice, "{}");
+    await clearLossNotice(storage, "w1");
+    expect(await storage.getItem(workspaceStorageKeys("w1").lossNotice)).toBeNull();
+    expect(await storage.getItem(workspaceStorageKeys("w2").lossNotice)).not.toBeNull();
+  });
+
+  it("wasSaved is false for a dropped or missing result", () => {
+    expect(wasSaved({ dropped: true })).toBe(false);
+    expect(wasSaved(undefined)).toBe(false);
+    expect(wasSaved({})).toBe(true);
+  });
+});
+
 describe("mutate on a client that cannot save", () => {
   it("flags the edit as dropped after close() and after access was lost", async () => {
     const live = track(createSyncClient(base()));
@@ -276,7 +386,7 @@ describe("loss notice survives a kill during the purge", () => {
     expect(await inner.getItem(keys.queue)).toBeNull();
     expect(await inner.getItem(keys.lossNotice)).not.toBeNull();
     // The next boot: nothing is queued any more, yet the loss is still counted.
-    expect(await purgeWorkspaceData(inner, "w1")).toBe(2);
+    expect(await purgeWorkspaceData(inner, "w1")).toEqual({ discarded: 2, reason: "removed" });
     expect(await inner.getItem(keys.lossNotice)).toBeNull();
   });
 

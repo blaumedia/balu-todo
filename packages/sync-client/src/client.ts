@@ -2,6 +2,7 @@
 // queue + flush/pull engine described in contract §6.
 
 import {
+  parseRetryAfter,
   todayLocalISO,
   withTimeout,
   type Attachment,
@@ -121,15 +122,23 @@ export function workspaceStorageKeys(workspaceId: string) {
   };
 }
 
+/** What a purge removed: the queued commands lost, and why the workspace was lost. */
+export interface PurgedWorkspace {
+  discarded: number;
+  /** From the loss notice a purge left behind; "removed" when there is none. */
+  reason: AccessLost["reason"];
+}
+
 /**
  * Delete one workspace's persisted queue, replica, sync token, full-sync marker
- * and loss notice. Returns how many queued commands were discarded: the queue's
- * length, or the count a loss notice left behind when a purge was interrupted
- * after the queue was already gone (0 if none or unreadable).
+ * and loss notice. `discarded` is the queue's length, or the count a loss notice
+ * left behind when a purge was interrupted after the queue was already gone (0 if
+ * none or unreadable); `reason` is that notice's reason.
  */
-export async function purgeWorkspaceData(storage: AsyncKV, workspaceId: string): Promise<number> {
+export async function purgeWorkspaceData(storage: AsyncKV, workspaceId: string): Promise<PurgedWorkspace> {
   const keys = workspaceStorageKeys(workspaceId);
   let discarded = 0;
+  let reason: AccessLost["reason"] = "removed";
   try {
     const raw = await storage.getItem(keys.queue);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
@@ -139,13 +148,23 @@ export async function purgeWorkspaceData(storage: AsyncKV, workspaceId: string):
   }
   try {
     const raw = await storage.getItem(keys.lossNotice);
-    const notice = raw ? (JSON.parse(raw) as { discarded?: unknown }) : null;
+    const notice = raw ? (JSON.parse(raw) as { discarded?: unknown; reason?: unknown }) : null;
     if (typeof notice?.discarded === "number") discarded = Math.max(discarded, notice.discarded);
+    if (notice?.reason === "removed" || notice?.reason === "deleted") reason = notice.reason;
   } catch {
     /* an unreadable notice counts nothing */
   }
   await removeWorkspaceKeys(storage, keys, true);
-  return discarded;
+  return { discarded, reason };
+}
+
+/**
+ * Remove a loss notice left behind for a workspace that turned out to be
+ * reachable after all (re-invited before the next boot): it would never be shown,
+ * and its count would inflate a later, unrelated loss.
+ */
+export async function clearLossNotice(storage: AsyncKV, workspaceId: string): Promise<void> {
+  await storage.removeItem(workspaceStorageKeys(workspaceId).lossNotice);
 }
 
 /** The queue goes last: while it exists, a boot after a kill still finds what was lost. */
@@ -186,6 +205,23 @@ export interface Snapshot {
   hasSynced: boolean;
 }
 
+/** What `mutate()` returns. */
+export interface MutateResult {
+  uuid: string;
+  temp_id?: string;
+  dropped?: boolean;
+}
+
+/**
+ * Whether `mutate()` (or a wrapper around it) actually saved the edit. A client
+ * without access, a closed one, or none at all drops it: show no success
+ * feedback then, it would be false, and on web a success toast would replace the
+ * notice that explains the loss.
+ */
+export function wasSaved(result: { dropped?: boolean } | undefined): boolean {
+  return result !== undefined && !result.dropped;
+}
+
 export interface SyncClient {
   getSnapshot(): Snapshot;
   subscribe(cb: () => void): () => void;
@@ -195,7 +231,7 @@ export interface SyncClient {
    * is closed or has lost access to its workspace: nothing was applied or queued,
    * so a caller must not tell the user the edit was saved.
    */
-  mutate(input: CommandInput): { uuid: string; temp_id?: string; dropped?: boolean };
+  mutate(input: CommandInput): MutateResult;
   sync(): Promise<void>;
   flush(): Promise<void>;
   hydrate(): Promise<void>;
@@ -240,18 +276,6 @@ class HttpError extends Error {
 
 /** Statuses the contract calls retryable: the server (or a proxy) is busy, not refusing. */
 const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
-/** A `Retry-After` beyond this is clamped: a sync client must keep trying. */
-const RETRY_AFTER_CAP_MS = 300_000;
-
-/** `Retry-After` as ms: delta-seconds or an HTTP date, null when absent or unusable. */
-function retryAfterMs(res: Response, now: number): number | null {
-  const raw = res.headers?.get("retry-after")?.trim();
-  if (!raw) return null;
-  const secs = /^\d+$/.test(raw) ? Number(raw) : (Date.parse(raw) - now) / 1000;
-  if (!Number.isFinite(secs) || secs < 0) return null;
-  return Math.min(secs * 1000, RETRY_AFTER_CAP_MS);
-}
-
 /** What a failed sync means for the status: a busy server is "offline, retrying", not an error. */
 function failureStatus(e: unknown): SyncStatus {
   return e instanceof HttpError && !TRANSIENT_STATUSES.has(e.status) ? "error" : "offline";
@@ -333,8 +357,12 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   let started = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retryDelay = 0;
-  // The Retry-After of the failure being handled, consumed by scheduleRetry.
-  let retryAfter: number | null = null;
+  // When the pending retry timer fires (epoch ms), to tell whether a later reply
+  // asks for a longer wait.
+  let retryDue = 0;
+  // The server asked for no requests before this time (Retry-After, epoch ms; 0 =
+  // no such request). Absolute, so it expires on its own and never lingers.
+  let notBefore = 0;
   // Rejected commands of a flush whose recovery pull has not reported them yet;
   // they are already off the queue, so a loss found by that pull must count them.
   let rejectedUnreported = 0;
@@ -373,14 +401,8 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     return run;
   }
 
-  function scheduleRetry(): void {
-    if (!started || accessLost || retryTimer) return;
-    retryDelay = retryDelay === 0 ? retryBaseMs : Math.min(retryDelay * 2, retryMaxMs);
-    // Jitter so clients that failed together (a database restart) do not retry in
-    // lockstep, then never sooner than the server asked.
-    const jittered = retryDelay * (0.8 + Math.random() * 0.4);
-    const delay = Math.max(jittered, retryAfter ?? 0);
-    retryAfter = null;
+  function armRetry(delay: number): void {
+    retryDue = Date.now() + delay;
     retryTimer = setTimeout(() => {
       retryTimer = null;
       // Same rule as the interval: a hidden tab does not poll, but still pushes
@@ -388,6 +410,35 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       if (isHidden() && queue.length === 0) return;
       void sync();
     }, delay);
+  }
+
+  function scheduleRetry(): void {
+    if (!started || accessLost) return;
+    const wait = Math.max(0, notBefore - Date.now());
+    if (retryTimer) {
+      // A later reply can ask for a longer wait than the pending timer has left.
+      if (retryDue - Date.now() >= wait) return;
+      clearTimeout(retryTimer);
+      armRetry(wait);
+      return;
+    }
+    retryDelay = retryDelay === 0 ? retryBaseMs : Math.min(retryDelay * 2, retryMaxMs);
+    // Jitter so clients that failed together (a database restart) do not retry in
+    // lockstep, then never sooner than the server asked.
+    const jittered = retryDelay * (0.8 + Math.random() * 0.4);
+    armRetry(Math.max(jittered, wait));
+  }
+
+  /**
+   * True while the server's Retry-After holds back network work (flush, pull, the
+   * interval, a wake, the debounced flush after an edit). Makes sure a timer will
+   * pick the work up when the wait is over, even if a wake cleared the old one.
+   */
+  function throttled(): boolean {
+    const wait = notBefore - Date.now();
+    if (wait <= 0) return false;
+    if (started && !accessLost && !retryTimer) armRetry(wait);
+    return true;
   }
 
   function resetRetry(): void {
@@ -403,6 +454,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   function setStatus(s: SyncStatus): void {
     if (s === "synced") {
       hasSynced = true;
+      notBefore = 0;
       resetRetry();
     } else if (s === "offline" || s === "error") {
       // Without this the only retry was the 60 s interval, so recovering from an
@@ -625,7 +677,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       budget,
       async () => {
         if (!headers.ok) {
-          throw new HttpError(headers.status, await errorCode(headers), retryAfterMs(headers, Date.now()));
+          throw new HttpError(headers.status, await errorCode(headers), parseRetryAfter(headers.headers?.get("retry-after")));
         }
         return (await headers.json()) as SyncResponse;
       },
@@ -643,8 +695,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
   /** The status a failed sync leaves behind; also stores the server's Retry-After for the retry timer. */
   function failed(e: unknown): SyncStatus {
-    if (e instanceof HttpError) retryAfter = e.retryAfterMs;
-    if (e instanceof RequestTimeoutError) batchSize = Math.max(minBatch, Math.floor(batchSize / 2));
+    // Only an HTTP reply can carry a Retry-After; any other failure (and a reply
+    // without one) ends a wait an earlier reply asked for.
+    notBefore = e instanceof HttpError && e.retryAfterMs !== null ? Date.now() + e.retryAfterMs : 0;
     return failureStatus(e);
   }
 
@@ -678,7 +731,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   async function flush(): Promise<void> {
-    if (accessLost || closed || flushing || queue.length === 0) return;
+    if (accessLost || closed || flushing || queue.length === 0 || throttled()) return;
     flushing = true;
     setStatus("syncing");
     const rejected: RejectedCommand[] = [];
@@ -713,12 +766,17 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
           // redundant full sync.
           if (resp.full_sync) await clearNeedsFullSync();
           invalidate();
-          batchSize = maxBatch;
+          // Grow back step by step: restoring the full size at once alternated a
+          // full batch that times out with a half one that passes, on a slow server.
+          batchSize = Math.min(maxBatch, batchSize * 2);
         }
         setStatus("synced");
         return null;
       } catch (e) {
         const reason = lostAccessReason(e);
+        // A slow server is working through each command: send fewer. Only a push
+        // shrinks the batch - a timed-out pull says nothing about its size.
+        if (e instanceof RequestTimeoutError) batchSize = Math.max(minBatch, Math.floor(batchSize / 2));
         if (!reason) setStatus(failed(e));
         return reason;
       } finally {
@@ -753,7 +811,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   async function pull(): Promise<void> {
-    if (accessLost || closed) return;
+    if (accessLost || closed || throttled()) return;
     setStatus("syncing");
     const lost = await exclusive(async (): Promise<AccessLost["reason"] | null> => {
       if (accessLost || closed) return null;
@@ -810,7 +868,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     }, debounceMs);
   }
 
-  function mutate(input: CommandInput): { uuid: string; temp_id?: string; dropped?: boolean } {
+  function mutate(input: CommandInput): MutateResult {
     const isAdd = input.type.endsWith("_add");
     const tempId = isAdd ? input.temp_id ?? `tmp-${uuid()}` : input.temp_id;
     // The workspace is gone for this user: an edit could never be saved or sent,
