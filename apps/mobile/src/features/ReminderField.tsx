@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../components/Icon';
 import { relativeDate } from '../lib/format';
-import { combineDayAndTime, firstReminderPickerStep, reminderDialogStep, type ReminderPickerStep } from '../lib/reminderPicker';
+import { combineDayAndTime, firstReminderPickerStep, formatReminderTime, reminderDialogStep, type ReminderPickerStep } from '../lib/reminderPicker';
 import { useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, radius, space } from '../theme/tokens';
@@ -16,9 +16,6 @@ function localISODate(d: Date): IsoDate {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
-}
-function hhmm(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 /** Build a local Date from an IsoDate at a given hour:minute. */
 function atTime(iso: IsoDate, hour: number, minute: number): Date {
@@ -53,7 +50,7 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
   const overdue = current != null && current.getTime() <= Date.now();
   const valueColor = overdue ? theme.danger : rel?.tone === 'today' ? theme.accent : theme.textPrimary;
 
-  const display = rel && current ? `${rel.text} · ${hhmm(current)}` : t('detail.none');
+  const display = rel && current ? `${rel.text} · ${formatReminderTime(current, locale)}` : t('detail.none');
 
   const submitText = () => {
     if (disabled) {
@@ -73,6 +70,7 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
     setEditing(false);
   };
 
+  // Only read when the picker opens (openPicker freezes it into `draft`).
   const seed = current ?? atTime(todayLocalISO(), 9, 0);
 
   const closePicker = () => {
@@ -183,10 +181,11 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
           </Pressable>
         </View>
       ) : null}
-      {(step === 'date' || step === 'time') && !disabled ? (
+      {(step === 'date' || step === 'time') && draft && !disabled ? (
         <DateTimePicker
           key={step}
-          value={step === 'time' && day ? combineDayAndTime(day, seed) : seed}
+          // Frozen: a remote change or midnight must not reset an open dialog.
+          value={step === 'time' && day ? combineDayAndTime(day, draft) : draft}
           mode={step}
           display="default"
           onChange={onDialogChange}

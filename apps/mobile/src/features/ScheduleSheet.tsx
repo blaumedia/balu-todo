@@ -1,6 +1,6 @@
 import { addDaysISO, dowISO, todayLocalISO, type IsoDate } from '@balu/domain';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon, type IconName } from '../components/Icon';
@@ -31,8 +31,11 @@ export function ScheduleSheet() {
   // The task the date picker was opened for, not a boolean: a stale `true`
   // survived backdrop/drag/back/role-drop closes and popped the picker (the
   // Android dialog, the iOS compact field) on the next open.
-  const [pickerFor, setPickerFor] = useState<string | null>(null);
-  const showPicker = schedulePickerOpen(pickerFor, taskId);
+  // The seed date is frozen at open: the Android wrapper re-opens (and so resets)
+  // an open dialog whenever `value` or `onChange` changes, and this component
+  // re-renders on every sync tick. Same approach as DateField.
+  const [pickerFor, setPickerFor] = useState<{ id: string; seed: Date } | null>(null);
+  const showPicker = schedulePickerOpen(pickerFor?.id ?? null, taskId);
   useEffect(() => {
     if (taskId == null) setPickerFor(null);
   }, [taskId]);
@@ -64,13 +67,17 @@ export function ScheduleSheet() {
     { key: 'schedule.someday', icon: 'archive', run: () => taskId && scheduleTask(taskId, { someday: true }) },
   ];
 
-  const onPickerChange = (e: DateTimePickerEvent, d?: Date) => {
+  // Stable identity (see the seed note above); reads the live task via a ref.
+  const latest = useRef({ taskId, close });
+  latest.current = { taskId, close };
+  const onPickerChange = useCallback((e: DateTimePickerEvent, d?: Date) => {
     setPickerFor(null);
-    if (e.type === 'set' && d && taskId) {
-      scheduleTask(taskId, { start_date: dateToIso(d), evening: false });
-      close();
+    const cur = latest.current;
+    if (e.type === 'set' && d && cur.taskId) {
+      scheduleTask(cur.taskId, { start_date: dateToIso(d), evening: false });
+      cur.close();
     }
-  };
+  }, []);
 
   return (
     // Every option mutates; never shown to read-only members (same gate as ProjectActionsSheet).
@@ -88,7 +95,7 @@ export function ScheduleSheet() {
           </Pressable>
         ))}
         <Pressable
-          onPress={() => setPickerFor(taskId)}
+          onPress={() => taskId && setPickerFor({ id: taskId, seed: new Date() })}
           style={({ pressed }) => [styles.opt, pressed && { backgroundColor: theme.accentWash }]}
         >
           <Icon name="calendar-days" size={20} color={theme.textSecondary} strokeWidth={2} />
@@ -102,8 +109,8 @@ export function ScheduleSheet() {
           <Text style={[styles.optLabel, { color: theme.textSecondary }]}>{t('schedule.clear')}</Text>
         </Pressable>
       </View>
-      {showPicker ? (
-        <DateTimePicker value={new Date()} mode="date" display="default" onChange={onPickerChange} />
+      {showPicker && pickerFor ? (
+        <DateTimePicker value={pickerFor.seed} mode="date" display="default" onChange={onPickerChange} />
       ) : null}
     </BottomSheet>
   );
