@@ -92,9 +92,10 @@ export const en = {
   'priority.p2': 'P2',
   'priority.p3': 'P3',
 
-  'schedule.title': 'Schedule',
   'row.complete': 'Complete',
-  'schedule.today': 'Today',
+
+ 'schedule.title': 'Schedule',
+   'schedule.today': 'Today',
   'schedule.evening': 'This evening',
   'schedule.tomorrow': 'Tomorrow',
   'schedule.weekend': 'This weekend',

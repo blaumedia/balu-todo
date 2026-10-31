@@ -58,9 +58,11 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // ignores touches in the left edge zone (negative hitSlop shrinks its area).
   // A sideways swipe that starts there is the back gesture, not a row swipe.
   // Only on iOS and only where there is a screen to go back to: on Android and
-  // on tab roots the guard must keep covering the whole row.
+  // on tab roots the guard must keep covering the whole row. Tab navigators
+  // report canGoBack() (back goes to the first tab) but have no back swipe, so
+  // only a stack counts.
   const navigation = useNavigation();
-  const edgeBack = Platform.OS === 'ios' && navigation.canGoBack();
+  const edgeBack = Platform.OS === 'ios' && navigation.getState()?.type === 'stack' && navigation.canGoBack();
   const swipeGuard = useMemo(() => {
     const pan = Gesture.Pan();
     if (edgeBack) pan.hitSlop({ left: -EDGE_BACK_ZONE });
@@ -71,20 +73,34 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // lifts), and the swipeable requires it to fail first, so a drag that starts
   // in the strip stays with the back swipe. Not the swipeable's hitSlop prop:
   // that is a view-level slop and would also kill taps on the checkbox.
-  const edgeBlock = useMemo(
-    () =>
-      Gesture.Manual()
-        .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
-        .onTouchesUp((_e, manager) => manager.fail())
-        .onTouchesCancelled((_e, manager) => manager.fail()),
-    [],
-  );
+  // It also fails as soon as the touch moves leftward or vertically (the back
+  // swipe is rightward only), so UIKit does not hold a swipeable activation
+  // until lift and replay it late.
+  const edgeBlock = useMemo(() => {
+    let startX = 0;
+    let startY = 0;
+    return Gesture.Manual()
+      .runOnJS(true)
+      .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
+      .onTouchesDown((e) => {
+        startX = e.allTouches[0]?.x ?? 0;
+        startY = e.allTouches[0]?.y ?? 0;
+      })
+      .onTouchesMove((e, manager) => {
+        const dx = (e.allTouches[0]?.x ?? startX) - startX;
+        const dy = (e.allTouches[0]?.y ?? startY) - startY;
+        if (dx < -10 || Math.abs(dy) > 10) manager.fail();
+      })
+      .onTouchesUp((_e, manager) => manager.fail())
+      .onTouchesCancelled((_e, manager) => manager.fail());
+  }, []);
 
   const completed = task.completed_at != null;
   const checked = completed || done;
 
   const completeWithLinger = () => {
     if (completed) {
+      setDone(false);
       uncompleteTask(task.id);
       return;
     }
@@ -219,28 +235,28 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   }
 
   const swipe = (
-      <ReanimatedSwipeable
-        ref={swipeRef}
-        requireExternalGestureToFail={edgeBack ? edgeBlock : undefined}
-        friction={2}
-        leftThreshold={56}
-        rightThreshold={56}
-        overshootLeft={false}
-        overshootRight={false}
-        onSwipeableOpen={onSwipeableOpen}
-        renderLeftActions={() => (
-          <View style={[styles.action, { backgroundColor: theme.success, alignItems: 'flex-start' }]}>
-            <Icon name="check" size={22} color="#fff" strokeWidth={2.5} />
-          </View>
-        )}
-        renderRightActions={() => (
-          <View style={[styles.action, { backgroundColor: theme.accent, alignItems: 'flex-end' }]}>
-            <Icon name="calendar" size={20} color={theme.onAccent} strokeWidth={2.2} />
-          </View>
-        )}
-      >
-        {content}
-      </ReanimatedSwipeable>
+    <ReanimatedSwipeable
+      ref={swipeRef}
+      requireExternalGestureToFail={edgeBack ? edgeBlock : undefined}
+      friction={2}
+      leftThreshold={56}
+      rightThreshold={56}
+      overshootLeft={false}
+      overshootRight={false}
+      onSwipeableOpen={onSwipeableOpen}
+      renderLeftActions={() => (
+        <View style={[styles.action, { backgroundColor: theme.success, alignItems: 'flex-start' }]}>
+          <Icon name="check" size={22} color="#fff" strokeWidth={2.5} />
+        </View>
+      )}
+      renderRightActions={() => (
+        <View style={[styles.action, { backgroundColor: theme.accent, alignItems: 'flex-end' }]}>
+          <Icon name="calendar" size={20} color={theme.onAccent} strokeWidth={2.2} />
+        </View>
+      )}
+    >
+      {content}
+    </ReanimatedSwipeable>
   );
 
   return (
