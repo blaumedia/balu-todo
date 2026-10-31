@@ -1,7 +1,8 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
 import { useMemo, useRef, useState } from 'react';
-import { type AccessibilityActionEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from 'expo-router';
 import Animated, { FadeOut } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
@@ -56,8 +57,26 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // over the back swipe. That cannot be ruled out from source, so the guard
   // ignores touches in the left edge zone (negative hitSlop shrinks its area).
   // A sideways swipe that starts there is the back gesture, not a row swipe.
-  const swipeGuard = useMemo(
-    () => Gesture.Pan().hitSlop({ left: -EDGE_BACK_ZONE }).activeOffsetX([-10, 10]).failOffsetY([-10, 10]),
+  // Only on iOS and only where there is a screen to go back to: on Android and
+  // on tab roots the guard must keep covering the whole row.
+  const navigation = useNavigation();
+  const edgeBack = Platform.OS === 'ios' && navigation.canGoBack();
+  const swipeGuard = useMemo(() => {
+    const pan = Gesture.Pan();
+    if (edgeBack) pan.hitSlop({ left: -EDGE_BACK_ZONE });
+    return pan.activeOffsetX([-10, 10]).failOffsetY([-10, 10]);
+  }, [edgeBack]);
+  // Writer rows: ReanimatedSwipeable's own pan covers the whole row. A Manual
+  // gesture over the edge strip never activates (it fails when the finger
+  // lifts), and the swipeable requires it to fail first, so a drag that starts
+  // in the strip stays with the back swipe. Not the swipeable's hitSlop prop:
+  // that is a view-level slop and would also kill taps on the checkbox.
+  const edgeBlock = useMemo(
+    () =>
+      Gesture.Manual()
+        .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
+        .onTouchesUp((_e, manager) => manager.fail())
+        .onTouchesCancelled((_e, manager) => manager.fail()),
     [],
   );
 
@@ -69,6 +88,8 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
       uncompleteTask(task.id);
       return;
     }
+    // Checkbox and the accessibility action stay live during the linger: once only.
+    if (done) return;
     setDone(true);
     hapticComplete();
     // Row lingers ~600ms (DESIGN §5) before the mutation removes it from the list.
@@ -197,10 +218,10 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     );
   }
 
-  return (
-    <Animated.View exiting={FadeOut.duration(duration.medium)}>
+  const swipe = (
       <ReanimatedSwipeable
         ref={swipeRef}
+        requireExternalGestureToFail={edgeBack ? edgeBlock : undefined}
         friction={2}
         leftThreshold={56}
         rightThreshold={56}
@@ -220,6 +241,17 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
       >
         {content}
       </ReanimatedSwipeable>
+  );
+
+  return (
+    <Animated.View exiting={FadeOut.duration(duration.medium)}>
+      {edgeBack ? (
+        <GestureDetector gesture={edgeBlock}>
+          <View collapsable={false}>{swipe}</View>
+        </GestureDetector>
+      ) : (
+        swipe
+      )}
     </Animated.View>
   );
 }

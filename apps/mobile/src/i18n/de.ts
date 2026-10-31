@@ -96,6 +96,7 @@ export const de: Record<TranslationKey, string> = {
   'priority.p3': 'P3',
 
   'schedule.title': 'Planen',
+  'row.complete': 'Erledigen',
   'schedule.today': 'Heute',
   'schedule.evening': 'Heute Abend',
   'schedule.tomorrow': 'Morgen',
@@ -208,7 +209,6 @@ export const de: Record<TranslationKey, string> = {
   'common.cancel': 'Abbrechen',
   'common.copy': 'Kopieren',
   'common.done': 'Fertig',
-  'row.complete': 'Erledigen',
   'common.delete': 'Löschen',
   'common.save': 'Speichern',
 };

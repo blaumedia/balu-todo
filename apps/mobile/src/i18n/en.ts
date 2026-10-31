@@ -93,6 +93,7 @@ export const en = {
   'priority.p3': 'P3',
 
   'schedule.title': 'Schedule',
+  'row.complete': 'Complete',
   'schedule.today': 'Today',
   'schedule.evening': 'This evening',
   'schedule.tomorrow': 'Tomorrow',
@@ -203,7 +204,6 @@ export const en = {
   'common.cancel': 'Cancel',
   'common.copy': 'Copy',
   'common.done': 'Done',
-  'row.complete': 'Complete',
   'common.delete': 'Delete',
   'common.save': 'Save',
 } as const;
