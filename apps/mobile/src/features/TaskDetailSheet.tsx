@@ -103,11 +103,14 @@ function DetailBody({
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
 
+  // A role drop blurs the focused input; a viewer must not write (the server rejects it).
   const commitTitle = () => {
+    if (!writable) return;
     const v = title.trim();
     if (v && v !== task.title) updateTask(task.id, { title: v });
   };
   const commitNotes = () => {
+    if (!writable) return;
     if (notes !== task.notes) updateTask(task.id, { notes });
   };
 
