@@ -362,8 +362,10 @@ def test_upload_aborted_by_the_client_is_a_handled_event(
         "secret-name.bin", b"A" * 4096, "application/octet-stream"
     )
 
+    half = len(body) // 2
+
     async def _aborted_stream(self):
-        yield body
+        yield body[:half]  # the abort lands inside the file part
         raise ClientDisconnect()
 
     monkeypatch.setattr(Request, "stream", _aborted_stream)
@@ -379,6 +381,7 @@ def test_upload_aborted_by_the_client_is_a_handled_event(
     assert records[0].levelname == "INFO"
     assert "upload aborted by client" in records[0].getMessage()
     assert user["workspace_id"] in records[0].getMessage()
+    assert f"bytes_received={half}" in records[0].getMessage()
     assert "secret-name" not in records[0].getMessage()
 
 

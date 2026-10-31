@@ -419,7 +419,7 @@ async def upload_attachment(
         logger.info("upload aborted by client: workspace=%s bytes_received=%d", ws_id, total)
         raise validation_error("upload aborted") from None
     except Exception:
-        # A parser error, a dropped connection, a full disk: never leave the
+        # Anything else (a full disk, an unexpected I/O error): never leave the
         # half-written blob behind.
         sink.close()
         path.unlink(missing_ok=True)

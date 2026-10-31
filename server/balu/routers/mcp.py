@@ -12,6 +12,8 @@ configuration is worth more than documenting two account endpoints.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -29,6 +31,8 @@ from ..mcp.tools import ToolContext
 from ..models import User
 from ..ratelimit import MCP_AUTH_PER_IP, MCP_KEY_PER_IP, client_ip, limiter
 from ..schemas.mcp import McpSettings
+
+logger = logging.getLogger("balu.mcp")
 
 router = APIRouter(tags=["mcp"], include_in_schema=False)
 
@@ -148,6 +152,7 @@ async def mcp_post(
     except ClientDisconnect:
         # The client went away mid-body: nobody to answer, and not a server
         # fault, so do not let it escape as an unhandled ASGI exception.
+        logger.info("mcp request aborted by client")
         return Response(status_code=400)
     authorization = request.headers.get("Authorization", "")
     ip = client_ip(request)

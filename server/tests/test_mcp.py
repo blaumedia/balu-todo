@@ -828,7 +828,9 @@ def test_unknown_tool_is_reported_as_a_tool_error(client, user, mcp_on):
     assert "unknown tool" in payload(result)
 
 
-def test_a_client_disconnect_mid_body_is_a_handled_400(client, user, mcp_on, monkeypatch):
+def test_a_client_disconnect_mid_body_is_a_handled_400(
+    client, user, mcp_on, monkeypatch, caplog
+):
     """A client that goes away while the JSON-RPC body is read is not a server
     fault. The test client re-raises unhandled server exceptions, so an
     escaping ClientDisconnect would fail the request call itself."""
@@ -838,10 +840,13 @@ def test_a_client_disconnect_mid_body_is_a_handled_400(client, user, mcp_on, mon
         raise ClientDisconnect()
 
     monkeypatch.setattr(Request, "body", _aborted_body)
-    resp = client.post(
-        "/api/v1/mcp",
-        headers={"Authorization": f"Bearer {key}"},
-        content=b'{"jsonrpc": "2.0", "method": "tools/list", "id": 1}',
-    )
+    with caplog.at_level("INFO", logger="balu.mcp"):
+        resp = client.post(
+            "/api/v1/mcp",
+            headers={"Authorization": f"Bearer {key}"},
+            content=b'{"jsonrpc": "2.0", "method": "tools/list", "id": 1}',
+        )
     assert resp.status_code == 400
     assert resp.content == b""
+    records = [r for r in caplog.records if r.name == "balu.mcp"]
+    assert [r.getMessage() for r in records] == ["mcp request aborted by client"]
