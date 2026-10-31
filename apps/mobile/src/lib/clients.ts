@@ -13,6 +13,25 @@ let api: ApiClient | null = null;
 let apiBaseUrl: string | null = null;
 let sync: SyncClient | null = null;
 
+/**
+ * Clients that were stopped (workspace switch, session expiry) but whose running
+ * pull or flush has not settled yet. `stop()` does not cancel that work, and it
+ * writes the old workspace's queue/replica/token when it lands - so a purge or an
+ * adoption by another user must reach these too, not only the current client.
+ */
+const retired = new Set<SyncClient>();
+
+/** Stop `client` and keep it reachable until its running work has settled. */
+function retire(client: SyncClient | null): void {
+  if (!client) return;
+  client.stop();
+  retired.add(client);
+  const settled = (): void => {
+    retired.delete(client);
+  };
+  client.idle().then(settled, settled);
+}
+
 // Workspaces whose loss the app caused itself (delete, leave): the sync client's
 // 403/404 for them must not tell the user what they just did.
 const expectedLoss = new Set<string>();
@@ -137,7 +156,7 @@ export function getApi(): ApiClient | null {
 }
 
 export function initSync(serverUrl: string, workspaceId: string, userId: string): SyncClient {
-  sync?.stop();
+  retire(sync);
   // Landing in a workspace again (re-invite) resets its loss bookkeeping.
   expectedLoss.delete(workspaceId);
   announcedLoss.delete(workspaceId);
@@ -177,7 +196,21 @@ export function getSync(): SyncClient | null {
 }
 
 export function teardownSync(): void {
-  sync?.stop();
+  retire(sync);
   sync = null;
   notifySyncClient();
+}
+
+/**
+ * Close every sync client for good (the current one and any stopped one still
+ * winding down), drop the current one, and wait for their running pull or flush
+ * to settle. SQLite writes are async, so a purge must wait here: a late write
+ * from a client that is merely stopped would land after it.
+ */
+export async function teardownSyncSettled(): Promise<void> {
+  const all = [...retired, ...(sync ? [sync] : [])];
+  for (const client of all) client.close();
+  sync = null;
+  notifySyncClient();
+  await Promise.all(all.map((client) => client.idle().catch(() => {})));
 }

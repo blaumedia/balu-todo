@@ -20,6 +20,7 @@ const fake = vi.hoisted(() => ({
   nav: [] as string[],
   canDismiss: false,
   inited: [] as string[],
+  events: [] as string[],
 }));
 
 const fakeApi = {
@@ -57,7 +58,10 @@ vi.mock('../src/lib/kv', () => ({
     lastWorkspaceId: 'last',
     session: 'session',
   },
-  purgeUserData: async (opts: unknown) => void fake.purgeCalls.push(opts),
+  purgeUserData: async (opts: unknown) => {
+    fake.events.push('purge');
+    fake.purgeCalls.push(opts);
+  },
   sqliteKV: {
     getItem: async (k: string) => fake.kv.get(k) ?? null,
     setItem: async (k: string, v: string) => void fake.kv.set(k, v),
@@ -74,6 +78,13 @@ vi.mock('../src/lib/clients', () => ({
   },
   teardownSync: () => {
     fake.teardowns += 1;
+  },
+  // Closes every client and waits for their running request, like the real one.
+  teardownSyncSettled: async () => {
+    fake.teardowns += 1;
+    fake.events.push('settle:start');
+    await new Promise((r) => setTimeout(r, 5));
+    fake.events.push('settle:end');
   },
   listKnownWorkspaceIds: async () => fake.known,
   purgeWorkspaceStorage: async (id: string) => {
@@ -96,6 +107,7 @@ import {
   establishSession,
   expireSession,
   handleAccessLost,
+  logout,
   moveOffLostWorkspace,
 } from '../src/lib/boot';
 import { useApp } from '../src/store/app';
@@ -123,6 +135,7 @@ beforeEach(() => {
   fake.nav = [];
   fake.canDismiss = false;
   fake.inited = [];
+  fake.events = [];
   fake.getMe = async () => me('a', 'b');
   useApp.setState({
     user,
@@ -253,11 +266,26 @@ describe('establishSession foreign data', () => {
     expect(fake.inited).toEqual(['a']);
   });
 
+  it("lets the closed sync clients settle before the purge, so no late write follows it", async () => {
+    fake.kv.set('session', JSON.stringify({ user: { id: 'someone-else' }, workspace: ws('x') }));
+    fake.getMe = async () => me('a');
+    await establishSession('https://x', api);
+    expect(fake.events).toEqual(['settle:start', 'settle:end', 'purge']);
+  });
+
   it("keeps the same user's data", async () => {
     fake.kv.set('session', JSON.stringify({ user, workspace: ws('x') }));
     fake.getMe = async () => me('a');
     await establishSession('https://x', api);
     expect(fake.purgeCalls).toEqual([]);
     expect(fake.teardowns).toBe(0);
+  });
+});
+
+describe('logout', () => {
+  it('lets the closed sync clients settle before the user data is purged', async () => {
+    await logout();
+    expect(fake.events).toEqual(['settle:start', 'settle:end', 'purge']);
+    expect(fake.logouts).toBe(1);
   });
 });

@@ -16,6 +16,7 @@ import {
   setAccessLostHandler,
   setSessionExpiredHandler,
   teardownSync,
+  teardownSyncSettled,
 } from './clients';
 import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { isForeignLocalData } from './localData';
@@ -54,7 +55,9 @@ export async function establishSession(
   // for it): wipe it before anything reads it. The new tokens are already stored.
   if (isForeignLocalData(await sqliteKV.getItem(SETTINGS.session), me.user.id)) {
     stopReminderScheduler();
-    teardownSync();
+    // Closed and settled, not just stopped: a flush still running would write the
+    // old user's queue and replica back after the purge (SQLite writes are async).
+    await teardownSyncSettled();
     await purgeUserData({ keepAuth: true });
   }
   // Same rule as the web app (I8): explicit → last used → first. Taking
@@ -325,9 +328,9 @@ setSessionExpiredHandler(() => {
 
 /** Log out everywhere: stop syncing, revoke server-side, wipe local user data. */
 export async function logout(): Promise<void> {
-  // Tear down first so nothing re-persists after the purge.
+  // Close first and let running requests settle, so nothing re-persists after the purge.
   stopReminderScheduler();
-  teardownSync();
+  await teardownSyncSettled();
 
   const api = getApi();
   try {
