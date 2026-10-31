@@ -1508,3 +1508,113 @@ describe("attachments (v1.4)", () => {
     expect(c.getSnapshot().attachments).toEqual([]);
   });
 });
+
+describe("status while retrying after a failure", () => {
+  // Server that fails (network down) until `up`, then hangs on a gate, then answers.
+  function controllable() {
+    const server = makeServer();
+    const holder: { c?: SyncClient } = {};
+    let mode: "down" | "hang" | "up" = "down";
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let calls = 0;
+    const atCall: string[] = []; // client status at the moment each request goes out
+    const fetchImpl = (async (u: any, init: any) => {
+      calls += 1;
+      atCall.push(holder.c?.getStatus() ?? "?");
+      if (mode === "down") throw new TypeError("network down");
+      if (mode === "hang") await gate;
+      return server.fetch(u, init);
+    }) as unknown as typeof fetch;
+    return {
+      fetchImpl,
+      setMode: (m: "down" | "hang" | "up") => {
+        mode = m;
+      },
+      release,
+      calls: () => calls,
+      atCall,
+      holder,
+    };
+  }
+  const opts = { retryBaseMs: 1_000_000, retryMaxMs: 1_000_000, autoSyncMs: 1_000_000 };
+
+  for (const kind of ["flush", "pull"] as const) {
+    const attempt = (c: SyncClient): Promise<void> => (kind === "flush" ? c.flush() : c.sync());
+    const prime = (c: SyncClient): void => {
+      if (kind === "flush") c.mutate({ type: "task_add", args: { title: "x" } });
+    };
+
+    it(`${kind}: a retry from offline stays offline while in flight, then synced`, async () => {
+      const s = controllable();
+      const c = track(createSyncClient(base({ fetch: s.fetchImpl, ...opts })));
+      prime(c);
+      await attempt(c);
+      expect(c.getStatus()).toBe("offline");
+      s.setMode("hang");
+      const seen: string[] = [];
+      c.subscribe(() => seen.push(c.getStatus()));
+      const p = attempt(c);
+      await vi.waitFor(() => expect(s.calls()).toBeGreaterThan(1));
+      expect(c.getStatus()).toBe("offline");
+      s.release();
+      await p;
+      expect(c.getStatus()).toBe("synced");
+      expect(seen).not.toContain("syncing");
+    });
+
+    it(`${kind}: a first attempt from synced shows syncing`, async () => {
+      const s = controllable();
+      s.setMode("up");
+      const c = track(createSyncClient(base({ fetch: s.fetchImpl, ...opts })));
+      await c.sync();
+      expect(c.getStatus()).toBe("synced");
+      s.setMode("hang");
+      prime(c);
+      const p = attempt(c);
+      await vi.waitFor(() => expect(c.getStatus()).toBe("syncing"));
+      s.release();
+      await p;
+      expect(c.getStatus()).toBe("synced");
+    });
+
+    it(`${kind}: the very first attempt (initial status) shows syncing`, async () => {
+      const s = controllable();
+      s.setMode("hang");
+      const c = track(createSyncClient(base({ fetch: s.fetchImpl, ...opts })));
+      prime(c);
+      const p = attempt(c);
+      await vi.waitFor(() => expect(c.getStatus()).toBe("syncing"));
+      s.release();
+      await p;
+    });
+
+    it(`${kind}: a failing retry stays offline and the automatic retry is still scheduled`, async () => {
+      const s = controllable();
+      const c = track(
+        createSyncClient(
+          base({ fetch: s.fetchImpl, retryBaseMs: 10, retryMaxMs: 10, autoSyncMs: 1_000_000 }),
+        ),
+      );
+      s.holder.c = c;
+      prime(c);
+      c.start();
+      // The first attempt legitimately shows "syncing"; watch from its failure on.
+      await vi.waitFor(() => expect(s.calls()).toBeGreaterThanOrEqual(1));
+      await vi.waitFor(() => expect(c.getStatus()).toBe("offline"));
+      const seen: string[] = [];
+      c.subscribe(() => seen.push(c.getStatus()));
+      await vi.waitFor(() => expect(s.calls()).toBeGreaterThanOrEqual(4)); // retries keep firing
+      expect(c.getStatus()).toBe("offline");
+      expect(seen).not.toContain("syncing");
+      // Every retry went out while the client still said offline (the first one
+      // legitimately says syncing).
+      expect(s.atCall.slice(1).every((x) => x === "offline")).toBe(true);
+      // Recovery still happens through the scheduled retry.
+      s.setMode("up");
+      await vi.waitFor(() => expect(c.getStatus()).toBe("synced"));
+    });
+  }
+});

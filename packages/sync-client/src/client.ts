@@ -458,7 +458,13 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     return globalThis.document?.visibilityState === "hidden";
   }
 
+  // True from a failed attempt until one succeeds. Not derived from `status`,
+  // which starts as "offline" before any attempt has run: the first attempt
+  // must still show "syncing".
+  let failing = false;
+
   function setStatus(s: SyncStatus): void {
+    failing = s === "offline" || s === "error";
     if (s === "synced") {
       hasSynced = true;
       notBefore = 0;
@@ -473,6 +479,14 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       status = s;
       invalidate();
     }
+  }
+
+  // A retry after a failure must not flip the indicator back to "syncing": during
+  // an outage with hanging requests that showed "Syncing..." most of each cycle.
+  // offline/error stay until an attempt succeeds or fails differently.
+  function markSyncing(): void {
+    if (failing) return;
+    setStatus("syncing");
   }
 
   function buildSnapshot(): Snapshot {
@@ -740,7 +754,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   async function flush(): Promise<void> {
     if (accessLost || closed || flushing || queue.length === 0 || throttled()) return;
     flushing = true;
-    setStatus("syncing");
+    markSyncing();
     const rejected: RejectedCommand[] = [];
     const relocated: RelocatedCommand[] = [];
     let sentSize = 0; // size of the batch in flight, for the timeout reaction below
@@ -834,7 +848,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
   async function pull(): Promise<void> {
     if (accessLost || closed || throttled()) return;
-    setStatus("syncing");
+    markSyncing();
     const lost = await exclusive(async (): Promise<AccessLost["reason"] | null> => {
       if (accessLost || closed) return null;
       try {
