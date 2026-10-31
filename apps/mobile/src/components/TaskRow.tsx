@@ -12,6 +12,7 @@ import ReanimatedSwipeable, {
 import { completeTask, uncompleteTask } from '../lib/actions';
 import { relativeDate } from '../lib/format';
 import { hapticComplete } from '../lib/haptics';
+import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
@@ -131,8 +132,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // Swipes are unreachable with TalkBack/VoiceOver (they consume the gestures),
   // so expose both swipe actions as accessibility actions.
   const onAccessibilityAction = (e: AccessibilityActionEvent) => {
-    if (e.nativeEvent.actionName === 'complete') completeWithLinger();
-    else if (e.nativeEvent.actionName === 'schedule') openSchedule(task.id);
+    dispatchRowAction(e.nativeEvent.actionName, { complete: completeWithLinger, schedule: () => openSchedule(task.id) });
   };
 
   // ── metadata chips ──
@@ -151,14 +151,10 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     <Pressable
       onPress={() => openDetail(task.id)}
       // Only rows with swipe actions: the same two actions as swipe right / left.
-      accessibilityActions={
-        swipeable && writable
-          ? [
-              { name: 'complete', label: t('row.complete') },
-              { name: 'schedule', label: t('schedule.title') },
-            ]
-          : undefined
-      }
+      accessibilityActions={rowAccessibilityActions(swipeable, writable, {
+        complete: t('row.complete'),
+        schedule: t('schedule.title'),
+      })}
       onAccessibilityAction={swipeable && writable ? onAccessibilityAction : undefined}
       style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
