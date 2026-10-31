@@ -283,3 +283,34 @@ def test_describe_failure_keeps_our_own_channel_messages():
         "SMTP is not configured"
     )
     assert describe_failure(ValueError("secret url")) == "ValueError"
+
+
+def test_concurrent_put_keeps_exactly_the_last_list(client, user):
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.models import UserChannel
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    uid = uuid.UUID(user["user"]["id"])
+    with get_sessionmaker()() as s0:
+        s0.execute(
+            text("SELECT id FROM users WHERE id = :u FOR NO KEY UPDATE"), {"u": uid}
+        )
+        s0.add(UserChannel(user_id=uid, type="ntfy", config={"url": "https://93.184.216.34/a"}))
+        s0.flush()
+        bg = Background(
+            lambda: client.put(
+                "/api/v1/me/channels",
+                headers=user["headers"],
+                json={"channels": [{"type": "ntfy", "url": "https://93.184.216.34/b"}]},
+            )
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    resp = bg.result()
+    expected = [{"type": "ntfy", "url": "https://93.184.216.34/b"}]
+    assert resp.status_code == 200
+    assert resp.json()["channels"] == expected
+    got = client.get("/api/v1/me/channels", headers=user["headers"]).json()
+    assert got["channels"] == expected

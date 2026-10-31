@@ -24,6 +24,7 @@ from ..notifications import (
     transport_available,
 )
 from ..schemas.channel import ChannelIn, ChannelsIn, ChannelsResponse, ChannelTest
+from ..services import lock_users
 from ..urlguard import UnsafeUrl, check_outbound_url
 
 logger = logging.getLogger("balu.channels")
@@ -101,6 +102,11 @@ def put_channels(
             raise channel_unavailable(f"{channel.type} transport is not configured")
         prepared.append((channel.type, config))
 
+    # Delete-then-insert is not atomic against a second PUT: the second DELETE
+    # does not see the first PUT's uncommitted rows, and the list ends up as the
+    # union of both. With the lock, the later PUT's DELETE runs after the first
+    # commits and the list is exactly the last one.
+    lock_users(db, [user.id])
     db.execute(
         UserChannel.__table__.delete().where(UserChannel.user_id == user.id)
     )

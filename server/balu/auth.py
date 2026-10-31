@@ -11,7 +11,7 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import Depends, Request
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -111,14 +111,44 @@ def issue_refresh_token(
     return raw
 
 
+def _lock_family(db: Session, family_id: uuid.UUID) -> None:
+    """Serialise every rotation, replay burn and logout of one token family.
+
+    Row locks on the presented token were not enough: two replays of different
+    stale tokens each locked their own row and then waited for the other's in
+    the family-wide UPDATE (deadlock), and a replay burning the family could not
+    see a successor a concurrent rotation was inserting, leaving it live. One
+    transaction-scoped lock per family, taken before any family row is touched,
+    removes both. Released at commit or rollback.
+    """
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:f, 0))"),
+        {"f": str(family_id)},
+    )
+
+
+def _find_refresh_token(db: Session, raw: str, fresh: bool = False) -> RefreshToken | None:
+    stmt = select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
+    if fresh:
+        # Re-read after the family lock: the row may have been rotated or
+        # revoked by the transaction that held it.
+        stmt = stmt.execution_options(populate_existing=True)
+    return db.execute(stmt).scalar_one_or_none()
+
+
 def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
     """Validate `raw`, rotate it, return (user_id, new_raw_token).
 
     Replay of an already-rotated token invalidates the whole session family.
     """
-    row = db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
-    ).scalar_one_or_none()
+    row = _find_refresh_token(db, raw)
+    if row is None:
+        raise invalid_token()
+    # Two refreshes presenting one token both read it unrevoked and both issued
+    # a live successor, which defeats the replay defence (§1); under the family
+    # lock the second is judged a replay.
+    _lock_family(db, row.family_id)
+    row = _find_refresh_token(db, raw, fresh=True)
     if row is None:
         raise invalid_token()
 
@@ -129,7 +159,8 @@ def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
 
     if row.revoked:
         # Replay detected: burn the whole family and persist it (the request's
-        # error path would otherwise roll the burn back).
+        # error path would otherwise roll the burn back). The family lock makes
+        # this UPDATE see any successor a concurrent rotation just committed.
         db.query(RefreshToken).filter(RefreshToken.family_id == row.family_id).update(
             {RefreshToken.revoked: True}
         )
@@ -150,10 +181,9 @@ def revoke_refresh_token(db: Session, raw: str) -> None:
     Revoking only the presented token would leave every earlier token of the same
     family usable, so a logout would not actually end the session.
     """
-    row = db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == hash_token(raw))
-    ).scalar_one_or_none()
+    row = _find_refresh_token(db, raw)
     if row is not None:
+        _lock_family(db, row.family_id)
         db.query(RefreshToken).filter(RefreshToken.family_id == row.family_id).update(
             {RefreshToken.revoked: True}
         )

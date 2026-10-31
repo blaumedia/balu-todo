@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auth import (
@@ -66,7 +67,14 @@ def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)) 
         password_hash=hash_password(body.password),
     )
     db.add(user)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError:
+        # Two registrations of one address raced past the check above; the
+        # unique index decides, and the loser gets the answer it would have got
+        # a moment later.
+        db.rollback()
+        raise email_taken() from None
 
     # The workspace is named after the account, in full — splitting on the first
     # space turned "Anna Maria Schmidt" into a workspace called "Anna" (I12).

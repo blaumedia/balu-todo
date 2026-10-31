@@ -46,6 +46,8 @@ Rules:
   → `403 registration_disabled`. **Invites do not bypass this gate**: `POST /invites/accept`
   resolves an authenticated user, so it can only add an account that already exists. With
   registration closed there is no route to a new account at all.
+- Registering an address that is taken, including by a registration racing this one →
+  `409 email_taken`.
 - `POST /auth/register` auto-creates a personal workspace named after the user — the
   full name, e.g. "Anna Maria Schmidt" — with the user as `owner`.
 - **Throttling (v1.2.1):** `/auth/login`, `/auth/register` and `/auth/refresh` are rate
@@ -57,7 +59,9 @@ Rules:
 - Password: min 8 chars, hashed with argon2id (fallback bcrypt acceptable if argon2 is a
   packaging problem — pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
-  invalidates the whole session family (replay defense).
+  invalidates the whole session family (replay defense). Two refreshes presenting the
+  same token at the same time are serialised: one rotates it, the other is a replay
+  (`401`, family invalidated).
 
 ## 2. Account & workspaces (REST)
 
@@ -509,7 +513,7 @@ Per-user external channels — the self-hosted answer to app-store push relays.
 | Endpoint | Notes |
 |---|---|
 | `GET /me/channels` | `{channels: [...]}` |
-| `PUT /me/channels` | replaces the full list; validates per type |
+| `PUT /me/channels` | replaces the full list; validates per type; concurrent PUTs are serialised, so the stored list is exactly one of them |
 | `POST /me/channels/test` | body `{type}` → sends a test message → `204`; delivery failure → `400 channel_unavailable` |
 
 Channel shapes: `{"type": "ntfy", "url": "https://ntfy.sh/<topic>"}` ·

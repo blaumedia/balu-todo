@@ -189,3 +189,120 @@ def test_logout_invalidates_earlier_tokens_in_the_family(client, user):
     for token in (first, second):
         resp = client.post("/api/v1/auth/refresh", json={"refresh_token": token})
         assert resp.status_code == 401, token
+
+
+def test_concurrent_refresh_with_one_token_is_a_replay(client):
+    from balu.auth import rotate_refresh_token
+    from balu.db import get_sessionmaker
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    data = register_user(client)
+    token = data["refresh_token"]
+    with get_sessionmaker()() as s0:
+        new_raw = rotate_refresh_token(s0, token)[1]
+        s0.flush()
+        bg = Background(
+            lambda: client.post("/api/v1/auth/refresh", json={"refresh_token": token})
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    resp = bg.result()
+    assert resp.status_code == 401
+    assert resp.json()["detail"]["code"] == "invalid_token"
+    # The family is burned, exactly as for a sequential replay.
+    again = client.post("/api/v1/auth/refresh", json={"refresh_token": new_raw})
+    assert again.status_code == 401
+
+
+def _family_of_three(client) -> tuple[str, str, str]:
+    """Register, refresh twice: (revoked, revoked, live) tokens of one family."""
+    data = register_user(client)
+    t0 = data["refresh_token"]
+    t1 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).json()["refresh_token"]
+    t2 = client.post("/api/v1/auth/refresh", json={"refresh_token": t1}).json()["refresh_token"]
+    return t0, t1, t2
+
+
+def test_replays_of_two_stale_tokens_of_one_family_do_not_deadlock(client):
+    import threading
+
+    from fastapi import HTTPException
+    from sqlalchemy.orm import Session
+
+    from balu.auth import rotate_refresh_token
+    from balu.db import get_sessionmaker
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    t0, t1, t2 = _family_of_three(client)
+    # The first replay parks inside its family-wide burn, holding the family lock;
+    # the second must be blocked on that lock (not holding a row lock of its own,
+    # which is how the two used to cross) until the first is released.
+    in_burn = threading.Event()
+    release = threading.Event()
+
+    class Parked(Session):
+        def query(self, *args, **kwargs):
+            in_burn.set()
+            assert release.wait(timeout=10)
+            return super().query(*args, **kwargs)
+
+    def replay(token: str, session_cls: type[Session]) -> str:
+        with session_cls(bind=get_sessionmaker().kw["bind"]) as s:
+            try:
+                rotate_refresh_token(s, token)
+            except HTTPException as exc:
+                return exc.detail["code"]
+        return "rotated"
+
+    a = Background(lambda: replay(t0, Parked))
+    assert in_burn.wait(timeout=10)
+    b = Background(lambda: replay(t1, Session))
+    try:
+        wait_for_lock_waiters(1)
+    finally:
+        release.set()
+    assert (a.result(), b.result()) == ("invalid_token", "invalid_token")
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t2}).status_code == 401
+
+
+def test_replay_burns_a_successor_created_by_a_concurrent_rotation(client):
+    from balu.auth import rotate_refresh_token
+    from balu.db import get_sessionmaker
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    data = register_user(client, email="burn@example.com")
+    old = data["refresh_token"]
+    cur = client.post("/api/v1/auth/refresh", json={"refresh_token": old}).json()["refresh_token"]
+    with get_sessionmaker()() as s0:
+        newest = rotate_refresh_token(s0, cur)[1]  # the thief's rotation, uncommitted
+        s0.flush()
+        bg = Background(
+            lambda: client.post("/api/v1/auth/refresh", json={"refresh_token": old})
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    assert bg.result().status_code == 401
+    # The replay burned the whole family, including the token just rotated in.
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": newest}).status_code == 401
+
+
+def test_register_race_on_one_email_is_email_taken(client):
+    from balu.db import get_sessionmaker
+    from balu.models import User
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    email = "race-taken@example.com"
+    with get_sessionmaker()() as s0:
+        s0.add(User(email=email, name="X", password_hash="x"))
+        s0.flush()
+        bg = Background(
+            lambda: client.post(
+                "/api/v1/auth/register",
+                json={"email": email, "password": "password123", "name": "Y"},
+            )
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    resp = bg.result()
+    assert resp.status_code == 409
+    assert resp.json()["detail"]["code"] == "email_taken"
