@@ -249,6 +249,8 @@ describe('bootApp', () => {
     };
     await bootApp();
     expect(useApp.getState().loginNotice).toBeNull();
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.inited).toEqual([]);
     expect(fake.logouts).toBe(0);
   });
 
@@ -306,6 +308,13 @@ describe('logout', () => {
     await logout();
     expect(useApp.getState().boot).toBe('onboarding');
     expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('only replaces with onboarding when there is nothing to dismiss (deep link, single screen)', async () => {
+    fake.canDismiss = false;
+    useApp.setState({ boot: 'ready' } as any);
+    await logout();
+    expect(fake.nav).toEqual(['replace:/onboarding']);
   });
 
   it('still resets the session and leaves the screen when the purge fails', async () => {

@@ -343,6 +343,21 @@ describe("bootSession (attemptBoot classification)", () => {
     expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
   });
 
+  it("a signed_out /me (a deliberate logout) ends on login at once, without the unreachable screen", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      throw new ApiError("signed_out", "x", 401);
+    };
+    const booted = bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await booted).toBe(false);
+    expect(calls).toBe(1);
+    expect(useApp.getState().boot).toBe("login");
+    expect(useApp.getState().loginNotice).toBeNull();
+  });
+
   it("does not even ask /me when the stored login is already gone", async () => {
     globalThis.localStorage.removeItem("balu:auth:refresh");
     let calls = 0;
