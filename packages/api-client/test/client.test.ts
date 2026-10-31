@@ -508,6 +508,37 @@ describe("refresh across tabs sharing one storage", () => {
     expect(await storage.getItem("balu:auth:refreshLease")).toBeNull();
   });
 
+  it("a refresh() called after the lease was lost joins the retry instead of starting a second POST", async () => {
+    const { storage, state, fetchImpl } = await twoTabs();
+    let armed = false;
+    let stolen = false;
+    let late: Promise<unknown> | null = null;
+    let cRef: Awaited<ReturnType<typeof hookedTab>> | null = null;
+    const c = await hookedTab(storage, fetchImpl, {
+      get: (k) => {
+        if (k === "balu:auth:refresh" && armed) {
+          armed = false;
+          stolen = true;
+          void storage.setItem("balu:auth:refreshLease", JSON.stringify({ id: "other-tab", exp: Date.now() + 300 }));
+          return;
+        }
+        // The next lease read after the steal is the retry loop, which only runs
+        // once the lost attempt has been abandoned: the second call comes after it.
+        if (k === "balu:auth:refreshLease" && stolen && !late && lostSeen) late = cRef!.refresh();
+        if (k === "balu:auth:refreshLease" && stolen) lostSeen = true;
+      },
+    });
+    let lostSeen = false;
+    cRef = c;
+    armed = true;
+    const first = c.refresh();
+    const t1 = await first;
+    const t2 = await late;
+    expect(late).not.toBeNull();
+    expect(state.refreshCalls).toBe(1);
+    expect(t2).toBe(t1);
+  });
+
   it("a lease that expired during a long settle is renewed instead of lost", async () => {
     const { storage, state, fetchImpl } = await twoTabs();
     let offset = 0;
