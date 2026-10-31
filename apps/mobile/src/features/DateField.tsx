@@ -34,9 +34,10 @@ export interface DateFieldProps {
 export function DateField({ icon, label, value, onChange, disabled = false }: DateFieldProps) {
   const theme = useTheme();
   const { t, locale } = useT();
-  // Android only: seed captured once on open, because `isoToDate(null)` yields a fresh
-  // timestamp each render and the Android wrapper re-opens its dialog on a changed timestamp.
-  // iOS renders an inline picker (no dialogs to re-open) and follows `value` live, as before.
+  // Non-null while the picker is open; holds the date captured at open. Android renders this
+  // frozen seed, because `isoToDate(null)` yields a fresh timestamp each render and the Android
+  // wrapper re-opens its dialog on a changed timestamp. iOS renders an inline picker (no dialog
+  // to re-open), so it reads `value` live.
   const [pickerSeed, setPickerSeed] = useState<Date | null>(null);
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
