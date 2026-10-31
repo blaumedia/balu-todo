@@ -1,5 +1,5 @@
 import { pickMembership, type Locale, type Theme, type User, type Workspace } from '@balu/domain';
-import type { ApiClient } from '@balu/api-client';
+import { ApiError, type ApiClient } from '@balu/api-client';
 import type { AccessLost } from '@balu/sync-client';
 import { router } from 'expo-router';
 import { Alert } from 'react-native';
@@ -14,9 +14,11 @@ import {
   listKnownWorkspaceIds,
   purgeWorkspaceStorage,
   setAccessLostHandler,
+  setSessionExpiredHandler,
   teardownSync,
 } from './clients';
 import { SETTINGS, purgeUserData, sqliteKV } from './kv';
+import { isForeignLocalData } from './localData';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
 import { accessLostNotice } from './syncNotices';
 
@@ -48,6 +50,13 @@ export async function establishSession(
   stillWanted: () => boolean = () => true,
 ): Promise<boolean> {
   const me = await api.getMe();
+  // Another account's data is on this device (its session expired and was kept
+  // for it): wipe it before anything reads it. The new tokens are already stored.
+  if (isForeignLocalData(await sqliteKV.getItem(SETTINGS.session), me.user.id)) {
+    stopReminderScheduler();
+    teardownSync();
+    await purgeUserData({ keepAuth: true });
+  }
   // Same rule as the web app (I8): explicit → last used → first. Taking
   // memberships[0] unconditionally threw a multi-workspace user back into the
   // same workspace on every launch.
@@ -264,7 +273,13 @@ export async function bootApp(): Promise<void> {
   try {
     const ok = await establishSession(serverUrl, api);
     if (!ok) store.setBoot('onboarding');
-  } catch {
+  } catch (e) {
+    // A refused session is not "offline": booting the cached session would keep
+    // an account running whose tokens are gone.
+    if (e instanceof ApiError && e.status === 401) {
+      await expireSession();
+      return;
+    }
     // Offline (or server down): boot from the cached session so the local
     // replica + queue still work (acceptance criterion 2).
     if (sessionRaw) {
@@ -282,11 +297,36 @@ export async function bootApp(): Promise<void> {
   }
 }
 
+/**
+ * The server refused the refresh token (or /me answered 401): back to the
+ * login step with a notice. Queue and replica stay - they sync once the same
+ * user signs in again; establishSession wipes them if someone else does.
+ */
+export async function expireSession(): Promise<void> {
+  stopReminderScheduler();
+  teardownSync();
+  await getApi()?.logout().catch(() => {}); // no network call once the refresh token is gone
+  const st = useApp.getState();
+  const wasReady = st.boot === 'ready';
+  st.reset();
+  st.setLoginNotice('sessionExpired');
+  if (!wasReady) return; // during boot the index gate redirects on its own
+  try {
+    if (router.canDismiss()) router.dismissAll();
+    router.replace('/onboarding');
+  } catch {
+    /* router not ready */
+  }
+}
+
+setSessionExpiredHandler(() => {
+  void expireSession();
+});
+
 /** Log out everywhere: stop syncing, revoke server-side, wipe local user data. */
 export async function logout(): Promise<void> {
   // Tear down first so nothing re-persists after the purge.
   stopReminderScheduler();
-  const { teardownSync } = await import('./clients');
   teardownSync();
 
   const api = getApi();

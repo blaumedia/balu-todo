@@ -54,6 +54,7 @@ vi.mock('../src/lib/clients', () => ({
     return true;
   },
   setAccessLostHandler: () => {},
+  setSessionExpiredHandler: () => {},
 }));
 
 import { discardLostWorkspaces, handleAccessLost, moveOffLostWorkspace } from '../src/lib/boot';

@@ -49,8 +49,11 @@ export const sqliteKV: AsyncKV = {
  * Without this the next person to open the app on this device still has the
  * previous user's tasks, notes and comments in SQLite, and any queued command
  * would be flushed under whichever account signs in next.
+ *
+ * `keepAuth`: a different user just signed in over an expired session - their
+ * freshly stored tokens must survive.
  */
-export async function purgeUserData(): Promise<void> {
+export async function purgeUserData(opts: { keepAuth?: boolean } = {}): Promise<void> {
   const db = await getDb();
   // Device preferences survive; anything tied to the account goes. Note that
   // `remindersEnabled` is a device setting ('1'/'0', no user data) — wiping it
@@ -58,7 +61,8 @@ export async function purgeUserData(): Promise<void> {
   // `lastWorkspaceId` is deliberately NOT kept: it names the previous user's
   // workspace.
   await db.runAsync(
-    "DELETE FROM kv WHERE k LIKE 'balu:%' AND k NOT IN (?, ?, ?, ?)",
+    "DELETE FROM kv WHERE k LIKE 'balu:%' AND k NOT IN (?, ?, ?, ?)" +
+      (opts.keepAuth ? " AND k NOT LIKE 'balu:auth:%'" : ''),
     'balu:settings:serverUrl',
     'balu:settings:theme',
     'balu:settings:locale',

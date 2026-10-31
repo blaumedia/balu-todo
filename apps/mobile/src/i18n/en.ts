@@ -187,6 +187,7 @@ export const en = {
   'auth.invalid_credentials': 'Wrong email or password.',
   'auth.email_taken': 'That email is already registered.',
   'auth.registration_disabled': 'Registration is disabled on this server.',
+  'auth.sessionExpired': 'Your session expired, please log in again.',
 
   'project.newProject': 'New project',
   'project.newProjectName': 'Project name',

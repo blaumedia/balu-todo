@@ -40,6 +40,12 @@ export function setAccessLostHandler(handler: (info: AccessLost) => void): void 
   accessLostHandler = handler;
 }
 
+let sessionExpiredHandler: (() => void) | null = null;
+/** Registered by lib/boot.ts (a hook, not an import: boot.ts imports this module). */
+export function setSessionExpiredHandler(handler: () => void): void {
+  sessionExpiredHandler = handler;
+}
+
 /** Delete one workspace's replica/queue/token; returns the discarded queue length. */
 export async function purgeWorkspaceStorage(workspaceId: string): Promise<number> {
   const discarded = await purgeWorkspaceData(sqliteKV, workspaceId);
@@ -122,7 +128,7 @@ export function initApi(serverUrl: string): ApiClient {
   const base = apiBase(serverUrl);
   if (api && apiBaseUrl === base) return api;
   apiBaseUrl = base;
-  api = createApiClient({ baseUrl: base, storage: sqliteKV });
+  api = createApiClient({ baseUrl: base, storage: sqliteKV, onSessionExpired: () => sessionExpiredHandler?.() });
   return api;
 }
 
