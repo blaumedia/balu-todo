@@ -481,7 +481,7 @@ describe("outage recovery (contract §6.7)", () => {
     expect(calls).toBe(1);
   });
 
-  it("wake() syncs now instead of waiting for the backoff", async () => {
+  it("wake() cancels a pending retry, syncs once and the retry never fires", async () => {
     const server = makeServer();
     let calls = 0;
     const fetchImpl = ((u: any, init: any) => {
@@ -490,39 +490,110 @@ describe("outage recovery (contract §6.7)", () => {
       return server.fetch(u, init);
     }) as unknown as typeof fetch;
     const c = track(
-      createSyncClient(base({ fetch: fetchImpl, retryBaseMs: 10_000, autoSyncMs: 1_000_000 })),
+      createSyncClient(base({ fetch: fetchImpl, retryBaseMs: 80, autoSyncMs: 1_000_000 })),
     );
-    await c.sync(); // fails: offline
-    expect(c.getStatus()).toBe("offline");
-    await c.wake();
+    c.start();
+    await vi.waitFor(() => expect(calls).toBe(1)); // initial status is already "offline"
+    await new Promise((r) => setTimeout(r, 10)); // let the failure arm the 80 ms retry
+    // Two wake sources in one tick (focus + visibilitychange) share one sync.
+    await Promise.all([c.wake(), c.wake()]);
     expect(c.getStatus()).toBe("synced");
     expect(calls).toBe(2);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls).toBe(2);
+  });
+
+  it("a slow response body is not cut off by the header deadline", async () => {
+    const server = makeServer();
+    const fetchImpl = (async (u: any, init: any) => {
+      const res = await server.fetch(u, init);
+      const text = await res.text();
+      const enc = new TextEncoder();
+      const stream = new ReadableStream({
+        async start(ctrl) {
+          await new Promise((r) => setTimeout(r, 60));
+          ctrl.enqueue(enc.encode(text));
+          ctrl.close();
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const c = track(
+      createSyncClient(base({ fetch: fetchImpl, requestTimeoutMs: 20, bodyTimeoutMs: 2_000 })),
+    );
+    await c.sync();
+    expect(c.getStatus()).toBe("synced");
+  });
+
+  it("a body that never finishes is abandoned after bodyTimeoutMs", async () => {
+    const fetchImpl = (async () =>
+      new Response(new ReadableStream({ start() {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })) as unknown as typeof fetch;
+    const c = track(
+      createSyncClient(base({ fetch: fetchImpl, requestTimeoutMs: 1_000, bodyTimeoutMs: 30 })),
+    );
+    await c.sync();
+    expect(c.getStatus()).toBe("offline");
+  });
+
+  it("the retry does not poll from a hidden page with nothing queued", async () => {
+    vi.stubGlobal(
+      "document",
+      Object.assign(new EventTarget(), { visibilityState: "hidden" as DocumentVisibilityState }),
+    );
+    try {
+      let calls = 0;
+      const fetchImpl = (() => {
+        calls += 1;
+        throw new TypeError("network down");
+      }) as unknown as typeof fetch;
+      const c = track(
+        createSyncClient(base({ fetch: fetchImpl, retryBaseMs: 10, autoSyncMs: 1_000_000 })),
+      );
+      c.start();
+      await vi.waitFor(() => expect(c.getStatus()).toBe("offline"));
+      await new Promise((r) => setTimeout(r, 80));
+      expect(calls).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("runs a pull requested during a flush after it, not alongside it", async () => {
     const server = makeServer();
-    const events: string[] = [];
-    const fetchImpl = (async (u: any, init: any) => {
-      events.push("start");
-      await new Promise((r) => setTimeout(r, 10));
-      const res = await server.fetch(u, init);
-      events.push("end");
-      return res;
-    }) as unknown as typeof fetch;
-    const c = track(createSyncClient(base({ fetch: fetchImpl })));
-    c.mutate({ type: "task_add", args: { title: "a" } });
-    const flushing = c.flush();
-    await c.sync(); // overlaps the flush
-    await flushing;
-    await c.sync();
     let open = 0;
     let maxOpen = 0;
-    for (const e of events) {
-      open += e === "start" ? 1 : -1;
+    let started = 0;
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((r) => (releaseFirst = r));
+    const fetchImpl = (async (u: any, init: any) => {
+      started += 1;
+      open += 1;
       maxOpen = Math.max(maxOpen, open);
-    }
-    expect(events.length).toBeGreaterThanOrEqual(4);
+      try {
+        if (started === 1) await firstGate; // the pure pull stays in flight
+        else await new Promise((r) => setTimeout(r, 5));
+        return await server.fetch(u, init);
+      } finally {
+        open -= 1;
+      }
+    }) as unknown as typeof fetch;
+    const c = track(createSyncClient(base({ fetch: fetchImpl, flushDebounceMs: 1_000_000 })));
+    await c.hydrate();
+    const pulling = c.sync(); // queue empty: a pure pull, now in flight
+    await vi.waitFor(() => expect(started).toBe(1));
+    c.mutate({ type: "task_add", args: { title: "a" } });
+    const flushing = c.flush(); // must queue behind the pull
+    await new Promise((r) => setTimeout(r, 30));
+    expect(started).toBe(1);
+    releaseFirst();
+    await Promise.all([pulling, flushing]);
     expect(maxOpen).toBe(1);
+    expect(started).toBeGreaterThanOrEqual(2);
+    expect(c.getSnapshot().tasks.map((t) => t.title)).toEqual(["a"]);
+    expect(c.getSnapshot().pending).toBe(0);
   });
 });
 
@@ -614,8 +685,11 @@ describe("lost access (contract §6.8)", () => {
     c.start();
     await new Promise((r) => setTimeout(r, 20));
     expect(server.calls.length).toBe(calls);
+    const before = c.getSnapshot().tasks.length;
     c.mutate({ type: "task_add", args: { title: "c" } });
     await Promise.resolve();
+    expect(c.getSnapshot().tasks.length).toBe(before); // an edit after the loss is a no-op
+    expect(c.getSnapshot().pending).toBe(0);
     expect(await storage.getItem(workspaceStorageKeys("w1").queue)).toBeNull();
   });
 

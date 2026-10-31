@@ -60,8 +60,21 @@ export interface SyncClientOptions {
    * workspace's queue, replica, token and full-sync marker from `storage`.
    */
   onAccessLost?: (info: AccessLost) => void;
-  /** Abandon a sync request, including its `onAuthFail` refresh, after this long. Default 30 000. */
+  /**
+   * Abandon a sync request, including its `onAuthFail` refresh, if the response
+   * headers have not arrived after this long. Default 30 000. Reading the body
+   * is bounded separately by `bodyTimeoutMs`.
+   */
   requestTimeoutMs?: number;
+  /**
+   * Abandon reading a response body after this long. Default 120 000. Separate
+   * from `requestTimeoutMs` so a large full sync on a slow link can finish
+   * downloading instead of being aborted and re-requested forever. A true idle
+   * timeout needs a streamed body, which is not available in every runtime we
+   * ship (React Native's fetch has no `body` stream), so this is a plain, more
+   * generous limit.
+   */
+  bodyTimeoutMs?: number;
   /** First retry delay after a failed sync; doubles per failure. Default 2 000. */
   retryBaseMs?: number;
   /** Upper bound for the retry delay. Default 30 000. */
@@ -211,6 +224,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   const maxBatch = opts.maxBatch ?? 100;
 
   const requestTimeoutMs = opts.requestTimeoutMs ?? 30_000;
+  const bodyTimeoutMs = opts.bodyTimeoutMs ?? 120_000;
   const retryBaseMs = opts.retryBaseMs ?? 2_000;
   const retryMaxMs = opts.retryMaxMs ?? 30_000;
 
@@ -278,6 +292,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     retryDelay = retryDelay === 0 ? retryBaseMs : Math.min(retryDelay * 2, retryMaxMs);
     retryTimer = setTimeout(() => {
       retryTimer = null;
+      // Same rule as the interval: a hidden tab does not poll, but still pushes
+      // queued changes. The visibilitychange wake resumes syncing on return.
+      if (isHidden() && queue.length === 0) return;
       void sync();
     }, retryDelay);
   }
@@ -475,7 +492,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     // nowhere but locally, so no delta can ever delete it.
     const body = JSON.stringify({ sync_token: needsFullSync ? "*" : syncToken, commands });
 
-    return withTimeout(
+    const headers = await withTimeout(
       requestTimeoutMs,
       async (signal) => {
         const send = async (): Promise<Response> => {
@@ -495,10 +512,21 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
           await opts.onAuthFail();
           res = await send();
         }
-        if (!res.ok) throw new HttpError(res.status, await errorCode(res));
-        return (await res.json()) as SyncResponse;
+        return res;
       },
       () => new RequestTimeoutError(),
+    );
+    // The headers are in; the body gets its own, longer limit.
+    return withTimeout(
+      bodyTimeoutMs,
+      async () => {
+        if (!headers.ok) throw new HttpError(headers.status, await errorCode(headers));
+        return (await headers.json()) as SyncResponse;
+      },
+      () => {
+        void headers.body?.cancel().catch(() => undefined);
+        return new RequestTimeoutError();
+      },
     );
   }
 
@@ -508,7 +536,9 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     const discarded = queue.length;
     stop();
     await purgeWorkspaceData(opts.storage, opts.workspaceId);
+    queue = []; // counted above; nothing will ever send them
     setStatus("error");
+    invalidate();
     opts.onAccessLost?.({ workspaceId: opts.workspaceId, reason, discarded });
   }
 
@@ -571,6 +601,8 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
 
     if (needsFullSync) await pull();
     if (accessLost) return; // the recovery pull can discover the loss too
+    // Rejections first; a handler with a single message slot can show only one,
+    // so apps that want both queue them (see apps/*/src/lib/clients.ts).
     if (rejected.length > 0) opts.onCommandsRejected?.(rejected);
     if (relocated.length > 0) opts.onCommandsRelocated?.(relocated);
   }
@@ -624,6 +656,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   function mutate(input: CommandInput): { uuid: string; temp_id?: string } {
     const isAdd = input.type.endsWith("_add");
     const tempId = isAdd ? input.temp_id ?? `tmp-${uuid()}` : input.temp_id;
+    // The workspace is gone for this user: an edit could never be saved or sent,
+    // so do not show it on screen either. A no-op (rather than a throw) keeps
+    // every call site safe while the app moves away.
+    if (accessLost) return { uuid: uuid(), temp_id: tempId };
     const args: Record<string, unknown> = { ...input.args };
     // Recurrence rolls forward from "today", and the optimistic apply uses the
     // *device's* calendar day. Stamping it here — rather than at each call site —

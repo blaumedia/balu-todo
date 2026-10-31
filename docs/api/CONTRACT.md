@@ -454,7 +454,9 @@ whenever any command in a flush was rejected, then reports the failures to the a
    `temp_id_mapping`.
 7. Poll cadence v1: pull on app focus, page visible and app foreground + after every
    flush + every 60 s while visible (a background tab still pushes queued changes). A
-   sync request, including its token refresh, is abandoned after 30 s; a failed sync is
+   sync request, including its token refresh, is abandoned if the response headers have
+   not arrived after 30 s (reading the body has its own, longer 120 s limit, so a large
+   full sync on a slow link can finish); a failed sync is
    retried after 2 s, doubling to 30 s, reset on success or when the app regains focus,
    visibility, network or the foreground. (WebSocket/SSE push is a later optimization;
    the protocol doesn't change.)
