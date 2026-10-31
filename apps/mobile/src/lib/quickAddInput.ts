@@ -28,3 +28,25 @@ export function interpretChange(value: string): ChangeIntent {
   }
   return { submit: null, text: value };
 }
+
+/** Mutable holder for the newest text, readable before React re-renders. */
+export interface LatestText {
+  current: string;
+}
+
+/**
+ * Interpret an `onChangeText` value and record the resulting text in `latest`
+ * synchronously. `useState` only catches up on the next render, so a submit
+ * pressed within that frame would otherwise send the previous text and drop
+ * the last character.
+ */
+export function applyChange(latest: LatestText, value: string): ChangeIntent {
+  const intent = interpretChange(value);
+  latest.current = intent.text;
+  return intent;
+}
+
+/** The text a submit should use: an explicit value, else the newest typed text. */
+export function textToSubmit(raw: string | undefined, latest: LatestText): string {
+  return raw ?? latest.current;
+}
