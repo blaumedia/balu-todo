@@ -510,6 +510,36 @@ describe("rejected commands (contract §5.2)", () => {
     expect(c2.getSnapshot().tasks.map((t) => t.title)).not.toContain("nope");
   });
 
+  it("latches hasSynced even when the follow-up pull fails and status ends offline", async () => {
+    // flush() sets "synced" and the recovery pull() sets "syncing" in the same
+    // tick, so a UI never renders "synced"; the client must remember it.
+    const server = makeRejectingServer(rejectByTitle("nope"));
+    // Call 1 is the rejecting batch, call 2 the recovery pull. A stored delta
+    // token keeps the batch from being a first-contact full sync (which would
+    // wash the phantom away and skip the recovery pull).
+    const storage = memoryKV();
+    await storage.setItem(`balu:token:${WS}`, "t1");
+    let calls = 0;
+    const cutOnPull: typeof server.fetch = async (url, init) => {
+      calls += 1;
+      if (calls === 2) throw new TypeError("network down");
+      return server.fetch(url, init);
+    };
+    const c = track(createSyncClient(base({ storage, fetch: cutOnPull })));
+    await c.hydrate();
+    expect(c.getSnapshot().hasSynced).toBe(false);
+    c.mutate({ type: "task_add", args: { title: "nope" } });
+    await c.flush();
+
+    expect(c.getSnapshot().status).toBe("offline");
+    expect(c.getSnapshot().hasSynced).toBe(true);
+  });
+
+  it("reports hasSynced false for a fresh client", () => {
+    const c = track(createSyncClient(base({ storage: memoryKV(), fetch: makeRejectingServer(rejectByTitle("nope")).fetch })));
+    expect(c.getSnapshot().hasSynced).toBe(false);
+  });
+
   it("recovers within the session, not only after a restart", async () => {
     // Property: recovery must complete within the session, not merely on the
     // next launch. (An earlier attempt at this fix set `syncToken = "*"` in the

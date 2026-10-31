@@ -3,6 +3,8 @@ import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } f
 import { todayLocalISO, type Priority } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
 import { applyMoveDrop, dragKind, getDragResolver, makeAnnouncements } from "../lib/drag.js";
+import { projectViewAction } from "../lib/projectView.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { markReplaceNext, useUrlSync } from "../lib/useUrlSync.js";
 import { useApp } from "../store/app.js";
@@ -30,6 +32,8 @@ export function Shell() {
   const snapshot = useSnapshot();
   const view = useApp((s) => s.view);
   const selectedTaskId = useApp((s) => s.selectedTaskId);
+  const quickAddOpen = useApp((s) => s.quickAddOpen);
+  const writable = canWrite(useMyRole());
   const { t } = useT();
   useUrlSync();
 
@@ -59,7 +63,7 @@ export function Shell() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "n") {
         e.preventDefault();
-        st.setQuickAdd(true);
+        if (writable) st.setQuickAdd(true); // viewers cannot add tasks
         return;
       }
       if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
@@ -112,6 +116,7 @@ export function Shell() {
           break;
         case " ":
         case "e":
+          if (!writable) break;
           if (focusedId) {
             e.preventDefault();
             sync?.mutate({ type: "task_complete", args: { id: focusedId } });
@@ -120,12 +125,15 @@ export function Shell() {
         case "1":
         case "2":
         case "3":
+          if (!writable) break;
           update({ priority: Number(e.key) as Priority });
           break;
         case "0":
+          if (!writable) break;
           update({ priority: 0 });
           break;
         case "t":
+          if (!writable) break;
           update({ start_date: todayLocalISO(), someday: false });
           break;
         case "d":
@@ -139,7 +147,7 @@ export function Shell() {
           break;
         case "n":
           e.preventDefault();
-          st.setQuickAdd(true);
+          if (writable) st.setQuickAdd(true);
           break;
         case "Escape":
           if (st.selectedTaskId) st.selectTask(null);
@@ -149,7 +157,7 @@ export function Shell() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [writable]);
 
   // Deep-linked project that does not exist in this workspace's replica
   // (deleted, or the link came from another workspace): fall back to Today once
@@ -162,14 +170,29 @@ export function Shell() {
   // ("offline"/"error") a dangling link is deliberately kept rather than
   // healed - never discard a link on unconfirmed data; this self-heals once a
   // sync succeeds.
+  // A project created offline is opened as /project/tmp-...; after the ack the
+  // replica only has the real id, so follow snapshot.idAliases to it (again via
+  // replaceState) instead of treating it as gone. Plain useEffect on purpose:
+  // useUrlSync's effect runs first in each commit, so markReplaceNext() applies
+  // to the write our setState triggers - a layout effect would let an earlier
+  // no-op write consume the flag and the follow would push.
+  // Held while quick-add is open, as on mobile (see projectViewAction).
   useEffect(() => {
-    if (view.kind !== "project" || snapshot.status !== "synced") return;
-    const exists = snapshot.projects.some((p) => p.id === view.projectId && !p.is_deleted);
-    if (!exists) {
-      markReplaceNext();
-      useApp.getState().setView({ kind: "list", list: "today" });
-    }
-  }, [view, snapshot]);
+    if (view.kind !== "project") return;
+    const action = projectViewAction({
+      projectId: view.projectId,
+      projects: snapshot.projects,
+      aliases: snapshot.idAliases,
+      synced: snapshot.status === "synced",
+      quickAddOpen,
+    });
+    if (action.kind === "keep") return;
+    markReplaceNext();
+    // Follow: setState, not setView - setView clears the task selection and
+    // focus, and the ack lands right after the user worked in this project.
+    if (action.kind === "follow") useApp.setState({ view: { kind: "project", projectId: action.projectId } });
+    else useApp.getState().setView({ kind: "list", list: "today" });
+  }, [view, snapshot, quickAddOpen]);
 
   let content: React.ReactNode;
   if (view.kind === "settings") content = <SettingsView snapshot={snapshot} />;

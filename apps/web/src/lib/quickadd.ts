@@ -1,19 +1,39 @@
 import type { IsoDate, Label, Project } from "@balu/domain";
-import { composeTaskArgs as compose, type ComposeContext, type ParseResult } from "@balu/nl-parser";
+import { composeTaskArgs as compose, resolveQuickAddContext, type ComposeContext, type ParseResult, type QuickAddTarget } from "@balu/nl-parser";
 import type { ViewSel } from "../store/app.js";
 
 export interface ComposeCtx {
-  view: ViewSel;
+  context: ComposeContext;
   projects: Project[];
   labels: Label[];
   today: IsoDate;
 }
 
 /** Map the web app's view selection onto the shared compose context. */
-function contextOf(view: ViewSel): ComposeContext {
+export function contextOf(view: ViewSel): ComposeContext {
   if (view.kind === "project") return { kind: "project", projectId: view.projectId };
   if (view.kind === "list") return { kind: "list", list: view.list };
   return { kind: "none" };
+}
+
+/**
+ * Where quick-add composes into from this view: a temp project id the server
+ * has replaced is followed, and a project that is missing, deleted or archived
+ * falls back to the Inbox (redirected) - the same rule mobile uses.
+ */
+export function quickAddTarget(
+  view: ViewSel,
+  projects: ReadonlyArray<Project>,
+  aliases: Readonly<Record<string, string>>,
+  confirmed = true,
+): QuickAddTarget {
+  return resolveQuickAddContext(contextOf(view), projects, aliases, confirmed);
+}
+
+/** Whether to toast that the task landed in the Inbox: only when the view's
+ *  project was redirected and the user did not name a project via `#`. */
+export function shouldNotifyInbox(target: QuickAddTarget, args: Record<string, unknown>): boolean {
+  return target.redirected && args["project_id"] === undefined;
 }
 
 /**
@@ -30,6 +50,6 @@ export function composeTaskArgs(
     projects: ctx.projects,
     labels: ctx.labels,
     today: ctx.today,
-    context: contextOf(ctx.view),
+    context: ctx.context,
   });
 }

@@ -76,6 +76,12 @@ export interface Snapshot {
    * after the ack. In memory only; never pruned.
    */
   idAliases: Readonly<Record<string, string>>;
+  /**
+   * True once this client has reached "synced" at least once. Latched in the
+   * client (not derived from rendered status) because flush() sets "synced" and
+   * a follow-up pull() sets "syncing" in the same tick, so a UI may never see it.
+   */
+  hasSynced: boolean;
 }
 
 export interface SyncClient {
@@ -122,6 +128,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   let flushing = false;
   let hydrated = false;
   let needsFullSync = false;
+  let hasSynced = false;
   let idAliases: Record<string, string> = {};
 
   const subscribers = new Set<() => void>();
@@ -142,6 +149,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   }
 
   function setStatus(s: SyncStatus): void {
+    if (s === "synced") hasSynced = true;
     if (status !== s) {
       status = s;
       invalidate();
@@ -161,6 +169,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
       syncToken,
       pending: queue.length,
       idAliases,
+      hasSynced,
     };
   }
 

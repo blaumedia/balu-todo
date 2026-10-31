@@ -2,9 +2,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { activeProjects, todayLocalISO } from "@balu/domain";
 import { parseQuickAdd, type Token } from "@balu/nl-parser";
 import { getSync } from "../lib/clients.js";
-import { composeTaskArgs } from "../lib/quickadd.js";
+import { composeTaskArgs, quickAddTarget, shouldNotifyInbox } from "../lib/quickadd.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
+import { canWrite, useMyRole } from "../lib/role.js";
 import { useSnapshot } from "../store/useSync.js";
 import { Icon } from "../components/Icon.js";
 import { Button } from "../components/Button.js";
@@ -56,6 +57,7 @@ export function QuickAdd() {
   const view = useApp((s) => s.view);
   const { t, locale } = useT();
   const snapshot = useSnapshot();
+  const writable = canWrite(useMyRole());
   const today = todayLocalISO();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState<string>(() => sanitize(globalThis.localStorage?.getItem(DRAFT_KEY) ?? ""));
@@ -96,8 +98,18 @@ export function QuickAdd() {
 
   function create() {
     if (!text.trim()) return;
+    // Send nothing when the user can no longer write. This only catches role
+    // changes that reach the store (boot, workspace switch, settings refresh).
+    if (!writable) {
+      useApp.getState().showToast(t("members.readonlyHint"));
+      close();
+      return;
+    }
+    // On confirmed data, never file into a dead id; before the first sync a
+    // missing project is kept (it may just not be loaded yet).
+    const target = quickAddTarget(view, snapshot.projects, snapshot.idAliases, snapshot.hasSynced);
     const args = composeTaskArgs(text, parsed, {
-      view,
+      context: target.context,
       projects: activeProjects(snapshot.projects),
       labels: snapshot.labels,
       today,
@@ -106,6 +118,7 @@ export function QuickAdd() {
     setText("");
     persistDraft("");
     setQuickAdd(false);
+    if (shouldNotifyInbox(target, args)) useApp.getState().showToast(t("quickadd.addedToInbox"));
   }
 
   if (!open) return null;
