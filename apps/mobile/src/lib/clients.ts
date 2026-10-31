@@ -2,7 +2,14 @@
 // (a self-hosted server the user points at), so both clients are (re)created
 // once the server URL is known.
 import { createApiClient, type ApiClient } from '@balu/api-client';
-import { createSyncClient, purgeWorkspaceData, type AccessLost, type SyncClient } from '@balu/sync-client';
+import {
+  clearLossNotice,
+  createSyncClient,
+  purgeWorkspaceData,
+  type AccessLost,
+  type PurgedWorkspace,
+  type SyncClient,
+} from '@balu/sync-client';
 import { Alert } from 'react-native';
 import { makeT } from '../i18n';
 import { useApp } from '../store/app';
@@ -66,11 +73,16 @@ export function setSessionExpiredHandler(handler: () => void): void {
   sessionExpiredHandler = handler;
 }
 
-/** Delete one workspace's replica/queue/token; returns the discarded queue length. */
-export async function purgeWorkspaceStorage(workspaceId: string): Promise<number> {
-  const discarded = await purgeWorkspaceData(sqliteKV, workspaceId);
+/** Delete one workspace's replica/queue/token; returns the discarded queue length and why it was lost. */
+export async function purgeWorkspaceStorage(workspaceId: string): Promise<PurgedWorkspace> {
+  const purged = await purgeWorkspaceData(sqliteKV, workspaceId);
   await updateKnownWorkspaces((ids) => ids.filter((id) => id !== workspaceId));
-  return discarded;
+  return purged;
+}
+
+/** Drop a loss notice left for a workspace that is reachable again. */
+export function clearWorkspaceLossNotice(workspaceId: string): Promise<void> {
+  return clearLossNotice(sqliteKV, workspaceId);
 }
 
 // sqlite has no cheap "which workspaces have local data" query through the shared

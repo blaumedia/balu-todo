@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { BootNotice } from '../components/BootNotice';
 import { ProjectActionsSheet } from '../features/ProjectActionsSheet';
 import { QuickAddSheet } from '../features/QuickAddSheet';
 import { ScheduleSheet } from '../features/ScheduleSheet';
@@ -68,6 +69,7 @@ function Chrome() {
       <TaskDetailSheet />
       <ScheduleSheet />
       <ProjectActionsSheet />
+      <BootNotice />
     </>
   );
 }

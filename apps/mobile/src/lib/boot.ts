@@ -7,6 +7,7 @@ import { makeT } from '../i18n';
 import { useApp } from '../store/app';
 import {
   claimAccessLossNotice,
+  clearWorkspaceLossNotice,
   getApi,
   getSync,
   initApi,
@@ -73,7 +74,8 @@ export async function establishSession(
   const lastUsed = await sqliteKV.getItem(SETTINGS.lastWorkspaceId);
   const membership = pickMembership(me.memberships, preferredWorkspaceId, lastUsed);
   // Boot and landing outside a lost workspace only: a switch has its own "exact or
-  // nothing" answer. The server sets such an account up on /me, so asking again helps.
+  // nothing" answer. The server sets such an account up inside /me, so an empty list
+  // means it could not; the callers say so and keep asking with a backoff.
   if (!membership && me.memberships.length === 0 && !requireExact) throw new NoWorkspaceError();
   if (!membership) return false;
   // Bail out before any mutation. pickMembership falls back to last-used/first
@@ -125,10 +127,15 @@ export async function discardLostWorkspaces(
   const bodies: string[] = [];
   let title = '';
   for (const id of candidates) {
-    if (live.has(id)) continue;
-    const discarded = await purgeWorkspaceStorage(id);
+    if (live.has(id)) {
+      // Reachable again (re-invited before this boot): a notice an interrupted purge
+      // left for it would never be shown and would inflate a later loss.
+      await clearWorkspaceLossNotice(id);
+      continue;
+    }
+    const { discarded, reason } = await purgeWorkspaceStorage(id);
     if (discarded === 0 || !claimAccessLossNotice(id)) continue;
-    const notice = accessLostNotice(t, 'removed', discarded, id === lastUsed ? lastUsedName : null);
+    const notice = accessLostNotice(t, reason, discarded, id === lastUsed ? lastUsedName : null);
     title = notice.title;
     bodies.push(notice.body);
   }
@@ -176,6 +183,56 @@ export function moveOffLostWorkspace(lostId: string): Promise<void> {
   return run;
 }
 
+/** Wait before retry `attempt` (0-based): 1 s, doubling, capped at 30 s, with +-20% jitter. */
+function retryWaitMs(attempt: number): number {
+  return Math.min(1000 * 2 ** Math.max(0, attempt), 30_000) * (0.8 + Math.random() * 0.4);
+}
+
+/**
+ * Take the stale screen down and say why: the open workspace is lost (or the
+ * account has none) and /me cannot settle it yet. The sync client is torn down and
+ * the sheets closed - their edits could only be dropped - and BootNotice covers the
+ * rest with a logout button.
+ */
+function showBootNotice(state: 'reconnecting' | 'noWorkspace'): void {
+  teardownSync();
+  const st = useApp.getState();
+  st.closeQuickAdd();
+  st.closeDetail();
+  st.closeSchedule();
+  st.closeProjectActions();
+  st.setBoot(state);
+}
+
+/**
+ * /me answered with no workspace: show the notice and keep asking with a backoff
+ * until it lists one, the user logs out, or the session is refused. Runs on its
+ * own so the caller (and the splash screen) does not wait for it.
+ */
+function holdForWorkspace(serverUrl: string, api: ApiClient): void {
+  showBootNotice('noWorkspace');
+  void (async () => {
+    const waiting = (): boolean => useApp.getState().boot === 'noWorkspace';
+    for (let attempt = 0; waiting(); attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt)));
+      if (!waiting()) return;
+      try {
+        if (!(await establishSession(serverUrl, api, null, false, waiting))) {
+          if (waiting()) useApp.getState().setBoot('onboarding');
+        }
+        return;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
+          await expireSession();
+          return;
+        }
+        if (e instanceof ApiError && e.code === 'signed_out') return;
+        // Still no workspace, or the server is unreachable: keep asking.
+      }
+    }
+  })();
+}
+
 async function landOutside(lostId: string): Promise<void> {
   const { serverUrl } = useApp.getState();
   const api = getApi();
@@ -186,7 +243,12 @@ async function landOutside(lostId: string): Promise<void> {
     for (let attempt = 0; !ok && isOpen(lostId); attempt++) {
       try {
         ok = await establishSession(serverUrl, api, null, false, () => isOpen(lostId));
-      } catch {
+      } catch (e) {
+        if (e instanceof NoWorkspaceError) {
+          // /me answered and lists nothing: not a blip. Explain and keep asking.
+          holdForWorkspace(serverUrl, api);
+          return;
+        }
         ok = false;
       }
       if (ok || !isOpen(lostId)) break;
@@ -201,9 +263,11 @@ async function landOutside(lostId: string): Promise<void> {
       }
       // /me keeps failing and the store knows no other workspace (offline boot from
       // the cached session): the user is still signed in, so dropping them on the
-      // login step would be wrong. Keep asking with backoff until /me answers or
-      // they leave (switch, logout, expiry).
-      await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 2 ** (attempt - 1), 30_000)));
+      // login step would be wrong. Say so (the lost workspace's screen would only
+      // drop edits) and keep asking with backoff until /me answers or they leave
+      // (logout, expiry).
+      if (attempt === 1) showBootNotice('reconnecting');
+      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt - 1)));
     }
     // The user switched workspace (or left) while /me was in flight: keep their choice.
     if (!ok && !isOpen(lostId)) return;
@@ -290,22 +354,14 @@ export async function bootApp(): Promise<void> {
   }
 
   try {
-    let ok: boolean;
-    try {
-      ok = await establishSession(serverUrl, api);
-    } catch (e) {
-      // The server sets such an account up on /me, so one more ask normally lands.
-      if (!(e instanceof NoWorkspaceError)) throw e;
-      ok = await establishSession(serverUrl, api);
-    }
+    const ok = await establishSession(serverUrl, api);
     if (!ok) store.setBoot('onboarding');
   } catch (e) {
     if (e instanceof NoWorkspaceError) {
-      // Signed in, but no workspace and the server did not set one up: say so
-      // instead of showing the login step with no explanation.
-      const t = makeT(store.locale);
-      Alert.alert(t('boot.noWorkspaceTitle'), t('boot.noWorkspaceBody'));
-      store.setBoot('onboarding');
+      // Signed in, but /me lists no workspace and the server could not set one up:
+      // say so, keep asking with a backoff and offer the logout, instead of showing
+      // the login step with no explanation.
+      holdForWorkspace(serverUrl, api);
       return;
     }
     // A refused session is not "offline": booting the cached session would keep

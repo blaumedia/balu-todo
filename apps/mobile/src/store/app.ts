@@ -2,7 +2,12 @@ import type { Locale, Membership, SmartList, Theme, User, Workspace } from '@bal
 import { create } from 'zustand';
 import { sqliteKV, SETTINGS } from '../lib/kv';
 
-type Boot = 'loading' | 'onboarding' | 'ready';
+/**
+ * `reconnecting`: signed in, but /me cannot be reached after the open workspace was
+ * lost. `noWorkspace`: /me answered with an account that has no workspace. Both
+ * show a full-screen notice (components/BootNotice) while lib/boot.ts keeps asking.
+ */
+type Boot = 'loading' | 'onboarding' | 'reconnecting' | 'noWorkspace' | 'ready';
 
 export type LoginNotice = 'sessionExpired';
 

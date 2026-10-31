@@ -9,6 +9,8 @@ const fake = vi.hoisted(() => ({
   expected: new Set<string>(),
   announced: new Set<string>(),
   purged: [] as string[],
+  cleared: [] as string[],
+  reasons: new Map<string, 'removed' | 'deleted'>(),
   kv: new Map<string, string>(),
   alerts: [] as Array<[string, string]>,
   getMe: (async () => ({})) as () => Promise<any>,
@@ -95,7 +97,10 @@ vi.mock('../src/lib/clients', () => ({
   listKnownWorkspaceIds: async () => fake.known,
   purgeWorkspaceStorage: async (id: string) => {
     fake.purged.push(id);
-    return fake.discarded.get(id) ?? 0;
+    return { discarded: fake.discarded.get(id) ?? 0, reason: fake.reasons.get(id) ?? 'removed' };
+  },
+  clearWorkspaceLossNotice: async (id: string) => {
+    fake.cleared.push(id);
   },
   claimAccessLossNotice: (id: string) => {
     if (fake.expected.has(id) || fake.announced.has(id)) return false;
@@ -131,6 +136,8 @@ beforeEach(() => {
   fake.expected.clear();
   fake.announced.clear();
   fake.purged = [];
+  fake.cleared = [];
+  fake.reasons.clear();
   fake.kv.clear();
   fake.alerts = [];
   fake.authed = true;
@@ -355,20 +362,33 @@ describe('accounts without a workspace (what-if 6)', () => {
     useApp.setState({ boot: 'loading', loginNotice: null, workspace: null, user: null } as any);
   });
 
-  it('asks /me once more and boots when the server set a workspace up', async () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('shows the no-workspace notice, keeps the tokens and boots once /me lists a workspace', async () => {
+    vi.useFakeTimers();
     let calls = 0;
-    fake.getMe = async () => (++calls === 1 ? me() : me('a'));
+    fake.getMe = async () => (++calls <= 2 ? me() : me('a'));
     await bootApp();
-    expect(calls).toBe(2);
-    expect(useApp.getState().boot).toBe('ready');
+    expect(useApp.getState().boot).toBe('noWorkspace');
     expect(fake.alerts).toHaveLength(0);
+    expect(fake.logouts).toBe(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(3);
+    expect(useApp.getState().boot).toBe('ready');
   });
 
-  it('explains itself instead of showing the login step silently', async () => {
-    fake.getMe = async () => me();
+  it('stops asking once the user logs out from the notice', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me();
+    };
     await bootApp();
-    expect(fake.alerts).toHaveLength(1);
-    expect(fake.alerts[0]![0]).toBe('No workspace found');
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    useApp.getState().reset();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toBe(1);
     expect(useApp.getState().boot).toBe('onboarding');
   });
 });
@@ -385,10 +405,51 @@ describe('landing outside a lost workspace while /me fails (what-if 11)', () => 
       return me('a');
     };
     const moving = moveOffLostWorkspace('lost');
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(useApp.getState().boot).toBe('reconnecting'); // visible, not silent
+    expect(fake.teardowns).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(60_000);
     await moving;
     expect(calls).toBe(4);
     expect(open()).toBe('a');
     expect(useApp.getState().boot).not.toBe('onboarding');
+  });
+
+  it('jitters the retry wait by +-20% (0.8x at the low end)', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    useApp.setState({ memberships: [mem('lost')] } as any);
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      throw new TypeError('down');
+    };
+    void moveOffLostWorkspace('lost');
+    await vi.advanceTimersByTimeAsync(700);
+    expect(calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(calls).toBe(3);
+    vi.restoreAllMocks();
+    useApp.getState().reset(); // the user leaves: the retry loop ends
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+
+  it('an empty /me explains itself instead of retrying silently', async () => {
+    vi.useFakeTimers();
+    useApp.setState({ memberships: [mem('lost')] } as any);
+    fake.getMe = async () => me();
+    await moveOffLostWorkspace('lost');
+    expect(useApp.getState().boot).toBe('noWorkspace');
+  });
+});
+
+describe('discardLostWorkspaces details (review f9966f34)', () => {
+  it('uses the recorded reason and clears the notice of a live workspace', async () => {
+    fake.known = ['a', 'gone'];
+    fake.discarded.set('gone', 2);
+    fake.reasons.set('gone', 'deleted');
+    await discardLostWorkspaces(['a']);
+    expect(fake.cleared).toEqual(['a']);
+    expect(fake.alerts[0]![1]).toContain('deleted');
   });
 });

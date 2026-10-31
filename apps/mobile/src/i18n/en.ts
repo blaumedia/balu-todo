@@ -44,7 +44,9 @@ export const en = {
   'sync.relocatedTitle': 'Tasks filed elsewhere',
   'sync.accessLostTitle': 'Workspace unavailable',
   'boot.noWorkspaceTitle': 'No workspace found',
-  'boot.noWorkspaceBody': 'Your account does not belong to a workspace yet. Sign in again to retry; a new workspace is set up if needed.',
+  'boot.noWorkspaceBody': 'Your account does not belong to a workspace yet. You stay signed in and Balu keeps asking the server. You can sign out below.',
+  'boot.reconnectingTitle': 'Reconnecting…',
+  'boot.reconnectingBody': 'You no longer have access to the workspace you had open, and the server cannot be reached to open another one. You stay signed in and Balu keeps trying. You can sign out below.',
 
   'quickadd.placeholder': 'Add a task — try dates, #project, @label, !p1',
   'quickadd.hint': 'Return to add · another stays open',

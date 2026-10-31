@@ -1,4 +1,5 @@
 import { activeProjects, todayLocalISO } from '@balu/domain';
+import { wasSaved } from '@balu/sync-client';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -9,7 +10,7 @@ import { useMyRole } from '../hooks/use-my-role';
 import { addTask } from '../lib/actions';
 import { shouldCloseWriteSheet } from '../lib/role';
 import { interpretChange } from '../lib/quickAddInput';
-import { composeTaskArgs, resolveQuickAddContext, wasSaved } from '../lib/quickadd';
+import { composeTaskArgs, resolveQuickAddContext } from '../lib/quickadd';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useSnapshot } from '../store/useSnapshot';

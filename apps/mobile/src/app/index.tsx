@@ -8,7 +8,8 @@ export default function Index() {
   const boot = useApp((s) => s.boot);
   const theme = useTheme();
 
-  if (boot === 'loading') {
+  // reconnecting / noWorkspace: components/BootNotice explains; the gate just waits.
+  if (boot === 'loading' || boot === 'reconnecting' || boot === 'noWorkspace') {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.bg }}>
         <ActivityIndicator color={theme.accent} />

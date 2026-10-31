@@ -47,7 +47,9 @@ export const de: Record<TranslationKey, string> = {
   'sync.relocatedTitle': 'Aufgaben woanders abgelegt',
   'sync.accessLostTitle': 'Arbeitsbereich nicht verfügbar',
   'boot.noWorkspaceTitle': 'Kein Arbeitsbereich gefunden',
-  'boot.noWorkspaceBody': 'Dein Konto gehört noch zu keinem Arbeitsbereich. Melde dich erneut an, um es noch einmal zu versuchen; bei Bedarf wird ein neuer angelegt.',
+  'boot.noWorkspaceBody': 'Dein Konto gehört noch zu keinem Arbeitsbereich. Du bleibst angemeldet und Balu fragt den Server weiter an. Unten kannst du dich abmelden.',
+  'boot.reconnectingTitle': 'Verbindung wird wiederhergestellt…',
+  'boot.reconnectingBody': 'Du hast keinen Zugriff mehr auf den geöffneten Arbeitsbereich, und der Server ist nicht erreichbar, um einen anderen zu öffnen. Du bleibst angemeldet und Balu versucht es weiter. Unten kannst du dich abmelden.',
 
   'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',
