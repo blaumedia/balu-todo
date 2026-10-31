@@ -97,8 +97,8 @@ export const de: Record<TranslationKey, string> = {
 
   'row.complete': 'Erledigen',
 
- 'schedule.title': 'Planen',
-   'schedule.today': 'Heute',
+  'schedule.title': 'Planen',
+  'schedule.today': 'Heute',
   'schedule.evening': 'Heute Abend',
   'schedule.tomorrow': 'Morgen',
   'schedule.weekend': 'Dieses Wochenende',

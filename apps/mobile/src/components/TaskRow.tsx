@@ -3,7 +3,7 @@ import { initials } from '../lib/collab';
 import { useMemo, useRef, useState } from 'react';
 import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from 'expo-router';
-import Animated, { FadeOut } from 'react-native-reanimated';
+import Animated, { FadeOut, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
   SwipeDirection,
@@ -75,25 +75,29 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // that is a view-level slop and would also kill taps on the checkbox.
   // It also fails as soon as the touch moves leftward or vertically (the back
   // swipe is rightward only), so UIKit does not hold a swipeable activation
-  // until lift and replay it late.
-  const edgeBlock = useMemo(() => {
-    let startX = 0;
-    let startY = 0;
-    return Gesture.Manual()
-      .runOnJS(true)
-      .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
-      .onTouchesDown((e) => {
-        startX = e.allTouches[0]?.x ?? 0;
-        startY = e.allTouches[0]?.y ?? 0;
-      })
-      .onTouchesMove((e, manager) => {
-        const dx = (e.allTouches[0]?.x ?? startX) - startX;
-        const dy = (e.allTouches[0]?.y ?? startY) - startY;
-        if (dx < -10 || Math.abs(dy) > 10) manager.fail();
-      })
-      .onTouchesUp((_e, manager) => manager.fail())
-      .onTouchesCancelled((_e, manager) => manager.fail());
-  }, []);
+  // until lift and replay it late. The callbacks must stay worklets (no
+  // runOnJS): GestureStateManager.fail() goes through Reanimated's
+  // setGestureState, which is a no-op with a warning on the JS thread. Worklets
+  // get a copy of captured variables, so the touch-down point lives in shared values.
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const edgeBlock = useMemo(
+    () =>
+      Gesture.Manual()
+        .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
+        .onTouchesDown((e) => {
+          startX.value = e.allTouches[0]?.x ?? 0;
+          startY.value = e.allTouches[0]?.y ?? 0;
+        })
+        .onTouchesMove((e, manager) => {
+          const touch = e.allTouches[0];
+          if (!touch) return;
+          if (touch.x - startX.value < -10 || Math.abs(touch.y - startY.value) > 10) manager.fail();
+        })
+        .onTouchesUp((_e, manager) => manager.fail())
+        .onTouchesCancelled((_e, manager) => manager.fail()),
+    [startX, startY],
+  );
 
   const completed = task.completed_at != null;
   const checked = completed || done;

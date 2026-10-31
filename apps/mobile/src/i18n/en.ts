@@ -94,8 +94,8 @@ export const en = {
 
   'row.complete': 'Complete',
 
- 'schedule.title': 'Schedule',
-   'schedule.today': 'Today',
+  'schedule.title': 'Schedule',
+  'schedule.today': 'Today',
   'schedule.evening': 'This evening',
   'schedule.tomorrow': 'Tomorrow',
   'schedule.weekend': 'This weekend',
