@@ -30,6 +30,13 @@ export interface ApiClientOptions {
   fetch?: typeof fetch;
   /** Give up on a JSON request (including a token refresh) after this long. Attachment upload/download are exempt. Default 30 000. */
   requestTimeoutMs?: number;
+  /**
+   * Called once when the server refuses the refresh token (401 from
+   * `/auth/refresh`), right after the stored tokens were cleared: the session is
+   * over and the app should show its login screen. Never called for a network
+   * error, a timeout, a 5xx or a 429 - those keep the tokens.
+   */
+  onSessionExpired?: () => void;
 }
 
 export class ApiError extends Error {
@@ -45,6 +52,9 @@ export class ApiError extends Error {
 
 const ACCESS_KEY = "balu:auth:access";
 const REFRESH_KEY = "balu:auth:refresh";
+const REFRESH_LOCK = "balu:auth:refresh";
+/** Refresh queues of clients sharing one storage, for browsers without Web Locks. */
+const chains = new WeakMap<object, Promise<unknown>>();
 
 export interface ApiClient {
   /** Load persisted tokens into memory. Call once at boot. */
@@ -189,11 +199,44 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     );
   }
 
+  /**
+   * Run `fn` while no other tab (or client on the same storage) refreshes.
+   *
+   * The server treats a second use of one refresh token as a replay and burns the
+   * whole token family, so two tabs refreshing with the same token log both out.
+   * Web Locks serialise across tabs where the browser offers them (secure
+   * contexts); otherwise refreshes of clients sharing one storage object are
+   * chained in this realm, and the re-read below narrows the cross-tab window.
+   */
+  function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+    const locks = (globalThis as { navigator?: { locks?: { request<R>(n: string, cb: () => Promise<R>): Promise<R> } } })
+      .navigator?.locks;
+    if (locks?.request) return locks.request(REFRESH_LOCK, fn);
+    const prev = chains.get(opts.storage) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    chains.set(opts.storage, run.catch(() => undefined));
+    return run;
+  }
+
   async function refresh(): Promise<AuthTokens> {
     if (refreshInFlight) return refreshInFlight;
     if (!refreshToken) throw new ApiError("invalid_token", "No refresh token", 401);
-    refreshInFlight = (async () => {
+    refreshInFlight = exclusive(async () => {
       try {
+        // Another tab may have rotated the tokens while we waited (or before we
+        // noticed our access token expired): its refresh token is the live one and
+        // ours is already spent. Use what it stored instead of replaying ours.
+        const storedRefresh = await opts.storage.getItem(REFRESH_KEY);
+        if (storedRefresh !== refreshToken) {
+          const storedAccess = await opts.storage.getItem(ACCESS_KEY);
+          if (storedRefresh && storedAccess) {
+            accessToken = storedAccess;
+            refreshToken = storedRefresh;
+            return { access_token: storedAccess, refresh_token: storedRefresh };
+          }
+          // Another tab ended the session (logout or a refused refresh).
+          throw new ApiError("invalid_token", "Session ended in another tab", 401);
+        }
         const tokens = await timed(async (signal) =>
           parse<AuthTokens>(
             await fetchImpl(url("/auth/refresh"), {
@@ -211,12 +254,19 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
         // invalid_token / token_expired). A network error, a timeout, a 5xx or a 429
         // during an outage says nothing about the token, and clearing it there logged
         // the user out of a session that was still valid.
-        if (e instanceof ApiError && e.status === 401) await clearTokens();
+        if (e instanceof ApiError && e.status === 401) {
+          await clearTokens();
+          try {
+            opts.onSessionExpired?.();
+          } catch {
+            /* the app's hook must not replace the auth error */
+          }
+        }
         throw e;
       } finally {
         refreshInFlight = null;
       }
-    })();
+    });
     return refreshInFlight;
   }
 

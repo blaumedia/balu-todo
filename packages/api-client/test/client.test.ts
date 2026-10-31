@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, createApiClient, type AsyncKV } from "../src/index.js";
 
 function memoryKV(): AsyncKV {
@@ -85,7 +85,11 @@ describe("auth", () => {
     expect(calls.filter((x) => x.includes("/auth/refresh"))).toHaveLength(1);
   });
 
-  async function expiredSession(refreshReply: () => Promise<Response> | Response, storage = memoryKV()) {
+  async function expiredSession(
+    refreshReply: () => Promise<Response> | Response,
+    storage = memoryKV(),
+    onSessionExpired?: () => void,
+  ) {
     const fetchImpl = (async (u: any) => {
       const path = String(u);
       if (path.endsWith("/auth/login")) {
@@ -94,39 +98,77 @@ describe("auth", () => {
       if (path.endsWith("/auth/refresh")) return refreshReply();
       return json({ detail: { code: "token_expired", message: "" } }, 401);
     }) as unknown as typeof fetch;
-    const c = createApiClient({ storage, fetch: fetchImpl });
+    const c = createApiClient({ storage, fetch: fetchImpl, onSessionExpired });
     await c.login({ email: "d@example.com", password: "pw" });
     return { c, storage, fetchImpl };
   }
 
   it("a network error during refresh keeps the tokens", async () => {
-    const { c, storage, fetchImpl } = await expiredSession(() => {
-      throw new TypeError("network down");
-    });
+    const spy = vi.fn();
+    const { c, storage, fetchImpl } = await expiredSession(
+      () => {
+        throw new TypeError("network down");
+      },
+      memoryKV(),
+      spy,
+    );
     await expect(c.getMe()).rejects.toBeInstanceOf(TypeError);
     expect(c.isAuthenticated()).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
     const fresh = createApiClient({ storage, fetch: fetchImpl });
     await fresh.hydrate();
     expect(fresh.isAuthenticated()).toBe(true);
   });
 
   it("a 5xx during refresh keeps the tokens", async () => {
+    const spy = vi.fn();
     const { c, storage, fetchImpl } = await expiredSession(
       () => new Response("<html>bad gateway</html>", { status: 502 }),
+      memoryKV(),
+      spy,
     );
     await expect(c.getMe()).rejects.toMatchObject({ status: 502 });
     expect(c.isAuthenticated()).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
     const fresh = createApiClient({ storage, fetch: fetchImpl });
     await fresh.hydrate();
     expect(fresh.isAuthenticated()).toBe(true);
   });
 
   it("a rejected refresh token (401) clears the tokens", async () => {
-    const { c } = await expiredSession(() =>
-      json({ detail: { code: "invalid_token", message: "" } }, 401),
+    const spy = vi.fn();
+    const { c } = await expiredSession(
+      () => json({ detail: { code: "invalid_token", message: "" } }, 401),
+      memoryKV(),
+      spy,
     );
     await expect(c.getMe()).rejects.toMatchObject({ status: 401 });
     expect(c.isAuthenticated()).toBe(false);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 429 during refresh keeps the tokens and does not end the session", async () => {
+    const spy = vi.fn();
+    const { c } = await expiredSession(
+      () => json({ detail: { code: "rate_limited", message: "" } }, 429),
+      memoryKV(),
+      spy,
+    );
+    await expect(c.getMe()).rejects.toMatchObject({ status: 429 });
+    expect(c.isAuthenticated()).toBe(true);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("two concurrent requests report one expired session", async () => {
+    const spy = vi.fn();
+    const { c } = await expiredSession(
+      () => json({ detail: { code: "invalid_token", message: "" } }, 401),
+      memoryKV(),
+      spy,
+    );
+    const results = await Promise.allSettled([c.getMe(), c.getMe()]);
+    expect(results.every((r) => r.status === "rejected")).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("a hung request times out with ApiError timeout", async () => {
@@ -271,5 +313,95 @@ describe("notification channels (contract §8)", () => {
     );
     await expect(c.testChannel("email")).rejects.toMatchObject({ code: "channel_unavailable" });
     expect(calls.at(-1)!.body).toEqual({ type: "email" });
+  });
+});
+
+describe("refresh across clients sharing one storage (two tabs)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** A server that rotates tokens and burns the family on a replayed refresh token. */
+  function rotatingServer() {
+    let current = "r1";
+    let access = "a1";
+    let n = 1;
+    const state = { refreshCalls: 0, burned: false };
+    const fetchImpl = (async (u: any, init: any) => {
+      const path = String(u);
+      if (path.endsWith("/auth/login")) {
+        return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      }
+      if (path.endsWith("/auth/refresh")) {
+        state.refreshCalls += 1;
+        await new Promise((r) => setTimeout(r, 5));
+        if (JSON.parse(init.body).refresh_token !== current || state.burned) {
+          state.burned = true;
+          return json({ detail: { code: "invalid_token", message: "" } }, 401);
+        }
+        n += 1;
+        current = `r${n}`;
+        access = `a${n}`;
+        return json({ access_token: access, refresh_token: current });
+      }
+      if (init.headers.authorization !== `Bearer ${access}`) {
+        return json({ detail: { code: "token_expired", message: "" } }, 401);
+      }
+      return json({ user: USER, memberships: [] });
+    }) as unknown as typeof fetch;
+    return { state, fetchImpl };
+  }
+
+  async function twoTabs() {
+    const storage = memoryKV();
+    const { state, fetchImpl } = rotatingServer();
+    const expired = vi.fn();
+    const a = createApiClient({ storage, fetch: fetchImpl, onSessionExpired: expired });
+    await a.login({ email: "d@example.com", password: "pw" });
+    const b = createApiClient({ storage, fetch: fetchImpl, onSessionExpired: expired });
+    await b.hydrate();
+    return { a, b, state, expired };
+  }
+
+  it.each([
+    ["fallback (no Web Locks)", false],
+    ["Web Locks", true],
+  ])("concurrent expiry in two tabs - %s", async (_name, withLocks) => {
+    if (withLocks) {
+      let tail: Promise<unknown> = Promise.resolve();
+      vi.stubGlobal("navigator", {
+        locks: {
+          request: <T>(_n: string, cb: () => Promise<T>) => {
+            const run = tail.then(cb, cb);
+            tail = run.catch(() => undefined);
+            return run;
+          },
+        },
+      });
+    }
+    const { a, b, state, expired } = await twoTabs();
+    // Rotate server-side so both tabs hold a stale access token.
+    await a.refresh();
+    expect(state.refreshCalls).toBe(1);
+    // b still has a1/r1 in memory; a's refresh stored a2/r2.
+    const me = await b.getMe();
+    expect(me.user.id).toBe("u1");
+    expect(state.refreshCalls).toBe(1); // b adopted the stored tokens, no replay
+    expect(b.getAccessToken()).toBe("a2");
+    expect(state.burned).toBe(false);
+    expect(expired).not.toHaveBeenCalled();
+  });
+
+  it("simultaneous refresh() calls from two clients send one request", async () => {
+    const { a, b, state, expired } = await twoTabs();
+    const [ta, tb] = await Promise.all([a.refresh(), b.refresh()]);
+    expect(state.refreshCalls).toBe(1);
+    expect(tb.refresh_token).toBe(ta.refresh_token);
+    expect(state.burned).toBe(false);
+    expect(expired).not.toHaveBeenCalled();
+  });
+
+  it("concurrent refresh() calls in one tab share one request", async () => {
+    const { a, state } = await twoTabs();
+    await Promise.all([a.refresh(), a.refresh(), a.refresh()]);
+    expect(state.refreshCalls).toBe(1);
   });
 });
