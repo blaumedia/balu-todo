@@ -188,6 +188,41 @@ describe("auth", () => {
     expect(await inner.getItem("balu:auth:refresh")).toBeNull();
   });
 
+  it("a logout during the refresh-key write leaves storage empty and rejects the login", async () => {
+    const inner = memoryKV();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const reachedRefresh = new Promise<void>((r) => (started = r));
+    let armed = false;
+    const storage: AsyncKV = {
+      ...inner,
+      async setItem(k, v) {
+        if (armed && k === "balu:auth:refresh") {
+          started();
+          await gate;
+        }
+        await inner.setItem(k, v);
+      },
+    };
+    const fetchImpl = (async (u: any) => {
+      if (String(u).endsWith("/auth/login")) {
+        return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      }
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl });
+    armed = true;
+    const login = c.login({ email: "d@example.com", password: "pw" });
+    await reachedRefresh;
+    await c.logout();
+    release();
+    await expect(login).rejects.toMatchObject({ code: "signed_out", status: 401 });
+    expect(c.isAuthenticated()).toBe(false);
+    expect(await inner.getItem("balu:auth:access")).toBeNull();
+    expect(await inner.getItem("balu:auth:refresh")).toBeNull();
+  });
+
   it("a logout during the token write of a refresh fails the request instead of retrying it", async () => {
     const inner = memoryKV();
     let release!: () => void;
@@ -251,7 +286,8 @@ describe("auth", () => {
     await c.logout();
     await c.login({ email: "d@example.com", password: "pw" });
     release();
-    await first;
+    expect(await first).toMatchObject({ code: "signed_out" });
+    expect(c.getAccessToken()).toBe("a2");
     expect(await inner.getItem("balu:auth:access")).toBe("a2");
     expect(await inner.getItem("balu:auth:refresh")).toBe("r2");
   });
