@@ -1510,27 +1510,29 @@ describe("attachments (v1.4)", () => {
 });
 
 describe("status while retrying after a failure", () => {
-  // Server that fails (network down) until `up`, then hangs on a gate, then answers.
+  // Server that fails (network down, or HTTP 500 = non-transient "error") until
+  // `up`, then hangs on a gate, then answers.
   function controllable() {
     const server = makeServer();
     const holder: { c?: SyncClient } = {};
-    let mode: "down" | "hang" | "up" = "down";
+    let mode: "down" | "http" | "hang" | "up" = "down";
     let release: () => void = () => undefined;
     const gate = new Promise<void>((r) => {
       release = r;
     });
     let calls = 0;
-    const atCall: string[] = []; // client status at the moment each request goes out
+    const atCall: string[] = []; // client status at the moment each request goes out (needs holder.c)
     const fetchImpl = (async (u: any, init: any) => {
       calls += 1;
       atCall.push(holder.c?.getStatus() ?? "?");
       if (mode === "down") throw new TypeError("network down");
+      if (mode === "http") return new Response("boom", { status: 500 });
       if (mode === "hang") await gate;
       return server.fetch(u, init);
     }) as unknown as typeof fetch;
     return {
       fetchImpl,
-      setMode: (m: "down" | "hang" | "up") => {
+      setMode: (m: "down" | "http" | "hang" | "up") => {
         mode = m;
       },
       release,
@@ -1550,6 +1552,7 @@ describe("status while retrying after a failure", () => {
     it(`${kind}: a retry from offline stays offline while in flight, then synced`, async () => {
       const s = controllable();
       const c = track(createSyncClient(base({ fetch: s.fetchImpl, ...opts })));
+      s.holder.c = c;
       prime(c);
       await attempt(c);
       expect(c.getStatus()).toBe("offline");
@@ -1562,6 +1565,43 @@ describe("status while retrying after a failure", () => {
       s.release();
       await p;
       expect(c.getStatus()).toBe("synced");
+      expect(seen).not.toContain("syncing");
+      // The in-flight retry went out while the client said offline.
+      expect(s.atCall.at(-1)).toBe("offline");
+    });
+
+    it(`${kind}: a retry from error stays error while in flight, then synced`, async () => {
+      const s = controllable();
+      s.setMode("http");
+      const c = track(createSyncClient(base({ fetch: s.fetchImpl, ...opts })));
+      s.holder.c = c;
+      prime(c);
+      await attempt(c);
+      expect(c.getStatus()).toBe("error");
+      s.setMode("hang");
+      const seen: string[] = [];
+      c.subscribe(() => seen.push(c.getStatus()));
+      const p = attempt(c);
+      await vi.waitFor(() => expect(s.calls()).toBeGreaterThan(1));
+      expect(c.getStatus()).toBe("error");
+      s.release();
+      await p;
+      expect(c.getStatus()).toBe("synced");
+      expect(seen).not.toContain("syncing");
+      expect(s.atCall.at(-1)).toBe("error");
+    });
+
+    it(`${kind}: offline moves to error on the next failure without syncing`, async () => {
+      const s = controllable();
+      const c = track(createSyncClient(base({ fetch: s.fetchImpl, ...opts })));
+      prime(c);
+      await attempt(c);
+      expect(c.getStatus()).toBe("offline");
+      s.setMode("http");
+      const seen: string[] = [];
+      c.subscribe(() => seen.push(c.getStatus()));
+      await attempt(c);
+      expect(c.getStatus()).toBe("error");
       expect(seen).not.toContain("syncing");
     });
 
@@ -1589,6 +1629,7 @@ describe("status while retrying after a failure", () => {
       await vi.waitFor(() => expect(c.getStatus()).toBe("syncing"));
       s.release();
       await p;
+      expect(c.getStatus()).toBe("synced");
     });
 
     it(`${kind}: a failing retry stays offline and the automatic retry is still scheduled`, async () => {

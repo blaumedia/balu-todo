@@ -353,6 +353,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   let queue: SyncCommand[] = [];
   let syncToken = "*";
   let status: SyncStatus = "offline";
+  // True while status is offline/error (set in setStatus); cleared only by
+  // synced. Not derived from `status`, which starts as "offline" before any
+  // attempt has run: the first attempt must still show "syncing".
+  let failing = false;
   let flushing = false;
   let hydrated = false;
   let needsFullSync = false;
@@ -457,11 +461,6 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   function isHidden(): boolean {
     return globalThis.document?.visibilityState === "hidden";
   }
-
-  // True from a failed attempt until one succeeds. Not derived from `status`,
-  // which starts as "offline" before any attempt has run: the first attempt
-  // must still show "syncing".
-  let failing = false;
 
   function setStatus(s: SyncStatus): void {
     failing = s === "offline" || s === "error";
