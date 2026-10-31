@@ -9,6 +9,7 @@ import { useMyRole, useWritable } from '../hooks/use-my-role';
 import { scheduleTask } from '../lib/actions';
 import { useT, type TranslationKey } from '../i18n';
 import { shouldCloseWriteSheet } from '../lib/role';
+import { schedulePickerOpen } from '../lib/schedule';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, hit, space } from '../theme/tokens';
@@ -27,7 +28,14 @@ export function ScheduleSheet() {
   const close = useApp((s) => s.closeSchedule);
   const writable = useWritable();
   const role = useMyRole();
-  const [showPicker, setShowPicker] = useState(false);
+  // The task the date picker was opened for, not a boolean: a stale `true`
+  // survived backdrop/drag/back/role-drop closes and popped the picker (the
+  // Android dialog, the iOS compact field) on the next open.
+  const [pickerFor, setPickerFor] = useState<string | null>(null);
+  const showPicker = schedulePickerOpen(pickerFor, taskId);
+  useEffect(() => {
+    if (taskId == null) setPickerFor(null);
+  }, [taskId]);
 
   // The role can drop while the sheet is open; close and clear the target so it
   // cannot pop up again by itself later.
@@ -57,7 +65,7 @@ export function ScheduleSheet() {
   ];
 
   const onPickerChange = (e: DateTimePickerEvent, d?: Date) => {
-    setShowPicker(false);
+    setPickerFor(null);
     if (e.type === 'set' && d && taskId) {
       scheduleTask(taskId, { start_date: dateToIso(d), evening: false });
       close();
@@ -80,7 +88,7 @@ export function ScheduleSheet() {
           </Pressable>
         ))}
         <Pressable
-          onPress={() => setShowPicker(true)}
+          onPress={() => setPickerFor(taskId)}
           style={({ pressed }) => [styles.opt, pressed && { backgroundColor: theme.accentWash }]}
         >
           <Icon name="calendar-days" size={20} color={theme.textSecondary} strokeWidth={2} />
