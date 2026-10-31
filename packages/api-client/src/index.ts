@@ -28,7 +28,7 @@ export interface ApiClientOptions {
   baseUrl?: string;
   storage: AsyncKV;
   fetch?: typeof fetch;
-  /** Give up on a JSON request (including a token refresh) after this long. Attachment upload/download are exempt. Default 30 000. */
+  /** Give up on a JSON request after this long. Attachment upload/download are exempt. Default 30 000. */
   requestTimeoutMs?: number;
   /**
    * Give up on one `/auth/refresh` request after this long. Default 30 000, the
@@ -38,11 +38,18 @@ export interface ApiClientOptions {
    * again inside that window gets the cached successor, after it the server
    * treats it as a replay and revokes the whole session. So a timed-out or
    * network-failed refresh is repeated right away, while the lock is still held,
-   * once (`REFRESH_ATTEMPTS`), the second attempt cut short so both end within `REFRESH_BUDGET_MS` (50 s) of the first; every
-   * attempt starts inside the window of a commit made by the first one. Nothing
-   * else retries within the window: the next refresh would only come with the
-   * next request, after the caller's own backoff. The cross-tab lease lasts the
-   * budget (or this value, if longer) plus 5 s.
+   * once (`REFRESH_ATTEMPTS`), the second attempt cut short so both end within
+   * `REFRESH_BUDGET_MS` (50 s) of the first; every attempt starts inside the
+   * window of a commit made by the first one. Values above 50 s are capped to
+   * that budget. Nothing else retries within the window: the next refresh would
+   * only come with the next request, after the caller's own backoff. The
+   * cross-tab lease lasts the budget plus 5 s.
+   *
+   * Accepted residual risks: (1) the aborted first request is not cancelled
+   * server-side; if it is only processed after the second one rotated the token
+   * and more than 60 s later, the server sees a replay and burns the session the
+   * client just refreshed. (2) Both attempts can lose their answer, and the
+   * successor is then only recoverable inside the grace window.
    */
   refreshTimeoutMs?: number;
   /**
@@ -324,7 +331,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
    */
   async function withLease<T>(fn: (stillHeld: () => Promise<boolean>) => Promise<T>): Promise<T> {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const ttl = Math.max(refreshTimeoutMs, REFRESH_BUDGET_MS) + 5000;
+    const ttl = REFRESH_BUDGET_MS + 5000;
     const mine = (lease: { id: string; exp: number } | null): boolean => lease?.id === id;
     const stillHeld = async (): Promise<boolean> => {
       const lease = readLease(await opts.storage.getItem(REFRESH_LEASE));

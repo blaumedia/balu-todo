@@ -458,14 +458,17 @@ describe("auth", () => {
 
   it("a network error during refresh keeps the tokens", async () => {
     const spy = vi.fn();
+    let refreshes = 0;
     const { c, storage, fetchImpl } = await expiredSession(
       () => {
+        refreshes++;
         throw new TypeError("network down");
       },
       memoryKV(),
       spy,
     );
     await expect(c.getMe()).rejects.toBeInstanceOf(TypeError);
+    expect(refreshes).toBe(2); // a lost answer is repeated exactly once
     expect(c.isAuthenticated()).toBe(true);
     expect(spy).not.toHaveBeenCalled();
     const fresh = createApiClient({ storage, fetch: fetchImpl });
@@ -475,12 +478,17 @@ describe("auth", () => {
 
   it("a 5xx during refresh keeps the tokens", async () => {
     const spy = vi.fn();
+    let refreshes = 0;
     const { c, storage, fetchImpl } = await expiredSession(
-      () => new Response("<html>bad gateway</html>", { status: 502 }),
+      () => {
+        refreshes++;
+        return new Response("<html>bad gateway</html>", { status: 502 });
+      },
       memoryKV(),
       spy,
     );
     await expect(c.getMe()).rejects.toMatchObject({ status: 502 });
+    expect(refreshes).toBe(1); // an answer, not a lost one
     expect(c.isAuthenticated()).toBe(true);
     expect(spy).not.toHaveBeenCalled();
     const fresh = createApiClient({ storage, fetch: fetchImpl });
@@ -490,24 +498,34 @@ describe("auth", () => {
 
   it("a rejected refresh token (401) clears the tokens", async () => {
     const spy = vi.fn();
+    let refreshes = 0;
     const { c } = await expiredSession(
-      () => json({ detail: { code: "invalid_token", message: "" } }, 401),
+      () => {
+        refreshes++;
+        return json({ detail: { code: "invalid_token", message: "" } }, 401);
+      },
       memoryKV(),
       spy,
     );
     await expect(c.getMe()).rejects.toMatchObject({ status: 401 });
+    expect(refreshes).toBe(1);
     expect(c.isAuthenticated()).toBe(false);
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("a 429 during refresh keeps the tokens and does not end the session", async () => {
     const spy = vi.fn();
+    let refreshes = 0;
     const { c } = await expiredSession(
-      () => json({ detail: { code: "rate_limited", message: "" } }, 429),
+      () => {
+        refreshes++;
+        return json({ detail: { code: "rate_limited", message: "" } }, 429);
+      },
       memoryKV(),
       spy,
     );
     await expect(c.getMe()).rejects.toMatchObject({ status: 429 });
+    expect(refreshes).toBe(1);
     expect(c.isAuthenticated()).toBe(true);
     expect(spy).not.toHaveBeenCalled();
   });
