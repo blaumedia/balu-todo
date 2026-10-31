@@ -1,11 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-// Unit tests here cover the pure, framework-free logic modules under src/lib
-// (URL <-> view mapping). React components are not unit-tested - they are
-// exercised via the vite build + in the browser.
+// Unit tests cover the framework-free logic in src/lib and the store; component
+// tests opt into jsdom per file.
 export default defineConfig({
   test: {
-    include: ['test/**/*.test.ts'],
+    include: ['test/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 });

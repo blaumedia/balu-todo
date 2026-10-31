@@ -28,6 +28,7 @@ export const en = {
   "quickadd.placeholder": "Add a task — try dates, #project, @label, !p1",
   "quickadd.hint": "Enter to add · Esc to close",
   "quickadd.add": "Add task",
+  "quickadd.archivedNotice": "Archived project - unarchive it to add tasks",
   "quickadd.addedToInbox": "Added to Inbox - this project no longer accepts tasks (deleted or archived).",
 
   "toolbar.search": "Search",

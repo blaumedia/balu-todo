@@ -9,6 +9,7 @@ import {
   type Theme,
 } from "@balu/domain";
 import { api, getSync } from "../lib/clients.js";
+import { archivedViewProjectId } from "../lib/quickadd.js";
 import { logout } from "../lib/logout.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
@@ -56,6 +57,7 @@ export function CommandPalette() {
   const setView = useApp((s) => s.setView);
   const setQuickAdd = useApp((s) => s.setQuickAdd);
   const selectTask = useApp((s) => s.selectTask);
+  const view = useApp((s) => s.view);
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
   const { t } = useT();
@@ -63,16 +65,18 @@ export function CommandPalette() {
   const writable = canWrite(useMyRole());
   const today = todayLocalISO();
   const shared = snapshot.members.filter((m) => !m.is_deleted).length > 1;
+  const archivedView = archivedViewProjectId(view, snapshot.projects, snapshot.idAliases) !== null;
 
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
+  // Track the highlighted row by id: a remote change can add or drop commands
+  // (e.g. New task on an archived view) and shift the indices under the cursor.
+  const [activeId, setActiveId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
       setQuery("");
-      setActive(0);
       // focus after the overlay mounts
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -144,26 +148,28 @@ export function CommandPalette() {
     // Commands (filtered by query against their label).
     const commands: Entry[] = [];
     if (writable) {
-    commands.push({
-      id: "cmd:newTask",
-      icon: "plus",
-      label: t("cmd.newTask"),
-      hint: "⌘N",
-      run: () => {
-        close();
-        setQuickAdd(true);
-      },
-    });
-    commands.push({
-      id: "cmd:newProject",
-      icon: "hash",
-      label: t("cmd.newProject"),
-      run: () => {
-        const name = globalThis.prompt(t("project.newProjectName"));
-        if (name?.trim()) getSync()?.mutate({ type: "project_add", args: { name: name.trim(), color: "blue" } });
-        close();
-      },
-    });
+      if (!archivedView) {
+        commands.push({
+          id: "cmd:newTask",
+          icon: "plus",
+          label: t("cmd.newTask"),
+          hint: "⌘N",
+          run: () => {
+            close();
+            setQuickAdd(true);
+          },
+        });
+      }
+      commands.push({
+        id: "cmd:newProject",
+        icon: "hash",
+        label: t("cmd.newProject"),
+        run: () => {
+          const name = globalThis.prompt(t("project.newProjectName"));
+          if (name?.trim()) getSync()?.mutate({ type: "project_add", args: { name: name.trim(), color: "blue" } });
+          close();
+        },
+      });
     }
     for (const [list, icon, key] of SMART_LISTS) {
       commands.push({
@@ -224,13 +230,19 @@ export function CommandPalette() {
 
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, snapshot, theme, today, writable]);
+  }, [query, snapshot, theme, today, writable, archivedView]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.entries), [groups]);
 
+  // Seed the highlight with the first row's id on open and on query change, so
+  // a remote change that reorders the commands cannot shift it. If the tracked
+  // row vanishes, nothing is highlighted (Enter does nothing) until an arrow key.
   useEffect(() => {
-    setActive((a) => (flat.length === 0 ? 0 : Math.min(a, flat.length - 1)));
-  }, [flat.length]);
+    if (open) setActiveId(flat[0]?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, query]);
+
+  const active = flat.findIndex((e) => e.id === activeId);
 
   useEffect(() => {
     const el = listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`);
@@ -242,10 +254,10 @@ export function CommandPalette() {
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setActive((a) => (flat.length ? (a + 1) % flat.length : 0));
+      setActiveId(flat.length ? flat[(active + 1) % flat.length]!.id : null);
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      setActive((a) => (flat.length ? (a - 1 + flat.length) % flat.length : 0));
+      setActiveId(flat.length ? flat[(active < 0 ? flat.length - 1 : active - 1 + flat.length) % flat.length]!.id : null);
     } else if (e.key === "Enter") {
       e.preventDefault();
       flat[active]?.run();
@@ -294,7 +306,6 @@ export function CommandPalette() {
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              setActive(0);
             }}
             onKeyDown={onKeyDown}
             placeholder={t("palette.placeholder")}
@@ -339,7 +350,7 @@ export function CommandPalette() {
                     key={entry.id}
                     type="button"
                     data-idx={idx}
-                    onMouseMove={() => setActive(idx)}
+                    onMouseMove={() => setActiveId(entry.id)}
                     onClick={entry.run}
                     style={{
                       display: "flex",

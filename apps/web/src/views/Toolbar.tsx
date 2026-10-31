@@ -1,9 +1,10 @@
-import { nextProjectSortOrder, type Theme } from "@balu/domain";
+import type { Theme } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { api, getSync } from "../lib/clients.js";
 import { canWrite, useMyRole } from "../lib/role.js";
+import { unarchiveProject } from "../lib/unarchiveProject.js";
 import { syncLabelKey } from "../components/SyncIndicator.js";
 import { SyncIndicator } from "../components/SyncIndicator.js";
 import { Badge } from "../components/Badge.js";
@@ -65,7 +66,7 @@ export function Toolbar({ snapshot }: { snapshot: Snapshot }) {
       {progress && <ProgressRing value={progress.value} total={progress.total} showLabel />}
       {archivedId && <Badge tone="neutral">{t("project.archived")}</Badge>}
       {archivedId && writable && (
-        <Button variant="secondary" size="sm" icon="archive-restore" onClick={() => getSync()?.mutate({ type: "project_update", args: { id: archivedId, archived_at: null, sort_order: nextProjectSortOrder(snapshot.projects) } })}>
+        <Button variant="secondary" size="sm" icon="archive-restore" onClick={() => { const sync = getSync(); if (sync) unarchiveProject(sync, archivedId); }}>
           {t("project.unarchive")}
         </Button>
       )}

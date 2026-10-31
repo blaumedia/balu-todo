@@ -1,5 +1,5 @@
 import type { IsoDate, Label, Project } from "@balu/domain";
-import { composeTaskArgs as compose, resolveQuickAddContext, type ComposeContext, type ParseResult, type QuickAddTarget } from "@balu/nl-parser";
+import { composeTaskArgs as compose, resolveProjectId, resolveQuickAddContext, type ComposeContext, type ParseResult, type QuickAddTarget } from "@balu/nl-parser";
 import type { ViewSel } from "../store/app.js";
 
 export interface ComposeCtx {
@@ -52,4 +52,20 @@ export function composeTaskArgs(
     today: ctx.today,
     context: ctx.context,
   });
+}
+
+/**
+ * The id of the archived project this view shows, or null. Follows a temp id
+ * the server has replaced. A deleted project returns null: the view heals to
+ * Today and quick-add's Inbox redirect covers the gap.
+ */
+export function archivedViewProjectId(
+  view: ViewSel,
+  projects: ReadonlyArray<Pick<Project, "id" | "is_deleted" | "archived_at">>,
+  aliases: Readonly<Record<string, string>>,
+): string | null {
+  if (view.kind !== "project") return null;
+  const id = resolveProjectId(aliases, view.projectId);
+  const project = projects.find((p) => p.id === id);
+  return project != null && !project.is_deleted && project.archived_at != null ? project.id : null;
 }

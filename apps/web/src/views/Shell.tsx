@@ -3,6 +3,7 @@ import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } f
 import { todayLocalISO, type Priority } from "@balu/domain";
 import { getSync } from "../lib/clients.js";
 import { applyMoveDrop, dragKind, getDragResolver, makeAnnouncements } from "../lib/drag.js";
+import { requestQuickAdd } from "../lib/requestQuickAdd.js";
 import { projectViewAction } from "../lib/projectView.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
@@ -63,7 +64,8 @@ export function Shell() {
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "n") {
         e.preventDefault();
-        if (writable) st.setQuickAdd(true); // viewers cannot add tasks
+        if (e.repeat) return; // a held key must not re-announce the toast
+        if (writable) requestQuickAdd(); // viewers cannot add tasks
         return;
       }
       if (st.quickAddOpen || st.paletteOpen) return; // overlay owns its keys
@@ -147,7 +149,8 @@ export function Shell() {
           break;
         case "n":
           e.preventDefault();
-          if (writable) st.setQuickAdd(true);
+          if (e.repeat) return; // a held key must not re-announce the toast
+          if (writable) requestQuickAdd();
           break;
         case "Escape":
           if (st.selectedTaskId) st.selectTask(null);
