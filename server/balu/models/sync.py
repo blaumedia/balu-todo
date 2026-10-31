@@ -14,7 +14,10 @@ from .common import utcnow
 
 
 class SyncedCommand(Base):
-    """Idempotency log: one row per processed command uuid **per workspace**.
+    """Idempotency log: one row per successfully applied command uuid **per workspace**.
+
+    Rows with a non-``ok`` status exist only from servers before v1.5.2; they are
+    never replayed and are overwritten when the command succeeds.
 
     The primary key is composite. With ``uuid`` alone, a command uuid recorded in
     one workspace suppressed the same uuid in every other workspace and replayed

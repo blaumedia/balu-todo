@@ -1,8 +1,10 @@
 """Command handlers and the per-request orchestrator.
 
 Each command runs in its own transaction (its own Session). A failure records an
-error status and does not abort the remaining commands. Processed command uuids are
-persisted for idempotent replay; temp_id -> object_id mappings persist across requests.
+error status and does not abort the remaining commands. The uuids of successfully
+applied commands are persisted for idempotent replay; a rejected command is not
+remembered and is evaluated again when re-sent (contract §5.1); temp_id -> object_id
+mappings persist across requests.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import StatementError
+from sqlalchemy.exc import NoResultFound, StatementError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..attachments import remove_blob
@@ -896,10 +898,27 @@ def _resolve_args(temp_map: dict[str, str], args: dict) -> dict:
     return resolved
 
 
-def _load_temp_map(session: Session, workspace_id: uuid.UUID) -> dict[str, str]:
+def _command_temp_ids(temp_id: str | None, args: dict) -> set[str]:
+    """Every string a command could use as a temp_id: its own and its references."""
+    names: list[Any] = [temp_id]
+    names.extend(args.get(key) for key in _REF_KEYS)
+    names.append(args.get("assigned_to"))
+    if isinstance(args.get("label_ids"), list):
+        names.extend(args["label_ids"])
+    if isinstance(args.get("items"), list):
+        names.extend(item.get("id") for item in args["items"] if isinstance(item, dict))
+    return {n for n in names if isinstance(n, str)}
+
+
+def _load_temp_map(
+    session: Session, workspace_id: uuid.UUID, temp_ids: set[str]
+) -> dict[str, str]:
+    if not temp_ids:
+        return {}
     rows = session.execute(
         select(TempIdMap.temp_id, TempIdMap.object_id).where(
-            TempIdMap.workspace_id == workspace_id
+            TempIdMap.workspace_id == workspace_id,
+            TempIdMap.temp_id.in_(temp_ids),
         )
     ).all()
     return {temp_id: str(object_id) for temp_id, object_id in rows}
@@ -908,6 +927,30 @@ def _load_temp_map(session: Session, workspace_id: uuid.UUID) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
+def _is_success(status_json: dict) -> bool:
+    return status_json.get("status") == "ok"
+
+
+def _replay(
+    status_json: dict,
+    cmd_uuid: str,
+    sync_status: dict[str, Any],
+    temp_map: dict[str, str],
+    temp_id_mapping: dict[str, str],
+    relocated: dict[str, Any] | None,
+) -> None:
+    """Report a stored success again: status, temp_id mapping and relocation."""
+    sync_status[cmd_uuid] = status_json.get("status")
+    stored_temp = status_json.get("temp_id")
+    stored_obj = status_json.get("object_id")
+    if stored_temp and stored_obj:
+        temp_map[stored_temp] = stored_obj
+        temp_id_mapping[stored_temp] = stored_obj
+    stored_relocated = status_json.get("relocated")
+    if stored_relocated and relocated is not None:
+        relocated[cmd_uuid] = stored_relocated
+
+
 def process_commands(
     sm: sessionmaker[Session],
     workspace_id: uuid.UUID,
@@ -924,13 +967,17 @@ def process_commands(
     When `relocated` is given, it is filled with `{command uuid: {"reasons": [...]}}`
     for every task_add the server filed somewhere other than requested because its
     target was deleted (contract §5.5); a replay reports the stored entry again.
+
+    `role` is the caller's role as the router read it before any lock. It is not
+    trusted: each command re-reads the membership under the workspace lock and
+    uses that role.
     """
     sync_status: dict[str, Any] = {}
     temp_id_mapping: dict[str, str] = {}
 
-    # Seed the in-memory temp map from persisted mappings.
-    with sm() as seed_session:
-        temp_map = _load_temp_map(seed_session, workspace_id)
+    # Mappings known so far: filled per command under the workspace lock, and by
+    # replays of stored successes.
+    temp_map: dict[str, str] = {}
 
     for command in commands:
         cmd_uuid = command.uuid
@@ -943,22 +990,20 @@ def process_commands(
             }
             continue
 
-        # Idempotent replay: return stored status without re-applying. The key is
-        # workspace-scoped — the same uuid in another workspace is a new command.
+        # Idempotent replay of a stored success: final, so it can be served
+        # without the lock. The key is workspace-scoped - the same uuid in another
+        # workspace is a new command. A stored rejection is not replayed: nothing
+        # of it was committed, so the command is evaluated again against the
+        # current state (it may succeed now, or fail the same way).
         with sm() as check_session:
             existing = check_session.get(
                 SyncedCommand, {"workspace_id": workspace_id, "uuid": cmd_uuid_obj}
             )
-            if existing is not None:
-                sync_status[str(cmd_uuid)] = existing.status_json.get("status")
-                stored_temp = existing.status_json.get("temp_id")
-                stored_obj = existing.status_json.get("object_id")
-                if stored_temp and stored_obj:
-                    temp_map[stored_temp] = stored_obj
-                    temp_id_mapping[stored_temp] = stored_obj
-                stored_relocated = existing.status_json.get("relocated")
-                if stored_relocated and relocated is not None:
-                    relocated[str(cmd_uuid)] = stored_relocated
+            if existing is not None and _is_success(existing.status_json):
+                _replay(
+                    existing.status_json, str(cmd_uuid), sync_status, temp_map,
+                    temp_id_mapping, relocated,
+                )
                 continue
 
         handler = HANDLERS.get(command.type)
@@ -970,8 +1015,60 @@ def process_commands(
         try:
             if handler is None:
                 raise CommandError("invalid_args", f"unknown command type: {command.type}")
-            if ROLE_RANK.get(role, 0) < ROLE_RANK["member"]:
+            ctx = Ctx(
+                session=session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                role=role,
+                temp_map=temp_map,
+            )
+            # Workspace lock first, before the handler reads or changes any row: a
+            # handler that flushed a row change or checked a parent before its own
+            # bump raced concurrent deletes and could deadlock against them.
+            try:
+                ctx.bump()
+            except NoResultFound:
+                # The workspace was deleted before or while this command waited
+                # for its lock.
+                raise CommandError("not_found", "workspace not found") from None
+            # A request that held the lock first may have committed mappings this
+            # command must see (reuse check, reference resolution): load the ones
+            # it names, now that the lock is held.
+            temp_map.update(
+                _load_temp_map(
+                    session,
+                    workspace_id,
+                    _command_temp_ids(command.temp_id, command.args or {}),
+                )
+            )
+            # A concurrent request carrying the same uuid held the lock first;
+            # without this both applied it and the loser reported "command could
+            # not be applied".
+            existing = session.get(
+                SyncedCommand,
+                {"workspace_id": workspace_id, "uuid": cmd_uuid_obj},
+                populate_existing=True,
+            )
+            if existing is not None and _is_success(existing.status_json):
+                session.rollback()
+                _replay(
+                    existing.status_json, str(cmd_uuid), sync_status, temp_map,
+                    temp_id_mapping, relocated,
+                )
+                continue
+            # The router's role predates the lock: a member removed or demoted
+            # mid-batch keeps no write access, and `h_comment_delete` gates on
+            # `ctx.role`.
+            membership = session.get(
+                Membership,
+                {"workspace_id": workspace_id, "user_id": user_id},
+                populate_existing=True,
+            )
+            if membership is None or membership.is_deleted:
+                raise CommandError("forbidden", "you are no longer a member of this workspace")
+            if ROLE_RANK.get(membership.role, 0) < ROLE_RANK["member"]:
                 raise CommandError("forbidden", "viewer role is read-only")
+            ctx.role = membership.role
             # A temp_id names exactly one object per workspace, forever (§5.3).
             # Reusing one for a new object is a client bug — reject it cleanly
             # instead of letting the unique constraint surface a raw DB error.
@@ -986,23 +1083,10 @@ def process_commands(
                 )
 
             resolved_args = _resolve_args(temp_map, command.args or {})
-            ctx = Ctx(
-                session=session,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                role=role,
-                temp_map=temp_map,
-            )
-            # Workspace lock first, before the handler reads or changes any row: a
-            # handler that flushed a row change or checked a parent before its own
-            # bump raced concurrent deletes and could deadlock against them.
-            ctx.bump()
             result = handler(ctx, resolved_args)
             status = "ok"
             if command.type in _ADD_COMMANDS and command.temp_id and result.get("object_id"):
                 object_id = str(result["object_id"])
-                temp_map[command.temp_id] = object_id
-                temp_id_mapping[command.temp_id] = object_id
                 session.add(
                     TempIdMap(
                         workspace_id=workspace_id,
@@ -1017,12 +1101,23 @@ def process_commands(
             reasons = result.get("relocated")
             if reasons:
                 record["relocated"] = {"reasons": list(reasons)}
-            session.add(
-                SyncedCommand(
-                    uuid=cmd_uuid_obj, workspace_id=workspace_id, status_json=record
+            log = pg_insert(SyncedCommand).values(
+                uuid=cmd_uuid_obj, workspace_id=workspace_id, status_json=record
+            )
+            # A rejection stored by a server before v1.5.2 may sit under this uuid:
+            # it is overwritten. Nothing else can be: a success is only written
+            # under the workspace lock, after the check above.
+            session.execute(
+                log.on_conflict_do_update(
+                    index_elements=["workspace_id", "uuid"],
+                    set_={"status_json": log.excluded.status_json},
                 )
             )
             session.commit()
+            # Only now: a failed commit must leave no mapping behind in memory.
+            if object_id:
+                temp_map[command.temp_id] = object_id
+                temp_id_mapping[command.temp_id] = object_id
             sync_status[str(cmd_uuid)] = status
             if reasons:
                 if relocated is not None:
@@ -1037,7 +1132,6 @@ def process_commands(
         except CommandError as exc:
             session.rollback()
             status = {"error_code": exc.code, "error": exc.message}
-            _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
         except Exception as exc:  # unexpected -> treat as invalid_args, keep going
             session.rollback()
@@ -1056,27 +1150,8 @@ def process_commands(
                     cmd_uuid, command.type, workspace_id,
                 )
             status = {"error_code": "invalid_args", "error": "command could not be applied"}
-            _record_failure(sm, cmd_uuid_obj, workspace_id, status)
             sync_status[str(cmd_uuid)] = status
         finally:
             session.close()
 
     return sync_status, temp_id_mapping
-
-
-def _record_failure(sm, cmd_uuid_obj, workspace_id, status) -> None:
-    # ON CONFLICT rather than check-then-insert: two concurrent replays of the
-    # same failing command both passed the check, and the loser's commit raised
-    # — from inside an exception handler, so it escaped `process_commands`
-    # entirely and failed the whole request.
-    with sm() as session:
-        session.execute(
-            pg_insert(SyncedCommand)
-            .values(
-                uuid=cmd_uuid_obj,
-                workspace_id=workspace_id,
-                status_json={"status": status},
-            )
-            .on_conflict_do_nothing(index_elements=["workspace_id", "uuid"])
-        )
-        session.commit()

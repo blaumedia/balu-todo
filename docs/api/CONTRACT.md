@@ -319,9 +319,15 @@ effects of those commands) are returned.
 - `commands` (optional, max 100 per request): applied **in order, each in its own
   transaction**. One failing command does not abort the rest.
 - `uuid`: client-generated UUIDv4, the **idempotency key**, scoped to `(workspace, uuid)`.
-  The server persists processed uuids per workspace; a replayed uuid **in the same
-  workspace** is not re-applied and returns its stored status. The same uuid in another
-  workspace is a different command and is applied normally.
+  The server persists the uuids of **successfully applied** commands per workspace: a
+  replayed uuid **in the same workspace** whose command succeeded is not re-applied and
+  returns `"ok"` again, with its `temp_id_mapping` and `relocated` entries. A **rejected**
+  command is not remembered (v1.5.2): nothing of it was committed, so when the same uuid
+  arrives again it is evaluated afresh against the current state and may now succeed (for
+  example a `task_add` whose temp parent arrived meanwhile, or a viewer since promoted).
+  Rejections stored by earlier servers are treated the same way. Two requests carrying the
+  same uuid at the same time are serialised: one applies it, the other reports its `"ok"`.
+  The same uuid in another workspace is a different command and is applied normally.
 
 ### 5.2 Response
 
@@ -398,8 +404,10 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
 (id/temp_id unknown or deleted - the one exception is a `task_add` whose project,
-section or parent was deleted, §5.5), `forbidden` (viewer role; or comment edit/delete
-by a non-author non-admin), `name_taken` (labels).
+section or parent was deleted, §5.5; also the workspace itself, if it was deleted while
+the request was in flight), `forbidden` (viewer role; a caller removed from the workspace
+or demoted to viewer while the request was in flight - the role is checked per command,
+under the workspace lock; or comment edit/delete by a non-author non-admin), `name_taken` (labels).
 
 Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
 comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.
