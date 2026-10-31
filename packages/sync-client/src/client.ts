@@ -172,6 +172,12 @@ export interface SyncClient {
   hydrate(): Promise<void>;
   start(): void;
   stop(): void;
+  /**
+   * Resolves once the network work already running (a pull or flush) has settled
+   * and written what it was writing. `stop()` does not cancel that work; wait here
+   * before wiping this client's storage, or its late write lands after the wipe.
+   */
+  idle(): Promise<void>;
   /** The app regained attention (focus, visible, online, foreground): reset the retry backoff and sync now. */
   wake(): Promise<void>;
 }
@@ -753,6 +759,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     hydrate,
     start,
     stop,
+    idle: () => lane.then(() => undefined),
     wake,
   };
 }

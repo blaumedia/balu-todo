@@ -1,4 +1,4 @@
-import { ApiError, tokenSubject } from "@balu/api-client";
+import { ACCESS_KEY, ApiError, REFRESH_KEY, tokenSubject } from "@balu/api-client";
 import { pickMembership, type MeResponse } from "@balu/domain";
 import type { AccessLost } from "@balu/sync-client";
 import { makeT } from "../i18n/index.js";
@@ -13,6 +13,7 @@ import {
   setSessionEndedElsewhereHandler,
   setSessionExpiredHandler,
   teardownSync,
+  teardownSyncSettled,
 } from "./clients.js";
 import { bootRetryDelayMs, waitForRetry } from "./bootRetry.js";
 import { adoptLocalDataFor, OWNER_KEY, purgeLocalData } from "./localData.js";
@@ -44,9 +45,6 @@ setSessionExpiredHandler(() => {
   void expireSession();
 });
 
-const REFRESH_KEY = "balu:auth:refresh";
-const ACCESS_KEY = "balu:auth:access";
-
 /** False only when this browser can tell the stored login is gone. */
 function loginStored(): boolean {
   const ls = globalThis.localStorage;
@@ -54,20 +52,38 @@ function loginStored(): boolean {
 }
 
 /**
+ * This browser no longer holds a login. With the owner key still stored the
+ * session merely expired (another tab's refresh was refused): same as an expiry
+ * here - login screen with the notice, unsynced changes kept for the same user.
+ * Without it the user logged out: purge, no notice.
+ */
+async function loginGone(): Promise<void> {
+  await api.hydrate();
+  if (globalThis.localStorage?.getItem(OWNER_KEY)) {
+    await expireSession();
+    return;
+  }
+  purgeLocalData();
+  useApp.getState().reset();
+  globalThis.history?.replaceState(null, "", "/");
+}
+
+/**
  * Another tab changed the stored login under this one (logged out, or a
  * different user signed in). Stop syncing at once so nothing of this tab's
  * user is written back, then follow storage: no login left means logout
- * semantics (purge, no expiry notice); someone else's login means boot as that
+ * semantics (purge, no expiry notice) or, when the owner is still stored (the
+ * session expired there), the expiry screen that keeps the data; someone else's login means boot as that
  * user from scratch - never carry this tab's store, queue or workspace over.
  * Resolves true when the app booted as the user now stored.
  */
 export async function reconcileSession(): Promise<boolean> {
-  teardownSync();
+  // Settled, not just stopped: an in-flight pull or flush would otherwise write
+  // the previous user's replica or queue after the next user's purge.
+  await teardownSyncSettled();
   await api.hydrate();
   if (!api.isAuthenticated()) {
-    purgeLocalData();
-    useApp.getState().reset();
-    globalThis.history?.replaceState(null, "", "/");
+    await loginGone();
     return false;
   }
   useApp.getState().reset();
@@ -101,7 +117,7 @@ export function onStorageEvent(e: { key: string | null }): void {
 }
 globalThis.addEventListener?.("storage", (e) => onStorageEvent(e as StorageEvent));
 
-type BootAttempt = "ready" | "login" | "unreachable";
+type BootAttempt = "ready" | "login" | "unreachable" | "gone";
 
 let bootLoop: Promise<boolean> | null = null;
 
@@ -130,13 +146,14 @@ async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
     // While retrying, another tab may have logged out. The access token this tab
     // holds stays valid on the server, so /me would boot the logged-out user.
     if (!loginStored()) {
-      await api.hydrate();
-      purgeLocalData();
-      useApp.getState().reset();
-      globalThis.history?.replaceState(null, "", "/");
+      await loginGone();
       return false;
     }
     const outcome = await attemptBoot(preferredWorkspaceId);
+    if (outcome === "gone") {
+      await loginGone();
+      return false;
+    }
     if (outcome !== "unreachable") return outcome === "ready";
     useApp.getState().setBoot("unreachable");
     await waitForRetry(bootRetryDelayMs(attempt));
@@ -154,6 +171,9 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
     }
     return "unreachable";
   }
+  // Logged out in another tab while /me was in flight: the answer was for a login
+  // that no longer exists, and adopting its user would re-create the owner key.
+  if (!loginStored()) return "gone";
   const st = useApp.getState();
   try {
     // Before anything reads local data: another user's queue must never be

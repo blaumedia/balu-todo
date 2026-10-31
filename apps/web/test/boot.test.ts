@@ -52,6 +52,9 @@ vi.mock("../src/lib/clients.js", () => ({
   teardownSync: () => {
     fake.teardowns += 1;
   },
+  teardownSyncSettled: async () => {
+    fake.teardowns += 1;
+  },
 }));
 
 import { ApiError } from "@balu/api-client";
@@ -322,6 +325,35 @@ describe("cross-tab session changes", () => {
     expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
   });
 
+  it("session expired in another tab (owner still stored): login screen with notice, queue kept", async () => {
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    expect(await reconcileSession()).toBe(false);
+    expect(fake.teardowns).toBeGreaterThan(0);
+    expect(useApp.getState().boot).toBe("login");
+    expect(useApp.getState().loginNotice).toBe("sessionExpired");
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBe("[]");
+    expect(globalThis.localStorage.getItem("balu:owner")).toBe("u1");
+  });
+
+  it("a storage event for an expired login keeps the queue", async () => {
+    globalThis.localStorage.removeItem("balu:auth:refresh");
+    onStorageEvent({ key: "balu:auth:refresh" });
+    await vi.waitFor(() => expect(useApp.getState().loginNotice).toBe("sessionExpired"));
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBe("[]");
+  });
+
+  it("logout in another tab while /me is in flight: boots nothing, purges", async () => {
+    useApp.setState({ boot: "loading", user: null });
+    fake.getMe = async () => {
+      globalThis.localStorage.removeItem("balu:auth:refresh");
+      globalThis.localStorage.removeItem("balu:owner");
+      return me("a");
+    };
+    expect(await bootSession()).toBe(false);
+    expect(useApp.getState().boot).toBe("login");
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
+  });
+
   it("a storage event for a removed login reconciles at once", async () => {
     globalThis.localStorage.removeItem("balu:auth:refresh");
     globalThis.localStorage.removeItem("balu:owner");
@@ -332,10 +364,10 @@ describe("cross-tab session changes", () => {
 
   it("another user signing in elsewhere: this tab restarts as that user", async () => {
     globalThis.localStorage.setItem("balu:auth:access", jwt("u2"));
-    globalThis.localStorage.setItem("balu:owner", "u2");
     fake.getMe = async () => ({ user: { ...user, id: "u2" }, memberships: [mem("z")] });
-    onStorageEvent({ key: "balu:owner" });
+    onStorageEvent({ key: "balu:auth:refresh" });
     await vi.waitFor(() => expect(useApp.getState().user?.id).toBe("u2"));
+    expect(globalThis.localStorage.getItem("balu:queue:w1")).toBeNull();
     expect(fake.teardowns).toBeGreaterThan(0);
     expect(fake.hydrated).toBe(1);
     expect(fake.open).toBe("z");

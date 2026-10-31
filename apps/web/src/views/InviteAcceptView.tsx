@@ -25,7 +25,11 @@ export function InviteAcceptView({ token, onDone }: { token: string; onDone: () 
     setPhase("accepting");
     try {
       const workspace = await api.acceptInvite(token);
-      await bootSession(workspace.id);
+      // false: the boot ended on the login screen (session gone meanwhile).
+      if (!(await bootSession(workspace.id))) {
+        setPhase("needsAuth");
+        return;
+      }
       showToast(t("invite.joined"));
       onDone();
     } catch (e) {

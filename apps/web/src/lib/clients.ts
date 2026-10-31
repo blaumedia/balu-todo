@@ -153,6 +153,13 @@ export function getSyncWorkspaceId(): string | null {
   return syncWorkspaceId;
 }
 
+/** `teardownSync`, then wait for the stopped client's running pull or flush to finish writing. */
+export async function teardownSyncSettled(): Promise<void> {
+  const old = sync;
+  teardownSync();
+  await old?.idle();
+}
+
 export function teardownSync(): void {
   sync?.stop();
   sync = null;

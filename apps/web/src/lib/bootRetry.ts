@@ -1,3 +1,5 @@
+import { REFRESH_KEY } from "@balu/api-client";
+
 /** Delay before boot retry `attempt` (0-based): 1 s, doubling, capped at 30 s. */
 export function bootRetryDelayMs(attempt: number): number {
   return Math.min(1000 * 2 ** Math.max(0, attempt), 30_000);
@@ -11,7 +13,7 @@ export function waitForRetry(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const onStorage = (e: Event): void => {
       const key = (e as { key?: string | null }).key;
-      if (key === null || key === "balu:auth:refresh") done();
+      if (key === null || key === REFRESH_KEY) done();
     };
     const done = (): void => {
       clearTimeout(timer);
