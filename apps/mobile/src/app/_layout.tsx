@@ -4,7 +4,8 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { AppState } from 'react-native';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { AppState, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ProjectActionsSheet } from '../features/ProjectActionsSheet';
@@ -26,6 +27,14 @@ export default function RootLayout() {
     const taskId = taskIdFromResponse(notificationResponse ?? null);
     if (taskId) openTaskFromNotification(taskId);
   }, [notificationResponse]);
+
+  // Android: a picker dialog restored after activity recreation has lost its
+  // JS listener, so OK would silently do nothing. Close any orphan once at mount.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    DateTimePickerAndroid.dismiss('date');
+    DateTimePickerAndroid.dismiss('time');
+  }, []);
 
   useEffect(() => {
     void bootApp().finally(() => {
