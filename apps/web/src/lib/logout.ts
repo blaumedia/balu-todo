@@ -7,7 +7,8 @@ export async function logout(): Promise<void> {
   // Close every sync client first, so nothing re-persists after the purge (a
   // queue written back without an owner key would be adopted, and flushed, by the
   // next user). Not awaited: a closed client never writes again and localStorage
-  // writes are synchronous, so waiting out a request would only stall the logout.
+  // writes are synchronous. api.logout() does not wait for a running refresh
+  // either (its token write is generation-aware), so nothing here stalls.
   closeSync();
   // Before the tokens go: another tab seeing the refresh key vanish must find the
   // owner key already gone, or it takes this logout for an expiry and keeps the data.

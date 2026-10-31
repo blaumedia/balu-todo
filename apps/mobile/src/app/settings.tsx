@@ -238,15 +238,28 @@ export default function SettingsScreen() {
     bestEffortPatch({ locale: value });
   };
 
-  const doLogout = async () => {
-    await logout();
-    router.replace('/onboarding');
+  // Re-entry guard: a second tap while the first logout runs would post and
+  // purge twice. The ref blocks synchronously, the state disables the button.
+  const leaving = useRef(false);
+  const [leavingUi, setLeavingUi] = useState(false);
+  const leave = async (afterLogout?: () => void) => {
+    if (leaving.current) return;
+    leaving.current = true;
+    setLeavingUi(true);
+    try {
+      try {
+        await logout();
+      } catch {
+        /* logout() already ended the session and left the screen; a failed purge has no UI to report to */
+      }
+      afterLogout?.();
+    } finally {
+      leaving.current = false;
+      setLeavingUi(false);
+    }
   };
-  const changeServer = async () => {
-    await logout();
-    setServerUrl(null);
-    router.replace('/onboarding');
-  };
+  const doLogout = () => leave();
+  const changeServer = () => leave(() => setServerUrl(null));
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
@@ -534,7 +547,7 @@ export default function SettingsScreen() {
           <Text style={[styles.link, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
         </Pressable>
 
-        <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} style={{ marginTop: space.s6 }} />
+        <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} disabled={leavingUi} style={{ marginTop: space.s6 }} />
         <View style={{ height: space.s8 }} />
       </ScrollView>
     </View>

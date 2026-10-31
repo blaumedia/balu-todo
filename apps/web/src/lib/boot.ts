@@ -190,7 +190,7 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
   try {
     me = await api.getMe();
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) {
+    if (e instanceof ApiError && e.status === 401 && e.code !== "signed_out") {
       await expireSession();
       return "login";
     }

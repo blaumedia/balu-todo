@@ -279,7 +279,7 @@ export async function bootApp(): Promise<void> {
   } catch (e) {
     // A refused session is not "offline": booting the cached session would keep
     // an account running whose tokens are gone.
-    if (e instanceof ApiError && e.status === 401) {
+    if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
       await expireSession();
       return;
     }
@@ -326,18 +326,33 @@ setSessionExpiredHandler(() => {
   void expireSession();
 });
 
-/** Log out everywhere: stop syncing, revoke server-side, wipe local user data. */
+/**
+ * Log out everywhere: stop syncing, revoke server-side, wipe local user data,
+ * and leave for onboarding. The navigation lives here so every caller (Settings
+ * logout, change server) clears the stack: a bare replace left Today underneath
+ * and the Android back button returned to it.
+ */
 export async function logout(): Promise<void> {
-  // Close first and wait for storage writes already started, so nothing re-persists after the purge.
-  stopReminderScheduler();
-  await teardownSyncSettled();
-
-  const api = getApi();
   try {
-    await api?.logout();
-  } catch {
-    /* best-effort */
+    // Close first and wait for storage writes already started, so nothing re-persists after the purge.
+    stopReminderScheduler();
+    await teardownSyncSettled();
+
+    const api = getApi();
+    try {
+      await api?.logout();
+    } catch {
+      /* best-effort */
+    }
+    await purgeUserData();
+  } finally {
+    // A failing purge must still end the session in the UI and leave the screen.
+    useApp.getState().reset();
+    try {
+      if (router.canDismiss()) router.dismissAll();
+      router.replace('/onboarding');
+    } catch {
+      /* router not ready */
+    }
   }
-  await purgeUserData();
-  useApp.getState().reset();
 }

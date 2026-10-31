@@ -17,6 +17,7 @@ const fake = vi.hoisted(() => ({
   teardowns: 0,
   remindersStopped: 0,
   purgeCalls: [] as unknown[],
+  purgeFails: false,
   nav: [] as string[],
   canDismiss: false,
   inited: [] as string[],
@@ -60,6 +61,7 @@ vi.mock('../src/lib/kv', () => ({
   },
   purgeUserData: async (opts: unknown) => {
     fake.events.push('purge');
+    if (fake.purgeFails) throw new Error('sqlite');
     fake.purgeCalls.push(opts);
   },
   sqliteKV: {
@@ -132,6 +134,7 @@ beforeEach(() => {
   fake.teardowns = 0;
   fake.remindersStopped = 0;
   fake.purgeCalls = [];
+  fake.purgeFails = false;
   fake.nav = [];
   fake.canDismiss = false;
   fake.inited = [];
@@ -240,6 +243,15 @@ describe('bootApp', () => {
     expect(st.user).toBeNull();
   });
 
+  it('a signed_out 401 from /me (a deliberate logout) does not announce an expiry', async () => {
+    fake.getMe = async () => {
+      throw new ApiError('signed_out', 'x', 401);
+    };
+    await bootApp();
+    expect(useApp.getState().loginNotice).toBeNull();
+    expect(fake.logouts).toBe(0);
+  });
+
   it('a network failure still boots the cached session offline', async () => {
     fake.getMe = async () => {
       throw new TypeError('network');
@@ -287,5 +299,21 @@ describe('logout', () => {
     await logout();
     expect(fake.events).toEqual(['settle:start', 'settle:end', 'purge']);
     expect(fake.logouts).toBe(1);
+  });
+
+  it('clears the navigation stack before replacing with onboarding', async () => {
+    fake.canDismiss = true;
+    await logout();
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('still resets the session and leaves the screen when the purge fails', async () => {
+    fake.purgeFails = true;
+    fake.canDismiss = true;
+    useApp.setState({ boot: 'ready' } as any);
+    await expect(logout()).rejects.toThrow('sqlite');
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
   });
 });
