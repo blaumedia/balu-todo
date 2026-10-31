@@ -203,10 +203,21 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   let sessionGen = 0;
 
   async function setTokens(t: AuthTokens): Promise<void> {
+    const gen = sessionGen;
     accessToken = t.access_token;
     refreshToken = t.refresh_token;
+    // A logout can land between the two writes. Undo whatever was written and
+    // stop, so the purge is not followed by a revived session in storage.
+    const ended = async (): Promise<boolean> => {
+      if (sessionGen === gen) return false;
+      await opts.storage.removeItem(ACCESS_KEY);
+      await opts.storage.removeItem(REFRESH_KEY);
+      return true;
+    };
     await opts.storage.setItem(ACCESS_KEY, t.access_token);
+    if (await ended()) return;
     await opts.storage.setItem(REFRESH_KEY, t.refresh_token);
+    await ended();
   }
   async function clearTokens(): Promise<void> {
     sessionGen++;
@@ -364,7 +375,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
 
   async function refresh(): Promise<AuthTokens> {
     if (refreshInFlight) return refreshInFlight;
-    if (!refreshToken) throw new ApiError("invalid_token", "No refresh token", 401);
+    if (!refreshToken) throw new ApiError("signed_out", "No refresh token", 401);
     const startedGen = sessionGen;
     const flight: Promise<AuthTokens> = exclusive(async (stillHeld) => {
       try {
@@ -401,7 +412,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
             }),
           ),
         );
-        if (sessionGen !== startedGen) throw new ApiError("invalid_token", "Signed out", 401);
+        if (sessionGen !== startedGen) throw new ApiError("signed_out", "Signed out", 401);
         await setTokens(tokens);
         return tokens;
       } catch (e) {
@@ -502,14 +513,18 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     async logout() {
       // End the generation first: a refresh still running must neither write its
       // tokens back after the purge nor announce an expired session after a
-      // deliberate logout. Then let it settle so nothing is mid-flight when the
-      // caller purges. The server revokes the whole token family on logout, so
-      // posting the pre-rotation token is enough.
+      // deliberate logout (setTokens is generation-aware, so nothing waits for it).
+      // Null the in-memory tokens before posting a local copy, so a refresh that
+      // starts meanwhile fails at once instead of racing the revocation into a
+      // real 401. The server revokes the whole token family on logout, so posting
+      // the pre-rotation token is enough.
       sessionGen++;
-      if (refreshInFlight) await refreshInFlight.catch(() => undefined);
-      if (refreshToken) {
+      const token = refreshToken;
+      accessToken = null;
+      refreshToken = null;
+      if (token) {
         try {
-          await post<void>("/auth/logout", { refresh_token: refreshToken });
+          await post<void>("/auth/logout", { refresh_token: token });
         } catch {
           /* best-effort */
         }

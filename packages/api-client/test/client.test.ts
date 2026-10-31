@@ -141,6 +141,80 @@ describe("auth", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("a refresh that lands after logout rejects as signed_out, not as a refused token", async () => {
+    const { c } = await expiredSession(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      return json({ access_token: "a2", refresh_token: "r2" });
+    });
+    const me = c.getMe().catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 0));
+    await c.logout();
+    expect(await me).toMatchObject({ code: "signed_out", status: 401 });
+  });
+
+  it("a logout between the two token writes leaves storage empty", async () => {
+    const inner = memoryKV();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const reachedAccess = new Promise<void>((r) => (started = r));
+    let armed = false;
+    const storage: AsyncKV = {
+      ...inner,
+      async setItem(k, v) {
+        if (armed && k === "balu:auth:access") {
+          started();
+          await gate;
+        }
+        await inner.setItem(k, v);
+      },
+    };
+    const fetchImpl = (async (u: any) => {
+      if (String(u).endsWith("/auth/login")) {
+        return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      }
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl });
+    armed = true;
+    const login = c.login({ email: "d@example.com", password: "pw" });
+    await reachedAccess;
+    await c.logout();
+    release();
+    await login;
+    expect(c.isAuthenticated()).toBe(false);
+    expect(await inner.getItem("balu:auth:access")).toBeNull();
+    expect(await inner.getItem("balu:auth:refresh")).toBeNull();
+  });
+
+  it("a refresh started while logout posts fails at once and stays silent", async () => {
+    const spy = vi.fn();
+    const calls: string[] = [];
+    let releasePost!: () => void;
+    const postGate = new Promise<void>((r) => (releasePost = r));
+    const fetchImpl = (async (u: any) => {
+      const path = String(u);
+      calls.push(path);
+      if (path.endsWith("/auth/login")) {
+        return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      }
+      if (path.endsWith("/auth/logout")) {
+        await postGate;
+        return new Response(null, { status: 204 });
+      }
+      return json({ detail: { code: "invalid_token", message: "" } }, 401);
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage: memoryKV(), fetch: fetchImpl, onSessionExpired: spy });
+    await c.login({ email: "d@example.com", password: "pw" });
+    const out = c.logout();
+    await new Promise((r) => setTimeout(r, 0)); // the logout post is pending
+    await expect(c.refresh()).rejects.toMatchObject({ code: "signed_out" });
+    releasePost();
+    await out;
+    expect(calls.filter((x) => x.endsWith("/auth/refresh"))).toHaveLength(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("a network error during refresh keeps the tokens", async () => {
     const spy = vi.fn();
     const { c, storage, fetchImpl } = await expiredSession(
