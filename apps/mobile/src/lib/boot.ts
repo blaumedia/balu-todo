@@ -402,11 +402,12 @@ export async function expireSession(): Promise<void> {
   teardownSync();
   await getApi()?.logout().catch(() => {}); // no network call once the refresh token is gone
   const st = useApp.getState();
-  // The notice screens sit on top of the tabs, so the user is past the gate there too.
+  // The notice screens may sit on the tabs or on the index gate (a cold start with no
+  // workspace); replacing to /onboarding from the gate is harmless, it goes there anyway.
   const pastGate = st.boot === 'ready' || st.boot === 'reconnecting' || st.boot === 'noWorkspace';
   st.reset();
   st.setLoginNotice('sessionExpired');
-  if (!pastGate) return; // during boot the index gate redirects on its own
+  if (!pastGate) return; // earlier boot phases: the index gate redirects on its own
   try {
     if (router.canDismiss()) router.dismissAll();
     router.replace('/onboarding');
