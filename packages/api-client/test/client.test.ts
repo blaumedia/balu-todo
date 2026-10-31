@@ -369,20 +369,53 @@ describe("auth", () => {
     expect(await storage.getItem("balu:auth:refresh")).toBe("r1");
   });
 
-  it("a refresh gives up after 30 s by default, inside the server's 60 s reuse grace window", async () => {
+  it("a refresh attempt gives up after 30 s and the whole refresh after 50 s, inside the server's 60 s reuse grace window", async () => {
     vi.useFakeTimers();
     try {
       const storage = memoryKV();
+      let attempts = 0;
       const fetchImpl = (async (u: any) => {
         if (String(u).endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+        attempts++;
         return new Promise<Response>(() => {});
       }) as unknown as typeof fetch;
       const c = createApiClient({ storage, fetch: fetchImpl, crossContextLock: "none" });
       await c.login({ email: "d@example.com", password: "pw" });
+      let state = "pending";
       const out = c.refresh();
       const settled = expect(out).rejects.toMatchObject({ code: "timeout" });
-      await vi.advanceTimersByTimeAsync(30_001);
+      void out.catch(() => (state = "rejected"));
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(attempts).toBe(1); // still waiting for the first answer
+      await vi.advanceTimersByTimeAsync(2);
+      expect(attempts).toBe(2); // the first one timed out, the second started
+      await vi.advanceTimersByTimeAsync(19_000);
+      expect(state).toBe("pending"); // 49 s
+      await vi.advanceTimersByTimeAsync(1_100);
       await settled;
+      expect(attempts).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a refresh whose answer was lost is repeated and takes the successor the server hands back", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryKV();
+      let attempts = 0;
+      const fetchImpl = (async (u: any) => {
+        if (String(u).endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+        attempts++;
+        if (attempts === 1) return new Promise<Response>(() => {});
+        return json({ access_token: "a2", refresh_token: "r2" });
+      }) as unknown as typeof fetch;
+      const c = createApiClient({ storage, fetch: fetchImpl, crossContextLock: "none" });
+      await c.login({ email: "d@example.com", password: "pw" });
+      const out = c.refresh();
+      await vi.advanceTimersByTimeAsync(30_001);
+      await expect(out).resolves.toMatchObject({ refresh_token: "r2" });
+      expect(attempts).toBe(2);
     } finally {
       vi.useRealTimers();
     }

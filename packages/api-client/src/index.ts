@@ -31,15 +31,18 @@ export interface ApiClientOptions {
   /** Give up on a JSON request (including a token refresh) after this long. Attachment upload/download are exempt. Default 30 000. */
   requestTimeoutMs?: number;
   /**
-   * Give up on the `/auth/refresh` request after this long. Default 30 000, the
+   * Give up on one `/auth/refresh` request after this long. Default 30 000, the
    * same as `requestTimeoutMs`. The server rotates the token when it commits, not
    * when it answers, and keeps the successor for a 60 s grace window
    * (`refresh_reuse_grace_seconds`): a refresh that presents the rotated token
    * again inside that window gets the cached successor, after it the server
-   * treats it as a replay and revokes the whole session. So the timeout plus the
-   * retry backoff must stay below 60 s; a longer one would make a slow answer
-   * the very replay it was meant to avoid. The cross-tab lease lasts this long
-   * plus 5 s.
+   * treats it as a replay and revokes the whole session. So a timed-out or
+   * network-failed refresh is repeated right away, while the lock is still held,
+   * once (`REFRESH_ATTEMPTS`), the second attempt cut short so both end within `REFRESH_BUDGET_MS` (50 s) of the first; every
+   * attempt starts inside the window of a commit made by the first one. Nothing
+   * else retries within the window: the next refresh would only come with the
+   * next request, after the caller's own backoff. The cross-tab lease lasts the
+   * budget (or this value, if longer) plus 5 s.
    */
   refreshTimeoutMs?: number;
   /**
@@ -96,6 +99,12 @@ const REFRESH_LOCK = "balu:auth:refresh";
 /** Storage key of the lease that stands in for Web Locks across tabs. */
 const REFRESH_LEASE = "balu:auth:refreshLease";
 const LEASE_SETTLE_MS = 50;
+/** Total time one refresh may spend retrying, kept below the server's 60 s reuse grace. */
+const REFRESH_BUDGET_MS = 50_000;
+/** A lost refresh answer is asked for once more, not in a loop. */
+const REFRESH_ATTEMPTS = 2;
+/** Do not start another refresh attempt with less than this left. */
+const REFRESH_MIN_ATTEMPT_MS = 1_000;
 const LEASE_POLL_MS = 100;
 /**
  * In-page refresh queues of clients sharing one storage: the whole lock for
@@ -315,7 +324,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
    */
   async function withLease<T>(fn: (stillHeld: () => Promise<boolean>) => Promise<T>): Promise<T> {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    const ttl = refreshTimeoutMs + 5000;
+    const ttl = Math.max(refreshTimeoutMs, REFRESH_BUDGET_MS) + 5000;
     const mine = (lease: { id: string; exp: number } | null): boolean => lease?.id === id;
     const stillHeld = async (): Promise<boolean> => {
       const lease = readLease(await opts.storage.getItem(REFRESH_LEASE));
@@ -429,19 +438,31 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
           // else signed in there: those tokens are not ours to adopt or clear.
           throw new SessionEndedElsewhere(storedRefresh && storedAccess ? "replaced" : "gone");
         }
-        const tokens = await withTimeout(
-          refreshTimeoutMs,
-          async (signal) =>
-            parse<AuthTokens>(
-              await fetchImpl(url("/auth/refresh"), {
-                method: "POST",
-                headers: { "content-type": "application/json" },
-                body: JSON.stringify({ refresh_token: refreshToken }),
-                signal,
-              }),
-            ),
-          () => new ApiError("timeout", "Request timed out", 0),
-        );
+        const budgetEnd = Date.now() + REFRESH_BUDGET_MS;
+        let tokens: AuthTokens;
+        for (let attempt = 1; ; attempt++) {
+          try {
+            tokens = await withTimeout(
+              Math.min(refreshTimeoutMs, Math.max(budgetEnd - Date.now(), REFRESH_MIN_ATTEMPT_MS)),
+              async (signal) =>
+                parse<AuthTokens>(
+                  await fetchImpl(url("/auth/refresh"), {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ refresh_token: refreshToken }),
+                    signal,
+                  }),
+                ),
+              () => new ApiError("timeout", "Request timed out", 0),
+            );
+            break;
+          } catch (err) {
+            // Only a lost answer is worth repeating (inside the grace window the
+            // server hands back the successor); a refusal or a 5xx is an answer.
+            const lost = err instanceof ApiError ? err.code === "timeout" : err instanceof TypeError;
+            if (!lost || attempt >= REFRESH_ATTEMPTS || sessionGen !== startedGen || budgetEnd - Date.now() < REFRESH_MIN_ATTEMPT_MS) throw err;
+          }
+        }
         if (sessionGen !== startedGen) throw new ApiError("signed_out", "Signed out", 401);
         if (!(await setTokens(tokens))) throw new ApiError("signed_out", "Signed out", 401);
         return tokens;
