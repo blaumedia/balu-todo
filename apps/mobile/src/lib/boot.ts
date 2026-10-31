@@ -1,9 +1,24 @@
 import { pickMembership, type Locale, type Theme, type User, type Workspace } from '@balu/domain';
 import type { ApiClient } from '@balu/api-client';
+import type { AccessLost } from '@balu/sync-client';
+import { router } from 'expo-router';
+import { Alert } from 'react-native';
+import { makeT } from '../i18n';
 import { useApp } from '../store/app';
-import { getApi, getSync, initApi, initSync } from './clients';
+import {
+  claimAccessLossNotice,
+  getApi,
+  getSync,
+  initApi,
+  initSync,
+  isAccessLossExpected,
+  purgeWorkspaceStorage,
+  setAccessLostHandler,
+  teardownSync,
+} from './clients';
 import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
+import { accessLostNotice } from './syncNotices';
 
 /**
  * Start the local reminder scheduler if the user opted in and the OS still
@@ -40,11 +55,107 @@ export async function establishSession(
   // user asked for, and mutating first would leave them in it with only an error
   // alert to show for it. Returning here keeps the live session fully intact.
   if (requireExact && membership.workspace.id !== preferredWorkspaceId) return false;
+  // Last-used workspace missing from /me: revoked or deleted while the app was
+  // closed. Read its cached name before setSession overwrites the cache.
+  const lostLastUsed =
+    lastUsed && !me.memberships.some((m) => m.workspace.id === lastUsed) ? lastUsed : null;
+  const lostName = lostLastUsed ? await cachedWorkspaceName(lostLastUsed) : null;
   useApp.getState().setSession(me.user, me.memberships, membership.workspace);
   initSync(serverUrl, membership.workspace.id, me.user.id);
   void resumeReminders();
+  if (lostLastUsed) void discardLostWorkspace(lostLastUsed, lostName);
   return true;
 }
+
+async function cachedWorkspaceName(id: string): Promise<string | null> {
+  try {
+    const raw = await sqliteKV.getItem(SETTINGS.session);
+    const cached = raw ? (JSON.parse(raw) as { workspace?: Workspace }) : null;
+    return cached?.workspace?.id === id ? cached.workspace.name : null;
+  } catch {
+    return null;
+  }
+}
+
+async function discardLostWorkspace(workspaceId: string, name: string | null): Promise<void> {
+  const discarded = await purgeWorkspaceStorage(workspaceId);
+  if (discarded === 0 || !claimAccessLossNotice(workspaceId)) return;
+  const notice = accessLostNotice(makeT(useApp.getState().locale), 'removed', discarded, name);
+  Alert.alert(notice.title, notice.body);
+}
+
+/** The sync client lost access to a workspace (403/404): tell the user, move on. */
+export async function handleAccessLost(info: AccessLost): Promise<void> {
+  if (isAccessLossExpected(info.workspaceId)) return;
+  const st = useApp.getState();
+  if (claimAccessLossNotice(info.workspaceId)) {
+    const name =
+      st.memberships.find((m) => m.workspace.id === info.workspaceId)?.workspace.name ??
+      (st.workspace?.id === info.workspaceId ? st.workspace.name : null);
+    const notice = accessLostNotice(makeT(st.locale), info.reason, info.discarded, name);
+    Alert.alert(notice.title, notice.body);
+  }
+  // A client the app already replaced (switch) reports too; only the open one moves.
+  if (useApp.getState().workspace?.id !== info.workspaceId) return;
+  await moveOffLostWorkspace(info.workspaceId);
+}
+
+/**
+ * Leave a workspace the user can no longer reach (revoked, deleted): land in
+ * another one from /me and delete the lost one's local data. The server never
+ * leaves an account workspace-less (§2, §7), so /me always has a survivor.
+ */
+export async function moveOffLostWorkspace(lostId: string): Promise<void> {
+  const { serverUrl } = useApp.getState();
+  const api = getApi();
+  let ok = false;
+  if (serverUrl && api) {
+    // No preferred id: the remembered last-used id is the lost one and /me no
+    // longer lists it, so pickMembership lands in the first survivor.
+    for (let attempt = 0; attempt < 2 && !ok; attempt++) {
+      try {
+        ok = await establishSession(serverUrl, api);
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      const { user, memberships } = useApp.getState();
+      const survivors = memberships.filter((m) => m.workspace.id !== lostId);
+      if (user && survivors[0]) {
+        useApp.getState().setSession(user, survivors, survivors[0].workspace);
+        initSync(serverUrl, survivors[0].workspace.id, user.id);
+        ok = true;
+      }
+    }
+  }
+  if (!ok) {
+    teardownSync();
+    useApp.getState().setBoot('onboarding');
+  } else {
+    resetToWorkspaceRoot();
+  }
+  await purgeWorkspaceStorage(lostId);
+}
+
+/** Everything on screen belongs to the lost workspace (same hygiene as settings doSwitch). */
+function resetToWorkspaceRoot(): void {
+  const st = useApp.getState();
+  st.setContext({ kind: 'list', list: 'today' });
+  st.closeQuickAdd();
+  st.closeDetail();
+  st.closeSchedule();
+  st.closeProjectActions();
+  try {
+    if (router.canDismiss()) router.dismissAll();
+  } catch {
+    /* router not ready */
+  }
+}
+
+setAccessLostHandler((info) => {
+  void handleAccessLost(info);
+});
 
 /** Switch to another workspace of the signed-in user. Returns false if the
  *  prerequisites are missing; throws when the server is unreachable. */
@@ -54,8 +165,8 @@ export async function switchWorkspace(workspaceId: string): Promise<boolean> {
   if (!serverUrl || !api) return false;
   // initSync stops the old client, and stop() cancels its debounced flush, so
   // nudge the outgoing queue out now. Deliberately not awaited: the sync POST
-  // has no timeout, so on a black-hole network the await would stall the switch
-  // for the platform's socket timeout. Nothing can be lost or misrouted either
+  // times out after 30 s (sync-client `requestTimeoutMs`), and awaiting it would
+  // still stall the switch for that long. Nothing can be lost or misrouted either
   // way - the queue is persisted under the old workspace's key and the in-flight
   // request keeps writing there.
   void getSync()?.flush().catch(() => {});

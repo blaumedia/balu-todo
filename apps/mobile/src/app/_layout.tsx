@@ -31,9 +31,10 @@ export default function RootLayout() {
     void bootApp().finally(() => {
       SplashScreen.hideAsync().catch(() => {});
     });
-    // Foreground sync (contract §6.7): pull whenever the app becomes active.
+    // Foreground (contract §6.7): sync now and restart the retry backoff from its
+    // shortest delay - it may have grown to 30 s while the app was in the background.
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void getSync()?.sync();
+      if (state === 'active') void getSync()?.wake();
     });
     return () => sub.remove();
   }, []);

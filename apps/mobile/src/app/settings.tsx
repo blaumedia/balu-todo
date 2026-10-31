@@ -21,7 +21,7 @@ import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
-import { getApi, initSync } from '../lib/clients';
+import { clearExpectedAccessLoss, expectAccessLoss, getApi, initSync, purgeWorkspaceStorage } from '../lib/clients';
 import { establishSession, logout, switchWorkspace } from '../lib/boot';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
@@ -172,9 +172,11 @@ export default function SettingsScreen() {
     setSwitching(true);
     try {
       try {
+        expectAccessLoss(doomedId);
         await api.deleteWorkspace(doomedId);
       } catch {
         // Nothing happened server-side, so the live session is still valid.
+        clearExpectedAccessLoss(doomedId);
         Alert.alert(t('workspace.deleteError'));
         return;
       }
@@ -202,6 +204,7 @@ export default function SettingsScreen() {
           ok = true;
         }
       }
+      void purgeWorkspaceStorage(doomedId);
       if (!ok) Alert.alert(t('workspace.deleteError'));
       cancelDelete();
       // Same hygiene as a switch: everything under this screen still belongs to
