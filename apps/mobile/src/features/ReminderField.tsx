@@ -2,9 +2,10 @@ import { todayLocalISO, type IsoDate, type IsoDateTime } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../components/Icon';
 import { relativeDate } from '../lib/format';
+import { combineDayAndTime, firstReminderPickerStep, type ReminderPickerStep } from '../lib/reminderPicker';
 import { useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, radius, space } from '../theme/tokens';
@@ -29,6 +30,8 @@ export interface ReminderFieldProps {
   /** UTC ISO datetime (`reminder_at`) or null. */
   value: IsoDateTime | null;
   onChange: (value: IsoDateTime | null) => void;
+  /** Read-only viewer: every control disabled for touch and assistive tech. */
+  disabled?: boolean;
 }
 
 /**
@@ -36,10 +39,12 @@ export interface ReminderFieldProps {
  * 09:00 on the parsed day) plus a native date+time picker for precision.
  * Writes a UTC ISO datetime, matching the contract's `reminder_at`.
  */
-export function ReminderField({ value, onChange }: ReminderFieldProps) {
+export function ReminderField({ value, onChange, disabled = false }: ReminderFieldProps) {
   const theme = useTheme();
   const { t, locale } = useT();
-  const [showPicker, setShowPicker] = useState(false);
+  const [step, setStep] = useState<ReminderPickerStep | null>(null);
+  const [day, setDay] = useState<Date | null>(null); // Android: the date from step 1
+  const [draft, setDraft] = useState<Date | null>(null); // iOS: the wheel value until Done
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
 
@@ -61,12 +66,46 @@ export function ReminderField({ value, onChange }: ReminderFieldProps) {
     setEditing(false);
   };
 
-  const onPickerChange = (e: DateTimePickerEvent, d?: Date) => {
-    setShowPicker(false);
-    if (e.type === 'set' && d) onChange(d.toISOString());
+  const seed = current ?? atTime(todayLocalISO(), 9, 0);
+
+  const closePicker = () => {
+    setStep(null);
+    setDay(null);
+    setDraft(null);
+  };
+  const openPicker = () => {
+    setDay(null);
+    setDraft(seed);
+    setStep(firstReminderPickerStep(Platform.OS));
+  };
+
+  // Android dialogs: date, then time; commit only after the time dialog's OK.
+  const onDialogChange = (e: DateTimePickerEvent, d?: Date) => {
+    if (e.type !== 'set' || !d) {
+      closePicker();
+      return;
+    }
+    if (step === 'date') {
+      setDay(d);
+      setStep('time');
+      return;
+    }
+    const picked = day ? combineDayAndTime(day, d) : d;
+    closePicker();
+    onChange(picked.toISOString());
+  };
+
+  // iOS wheels report every change; keep the value until Done.
+  const onWheelChange = (_e: DateTimePickerEvent, d?: Date) => {
+    if (d) setDraft(d);
+  };
+  const commitDraft = () => {
+    if (draft) onChange(draft.toISOString());
+    closePicker();
   };
 
   return (
+    <View>
     <View style={[styles.row, { borderBottomColor: theme.border }]}>
       <Icon name="bell" size={20} color={theme.textTertiary} strokeWidth={2} />
       <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.reminder')}</Text>
@@ -82,25 +121,61 @@ export function ReminderField({ value, onChange }: ReminderFieldProps) {
             placeholderTextColor={theme.textTertiary}
             style={[styles.input, { color: theme.textPrimary, borderColor: theme.border }]}
             returnKeyType="done"
+            editable={!disabled}
           />
         ) : (
-          <Pressable onPress={() => setEditing(true)}>
+          <Pressable
+            onPress={() => setEditing(true)}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('detail.reminder')}, ${rel && current ? `${rel.text} · ${hhmm(current)}` : t('detail.none')}`}
+            accessibilityState={{ disabled }}
+          >
             <Text style={[styles.value, { color: rel ? valueColor : theme.textTertiary }]}>
               {rel && current ? `${rel.text} · ${hhmm(current)}` : t('detail.none')}
             </Text>
           </Pressable>
         )}
-        <Pressable onPress={() => setShowPicker(true)} hitSlop={8}>
+        <Pressable
+          onPress={() => (step ? closePicker() : openPicker())}
+          hitSlop={8}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel={`${t('detail.reminder')}, ${t('detail.pickDate')}`}
+          accessibilityState={{ disabled }}
+        >
           <Icon name="calendar-days" size={18} color={theme.accent} strokeWidth={2} />
         </Pressable>
         {value ? (
-          <Pressable onPress={() => onChange(null)} hitSlop={8}>
+          <Pressable
+            onPress={() => onChange(null)}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${t('detail.reminder')}, ${t('detail.clear')}`}
+            accessibilityState={{ disabled }}
+          >
             <Icon name="x" size={16} color={theme.textTertiary} strokeWidth={2} />
           </Pressable>
         ) : null}
       </View>
-      {showPicker ? (
-        <DateTimePicker value={current ?? atTime(todayLocalISO(), 9, 0)} mode="datetime" display="default" onChange={onPickerChange} />
+    </View>
+      {step === 'datetime' && draft && !disabled ? (
+        <View style={[styles.wheel, { borderBottomColor: theme.border }]}>
+          <DateTimePicker value={draft} mode="datetime" display="spinner" onChange={onWheelChange} />
+          <Pressable onPress={commitDraft} hitSlop={8} accessibilityRole="button" style={styles.done}>
+            <Text style={[styles.doneText, { color: theme.accent }]}>{t('common.done')}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {(step === 'date' || step === 'time') && !disabled ? (
+        <DateTimePicker
+          key={step}
+          value={step === 'time' && day ? combineDayAndTime(day, seed) : seed}
+          mode={step}
+          display="default"
+          onChange={onDialogChange}
+        />
       ) : null}
     </View>
   );
@@ -111,5 +186,8 @@ const styles = StyleSheet.create({
   label: { fontSize: font.secondary, flexShrink: 0 },
   right: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: space.s3, flexShrink: 1 },
   value: { fontSize: font.secondary, fontVariant: ['tabular-nums'] },
+  wheel: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: space.s2 },
+  done: { alignSelf: 'flex-end', paddingVertical: space.s2, paddingHorizontal: space.s2 },
+  doneText: { fontSize: font.secondary, fontWeight: font.weightSemibold },
   input: { minWidth: 130, fontSize: font.secondary, borderWidth: 1, borderRadius: radius.chip, paddingHorizontal: 8, paddingVertical: 4 },
 });

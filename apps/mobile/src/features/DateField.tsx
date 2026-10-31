@@ -26,10 +26,12 @@ export interface DateFieldProps {
   label: string;
   value: IsoDate | null;
   onChange: (value: IsoDate | null) => void;
+  /** Read-only viewer: every control disabled for touch and assistive tech. */
+  disabled?: boolean;
 }
 
 /** A detail-sheet row: NL text entry ("tomorrow", "next tue") + native picker. */
-export function DateField({ icon, label, value, onChange }: DateFieldProps) {
+export function DateField({ icon, label, value, onChange, disabled = false }: DateFieldProps) {
   const theme = useTheme();
   const { t, locale } = useT();
   const [showPicker, setShowPicker] = useState(false);
@@ -73,24 +75,45 @@ export function DateField({ icon, label, value, onChange }: DateFieldProps) {
             placeholderTextColor={theme.textTertiary}
             style={[styles.input, { color: theme.textPrimary, borderColor: theme.border }]}
             returnKeyType="done"
+            editable={!disabled}
           />
         ) : (
-          <Pressable onPress={() => setEditing(true)}>
+          <Pressable
+            onPress={() => setEditing(true)}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${rel ? rel.text : t('detail.none')}`}
+            accessibilityState={{ disabled }}
+          >
             <Text style={[styles.value, { color: rel ? valueColor : theme.textTertiary }]}>
               {rel ? rel.text : t('detail.none')}
             </Text>
           </Pressable>
         )}
-        <Pressable onPress={() => setShowPicker(true)} hitSlop={8}>
+        <Pressable
+          onPress={() => setShowPicker(true)}
+          hitSlop={8}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel={`${label}, ${t('detail.pickDate')}`}
+          accessibilityState={{ disabled }}
+        >
           <Icon name="calendar-days" size={18} color={theme.accent} strokeWidth={2} />
         </Pressable>
         {value ? (
-          <Pressable onPress={() => onChange(null)} hitSlop={8}>
+          <Pressable
+            onPress={() => onChange(null)}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${t('detail.clear')}`}
+            accessibilityState={{ disabled }}
+          >
             <Icon name="x" size={16} color={theme.textTertiary} strokeWidth={2} />
           </Pressable>
         ) : null}
       </View>
-      {showPicker ? (
+      {showPicker && !disabled ? (
         <DateTimePicker value={isoToDate(value)} mode="date" display="default" onChange={onPickerChange} />
       ) : null}
     </View>
