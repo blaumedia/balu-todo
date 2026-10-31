@@ -18,7 +18,7 @@ import type {
   User,
   Workspace,
 } from "@balu/domain";
-import { withTimeout } from "@balu/domain";
+import { parseRetryAfter, withTimeout } from "@balu/domain";
 
 // Declared once in @balu/domain (D6); re-exported so existing imports keep working.
 export type { AsyncKV };
@@ -31,12 +31,15 @@ export interface ApiClientOptions {
   /** Give up on a JSON request (including a token refresh) after this long. Attachment upload/download are exempt. Default 30 000. */
   requestTimeoutMs?: number;
   /**
-   * Give up on the `/auth/refresh` request after this long. Default 90 000, longer
-   * than `requestTimeoutMs` on purpose: the server rotates the token when it
-   * commits, not when it answers, and a client that gave up on a slow refresh
-   * would present the already-rotated token next time - which the server treats
-   * as a replay and answers by revoking the whole session. The cross-tab lease
-   * lasts this long plus 5 s.
+   * Give up on the `/auth/refresh` request after this long. Default 30 000, the
+   * same as `requestTimeoutMs`. The server rotates the token when it commits, not
+   * when it answers, and keeps the successor for a 60 s grace window
+   * (`refresh_reuse_grace_seconds`): a refresh that presents the rotated token
+   * again inside that window gets the cached successor, after it the server
+   * treats it as a replay and revokes the whole session. So the timeout plus the
+   * retry backoff must stay below 60 s; a longer one would make a slow answer
+   * the very replay it was meant to avoid. The cross-tab lease lasts this long
+   * plus 5 s.
    */
   refreshTimeoutMs?: number;
   /**
@@ -75,17 +78,6 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
-}
-
-const RETRY_AFTER_CAP_MS = 300_000;
-
-/** `Retry-After` as ms: delta-seconds or an HTTP date; null when absent or unusable. */
-function parseRetryAfter(res: Response): number | null {
-  const raw = res.headers?.get("retry-after")?.trim();
-  if (!raw) return null;
-  const secs = /^\d+$/.test(raw) ? Number(raw) : (Date.parse(raw) - Date.now()) / 1000;
-  if (!Number.isFinite(secs) || secs < 0) return null;
-  return Math.min(secs * 1000, RETRY_AFTER_CAP_MS);
 }
 
 /** Internal: the lease was lost between taking it and using it; take it again. */
@@ -211,7 +203,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   const baseUrl = opts.baseUrl ?? "/api/v1";
   const fetchImpl = opts.fetch ?? globalThis.fetch.bind(globalThis);
   const timeoutMs = opts.requestTimeoutMs ?? 30_000;
-  const refreshTimeoutMs = opts.refreshTimeoutMs ?? 90_000;
+  const refreshTimeoutMs = opts.refreshTimeoutMs ?? 30_000;
 
   function timed<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
     return withTimeout(timeoutMs, run, () => new ApiError("timeout", "Request timed out", 0));
@@ -276,7 +268,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
       detail.code ?? "error",
       detail.message ?? res.statusText,
       res.status,
-      parseRetryAfter(res),
+      parseRetryAfter(res.headers?.get("retry-after")),
     );
   }
 
@@ -565,7 +557,11 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
       const token = refreshToken;
       accessToken = null;
       refreshToken = null;
-      await clearTokens();
+      try {
+        await clearTokens();
+      } catch {
+        /* a storage error must not skip the revoke below */
+      }
       if (token) {
         try {
           await post<void>("/auth/logout", { refresh_token: token });

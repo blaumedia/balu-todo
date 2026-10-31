@@ -369,6 +369,47 @@ describe("auth", () => {
     expect(await storage.getItem("balu:auth:refresh")).toBe("r1");
   });
 
+  it("a refresh gives up after 30 s by default, inside the server's 60 s reuse grace window", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = memoryKV();
+      const fetchImpl = (async (u: any) => {
+        if (String(u).endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+        return new Promise<Response>(() => {});
+      }) as unknown as typeof fetch;
+      const c = createApiClient({ storage, fetch: fetchImpl, crossContextLock: "none" });
+      await c.login({ email: "d@example.com", password: "pw" });
+      const out = c.refresh();
+      const settled = expect(out).rejects.toMatchObject({ code: "timeout" });
+      await vi.advanceTimersByTimeAsync(30_001);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("logout still posts the revoke when clearing the stored tokens fails", async () => {
+    const inner = memoryKV();
+    const storage = {
+      ...inner,
+      getItem: inner.getItem.bind(inner),
+      setItem: inner.setItem.bind(inner),
+      removeItem: async () => {
+        throw new Error("quota");
+      },
+    };
+    const posted: string[] = [];
+    const fetchImpl = (async (u: any) => {
+      posted.push(String(u));
+      if (String(u).endsWith("/auth/login")) return json({ user: USER, access_token: "a1", refresh_token: "r1" });
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl });
+    await c.login({ email: "d@example.com", password: "pw" });
+    await expect(c.logout()).resolves.toBeUndefined();
+    expect(posted.some((u) => u.endsWith("/auth/logout"))).toBe(true);
+  });
+
   it("carries a 503's Retry-After on the error", async () => {
     const mk = (value: string | null) =>
       createApiClient({
