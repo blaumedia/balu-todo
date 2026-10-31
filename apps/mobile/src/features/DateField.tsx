@@ -2,7 +2,7 @@ import { todayLocalISO, type IsoDate } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { relativeDate } from '../lib/format';
 import { useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
@@ -34,7 +34,9 @@ export interface DateFieldProps {
 export function DateField({ icon, label, value, onChange, disabled = false }: DateFieldProps) {
   const theme = useTheme();
   const { t, locale } = useT();
-  // Seed captured once on open: `isoToDate(null)` is a fresh `new Date()` each render.
+  // Android only: seed captured once on open, because `isoToDate(null)` yields a fresh
+  // timestamp each render and the Android wrapper re-opens its dialog on a changed timestamp.
+  // iOS renders an inline picker (no dialogs to re-open) and follows `value` live, as before.
   const [pickerSeed, setPickerSeed] = useState<Date | null>(null);
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
@@ -60,8 +62,8 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
     setEditing(false);
   };
 
-  // Stable identity: the Android wrapper re-opens the dialog whenever `onChange` or
-  // `value` changes, so both must stay stable while the dialog is open.
+  // Stable identity: the Android wrapper re-opens the dialog whenever the `onChange`
+  // identity or the `value` timestamp changes, so both must stay stable while it is open.
   const latestOnChange = useRef(onChange);
   latestOnChange.current = onChange;
   const onPickerChange = useCallback((e: DateTimePickerEvent, d?: Date) => {
@@ -132,7 +134,12 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
         ) : null}
       </View>
       {pickerSeed && !disabled ? (
-        <DateTimePicker value={pickerSeed} mode="date" display="default" onChange={onPickerChange} />
+        <DateTimePicker
+          value={Platform.OS === 'android' ? pickerSeed : isoToDate(value)}
+          mode="date"
+          display="default"
+          onChange={onPickerChange}
+        />
       ) : null}
     </View>
   );
