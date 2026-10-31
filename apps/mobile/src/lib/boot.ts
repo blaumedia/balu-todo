@@ -328,7 +328,7 @@ setSessionExpiredHandler(() => {
 
 /** Log out everywhere: stop syncing, revoke server-side, wipe local user data. */
 export async function logout(): Promise<void> {
-  // Close first and let running requests settle, so nothing re-persists after the purge.
+  // Close first and wait for storage writes already started, so nothing re-persists after the purge.
   stopReminderScheduler();
   await teardownSyncSettled();
 

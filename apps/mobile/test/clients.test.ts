@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The real clients.ts (retired set, retire(), teardownSyncSettled()) with a fake
 // sync client whose storage write and request are separately controllable.
@@ -75,12 +75,17 @@ beforeEach(() => {
   fakes.made.length = 0;
 });
 
-async function reset(): Promise<void> {
-  const pending = teardownSyncSettled();
-  for (const c of fakes.made) c.finishWrite();
-  await pending;
+// Let every fake finish, so no closed client lingers in the module's retired set
+// and leaks into the next test.
+afterEach(async () => {
+  for (const c of fakes.made) {
+    c.finishWrite();
+    c.releaseRequest();
+  }
+  await teardownSyncSettled();
+  await new Promise((r) => setTimeout(r, 0));
   fakes.made.length = 0;
-}
+});
 
 describe('teardownSyncSettled reaches stopped clients', () => {
   it('a client stopped by a workspace switch is closed by a later teardown', async () => {
@@ -96,7 +101,10 @@ describe('teardownSyncSettled reaches stopped clients', () => {
     w1!.finishWrite();
     w2!.finishWrite();
     await pending;
-    fakes.made.length = 0;
+    expect(w1!.writesSettledCalls).toBe(1);
+    expect(w2!.writesSettledCalls).toBe(1);
+    expect(w1!.idleCalls).toBe(1); // only retire() called it, at the switch
+    expect(w2!.idleCalls).toBe(0);
   });
 
   it('a client stopped by teardownSync is closed too', async () => {
@@ -108,6 +116,7 @@ describe('teardownSyncSettled reaches stopped clients', () => {
     expect(w1!.closed).toBe(true);
     w1!.finishWrite();
     await pending;
+    expect(w1!.writesSettledCalls).toBe(1);
   });
 
   it('does not resolve before every started write settled, but not for a hanging request', async () => {
@@ -124,6 +133,7 @@ describe('teardownSyncSettled reaches stopped clients', () => {
     w2!.finishWrite();
     await pending; // the requests of both never answered
     expect(done).toBe(true);
+    expect(w2!.idleCalls).toBe(0); // teardown waits for writes only; idle() is retire()'s
   });
 
   it('forgets a stopped client once its work has settled', async () => {
@@ -145,6 +155,13 @@ describe('teardownSyncSettled reaches stopped clients', () => {
     expect(oldW1!.closed).toBe(true);
     expect(w2!.closed).toBe(false);
     expect(newW1!.closed).toBe(false);
-    await reset();
+  });
+
+  it('re-initialising the current workspace closes the client it replaces', () => {
+    initSync(URL, 'w1', 'u1');
+    initSync(URL, 'w1', 'u1');
+    const [first, second] = fakes.made;
+    expect(first!.closed).toBe(true);
+    expect(second!.closed).toBe(false);
   });
 });
