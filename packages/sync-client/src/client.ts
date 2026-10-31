@@ -177,9 +177,16 @@ export interface SyncClient {
    * storage again (queue, token, replica, full-sync flag) and starts no new
    * network work. Work already in flight may still finish, but its results stay
    * in memory. `mutate()` becomes a no-op (the edit is neither applied nor shown),
-   * and the rejected/relocated callbacks no longer fire. Use it when another user's data is about to be wiped or adopted.
+   * and the rejected, relocated and access-lost callbacks no longer fire. Use it
+   * when another user's data is about to be wiped or adopted.
    */
   close(): void;
+  /**
+   * Resolves once the storage writes already started have settled. After `close()`
+   * no new write can start, so this is all a purge has to wait for: unlike `idle()`
+   * it does not wait for a slow network request, which `close()` has made harmless.
+   */
+  writesSettled(): Promise<void>;
   /**
    * Resolves once the network work already running (a pull or flush) has settled
    * and written what it was writing. `stop()` does not cancel that work; wait here
@@ -359,17 +366,28 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     };
   }
 
+  // Storage writes started and not yet settled, for writesSettled().
+  const pendingWrites = new Set<Promise<unknown>>();
+  function tracked(write: Promise<void>): Promise<void> {
+    pendingWrites.add(write);
+    const done = (): void => {
+      pendingWrites.delete(write);
+    };
+    write.then(done, done);
+    return write;
+  }
+
   async function persistQueue(): Promise<void> {
     if (accessLost || closed) return;
-    await opts.storage.setItem(qKey, JSON.stringify(queue));
+    await tracked(opts.storage.setItem(qKey, JSON.stringify(queue)));
   }
   async function persistToken(): Promise<void> {
     if (accessLost || closed) return;
-    await opts.storage.setItem(tKey, syncToken);
+    await tracked(opts.storage.setItem(tKey, syncToken));
   }
   async function persistReplica(): Promise<void> {
     if (accessLost || closed) return;
-    await opts.storage.setItem(rKey, JSON.stringify(serializeReplica(replica)));
+    await tracked(opts.storage.setItem(rKey, JSON.stringify(serializeReplica(replica))));
   }
 
   /**
@@ -385,13 +403,13 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     // the first version of this fix ended up asking for a delta and never
     // recovering. `doSync` reads the flag instead, so it cannot be clobbered.
     needsFullSync = true;
-    await opts.storage.setItem(nKey, "1");
+    await tracked(opts.storage.setItem(nKey, "1"));
   }
 
   async function clearNeedsFullSync(): Promise<void> {
     needsFullSync = false;
     if (closed) return;
-    await opts.storage.removeItem(nKey);
+    await tracked(opts.storage.removeItem(nKey));
   }
 
   async function hydrate(): Promise<void> {
@@ -557,6 +575,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     queue = []; // counted above; nothing will ever send them
     setStatus("error");
     invalidate();
+    if (closed) return; // closed during the purge: the user it concerned is gone
     opts.onAccessLost?.({ workspaceId: opts.workspaceId, reason, discarded });
   }
 
@@ -786,6 +805,10 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     stop();
   }
 
+  async function writesSettled(): Promise<void> {
+    while (pendingWrites.size > 0) await Promise.allSettled([...pendingWrites]);
+  }
+
   return {
     getSnapshot() {
       if (!snapshot) snapshot = buildSnapshot();
@@ -803,6 +826,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     start,
     stop,
     close,
+    writesSettled,
     idle,
     wake,
   };

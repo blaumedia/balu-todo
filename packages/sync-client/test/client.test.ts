@@ -573,6 +573,65 @@ describe("outage recovery (contract §6.7)", () => {
       expect(onCommandsRejected).not.toHaveBeenCalled();
     });
 
+    it("a client closed while it purges after a lost access does not report the loss", async () => {
+      const server = makeErrorServer(403, { detail: { code: "forbidden", message: "x" } });
+      const kv = memoryKV();
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let purging = false;
+      const storage = {
+        getItem: (k: string) => kv.getItem(k),
+        setItem: (k: string, v: string) => kv.setItem(k, v),
+        removeItem: async (k: string) => {
+          purging = true;
+          await gate;
+          return kv.removeItem(k);
+        },
+      };
+      const onAccessLost = vi.fn();
+      const c = track(createSyncClient(base({ fetch: server.fetch, storage, onAccessLost })));
+      const p = c.sync();
+      await vi.waitFor(() => expect(purging).toBe(true));
+      c.close(); // the user it concerned signed out meanwhile
+      release();
+      await p;
+      await c.idle();
+      expect(onAccessLost).not.toHaveBeenCalled();
+    });
+
+    it("writesSettled() waits for a storage write already started, not for a request", async () => {
+      const g = gated(); // the request never answers: its gate stays shut
+      let finish: () => void = () => undefined;
+      const slow = new Promise<void>((r) => {
+        finish = r;
+      });
+      const storage = {
+        ...g.storage,
+        setItem: async (k: string, v: string) => {
+          await slow;
+          return g.storage.setItem(k, v);
+        },
+      };
+      const c = track(createSyncClient(base({ fetch: g.fetchImpl, storage })));
+      const p = c.sync();
+      await vi.waitFor(() => expect(g.calls()).toBe(1));
+      c.mutate({ type: "task_add", args: { title: "x" } }); // starts persistQueue
+      c.close();
+      let settled = false;
+      const w = c.writesSettled().then(() => {
+        settled = true;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(settled).toBe(false); // the write is still running
+      finish();
+      await w; // resolves without the hanging request ever answering
+      expect(settled).toBe(true);
+      g.release();
+      await p;
+    });
+
     it("idle() also waits for a sync that was still hydrating when it was called", async () => {
       const g = gated();
       g.release();
