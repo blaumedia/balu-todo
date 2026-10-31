@@ -283,6 +283,11 @@ export async function bootApp(): Promise<void> {
       await expireSession();
       return;
     }
+    // Logged out while /me was in flight: do not revive the session from the cache.
+    if (e instanceof ApiError && e.code === 'signed_out') {
+      store.setBoot('onboarding');
+      return;
+    }
     // Offline (or server down): boot from the cached session so the local
     // replica + queue still work (acceptance criterion 2).
     if (sessionRaw) {

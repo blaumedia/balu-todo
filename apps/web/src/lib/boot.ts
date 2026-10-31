@@ -194,6 +194,8 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
       await expireSession();
       return "login";
     }
+    // Logged out while /me was in flight: not an outage, nothing to retry.
+    if (e instanceof ApiError && e.code === "signed_out") return "gone";
     return "unreachable";
   }
   // Logged out in another tab while /me was in flight: the answer was for a login
