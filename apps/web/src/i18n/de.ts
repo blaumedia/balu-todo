@@ -163,6 +163,8 @@ export const de: Record<TranslationKey, string> = {
   "invite.joined": "Willkommen im Workspace",
   "invite.invalidTitle": "Einladung ungültig",
   "invite.invalidBody": "Dieser Link ist abgelaufen oder wurde widerrufen. Bitte um einen neuen.",
+  "invite.bootFailedTitle": "Workspace konnte nicht geöffnet werden",
+  "invite.bootFailedBody": "Die Einladung wurde angenommen, aber der Workspace konnte nicht geöffnet werden. Lade die Seite neu, um es erneut zu versuchen.",
   "invite.back": "Zurück zu Balu",
 
   "workspace.switch": "Workspace wechseln",

@@ -160,6 +160,8 @@ export const en = {
   "invite.joined": "Welcome to the workspace",
   "invite.invalidTitle": "Invite not valid",
   "invite.invalidBody": "This link has expired or been revoked. Ask for a fresh one.",
+  "invite.bootFailedTitle": "Could not open the workspace",
+  "invite.bootFailedBody": "The invite was accepted, but the workspace could not be opened. Reload the page to try again.",
   "invite.back": "Back to Balu",
 
   "workspace.switch": "Switch workspace",

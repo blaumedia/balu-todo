@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "@balu/api-client";
 import { api } from "../lib/clients.js";
 import { bootSession } from "../lib/boot.js";
+import { phaseAfterFailedBoot } from "../lib/inviteAccept.js";
 import { makeT } from "../i18n/index.js";
 import { useApp } from "../store/app.js";
 import { Button } from "../components/Button.js";
 import { Icon } from "../components/Icon.js";
 import { LoginView } from "./LoginView.js";
 
-type Phase = "checking" | "needsAuth" | "accepting" | "invalid";
+type Phase = "checking" | "needsAuth" | "accepting" | "invalid" | "bootFailed";
 
 /**
  * `/invite/:token` — accept an invite (contract §7). Unauthenticated users sign
@@ -26,10 +27,8 @@ export function InviteAcceptView({ token, onDone }: { token: string; onDone: () 
     try {
       const workspace = await api.acceptInvite(token);
       if (!(await bootSession(workspace.id))) {
-        // false: the boot ended on the login screen. Only a session that is gone
-        // leads to the login form; a local failure or a missing membership with
-        // the login intact is an error here, not a reason to ask for a password.
-        setPhase(api.isAuthenticated() ? "invalid" : "needsAuth");
+        // false: the boot ended on the login screen (see phaseAfterFailedBoot).
+        setPhase(phaseAfterFailedBoot(api.isAuthenticated()));
         return;
       }
       showToast(t("invite.joined"));
@@ -56,6 +55,7 @@ export function InviteAcceptView({ token, onDone }: { token: string; onDone: () 
     return <LoginView onAuthenticated={accept} />;
   }
 
+  const failed = phase === "invalid" || phase === "bootFailed";
   const busy = phase === "checking" || phase === "accepting";
 
   return (
@@ -86,22 +86,22 @@ export function InviteAcceptView({ token, onDone }: { token: string; onDone: () 
             width: 48,
             height: 48,
             borderRadius: 14,
-            background: phase === "invalid" ? "var(--danger)" : "var(--balu-gradient)",
+            background: failed ? "var(--danger)" : "var(--balu-gradient)",
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Icon name={phase === "invalid" ? "x" : "users"} size={24} color="#fff" strokeWidth={2.5} />
+          <Icon name={failed ? "x" : "users"} size={24} color="#fff" strokeWidth={2.5} />
         </span>
 
-        {phase === "invalid" ? (
+        {failed ? (
           <>
             <h1 style={{ margin: "16px 0 8px", fontSize: "var(--text-title)", fontWeight: 600, color: "var(--text-primary)" }}>
-              {t("invite.invalidTitle")}
+              {t(phase === "bootFailed" ? "invite.bootFailedTitle" : "invite.invalidTitle")}
             </h1>
             <p style={{ margin: "0 0 20px", color: "var(--text-secondary)", fontSize: "var(--text-secondary-size)" }}>
-              {t("invite.invalidBody")}
+              {t(phase === "bootFailed" ? "invite.bootFailedBody" : "invite.invalidBody")}
             </p>
             <Button variant="secondary" fullWidth onClick={onDone}>
               {t("invite.back")}
