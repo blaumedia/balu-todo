@@ -931,6 +931,53 @@ describe("lost access (contract §6.8)", () => {
     }
   });
 
+  it("a 503 from /sync keeps the queue and retries with backoff", async () => {
+    const ok = makeServer();
+    let calls = 0;
+    let up = false;
+    const fetchImpl = ((u: any, init: any) => {
+      calls += 1;
+      if (!up) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: { code: "unavailable", message: "db" } }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      return ok.fetch(u, init);
+    }) as unknown as typeof fetch;
+    const storage = memoryKV();
+    const onAccessLost = vi.fn();
+    const onCommandsRejected = vi.fn();
+    const c = track(
+      createSyncClient(
+        base({
+          fetch: fetchImpl,
+          storage,
+          onAccessLost,
+          onCommandsRejected,
+          retryBaseMs: 5,
+          retryMaxMs: 20,
+          autoSyncMs: 1_000_000,
+        }),
+      ),
+    );
+    c.mutate({ type: "task_add", args: { title: "a" } });
+    c.start();
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(() => expect(c.getStatus()).toBe("error"));
+    expect(c.getSnapshot().pending).toBe(1);
+    expect(await storage.getItem(workspaceStorageKeys("w1").queue)).not.toBeNull();
+    const failed = calls;
+    up = true;
+    await vi.waitFor(() => expect(c.getStatus()).toBe("synced")); // the retry got through
+    expect(calls).toBeGreaterThan(failed);
+    expect(c.getSnapshot().pending).toBe(0);
+    expect(onAccessLost).not.toHaveBeenCalled();
+    expect(onCommandsRejected).not.toHaveBeenCalled();
+  });
+
   it("purgeWorkspaceData removes one workspace's keys and counts its queue", async () => {
     const storage = memoryKV();
     const k1 = workspaceStorageKeys("w1");
