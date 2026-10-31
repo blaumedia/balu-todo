@@ -255,6 +255,7 @@ export const de: Record<TranslationKey, string> = {
   "common.later": "Später diese Woche",
   "common.copy": "Kopieren",
   "common.copied": "Kopiert",
+  "common.copyFailed": "Konnte nicht in die Zwischenablage kopieren",
   "common.confirm": "Bestätigen",
   "common.remove": "Entfernen",
 };

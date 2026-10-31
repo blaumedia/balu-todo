@@ -252,6 +252,7 @@ export const en = {
   "common.later": "Later this week",
   "common.copy": "Copy",
   "common.copied": "Copied",
+  "common.copyFailed": "Could not copy to the clipboard",
   "common.confirm": "Confirm",
   "common.remove": "Remove",
 } as const;

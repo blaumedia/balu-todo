@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { McpSettings } from "@balu/domain";
 import { api } from "../lib/clients.js";
+import { copyText } from "../lib/clipboard.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { Button } from "../components/Button.js";
@@ -52,7 +53,7 @@ export function McpSection({
   const key = settings.key;
 
   function copy(value: string) {
-    void globalThis.navigator?.clipboard?.writeText(value).then(() => showToast(t("common.copied")));
+    void copyText(value).then((ok) => showToast(t(ok ? "common.copied" : "common.copyFailed"), ok ? undefined : { tone: "error" }));
   }
 
   async function generate() {
@@ -64,7 +65,7 @@ export function McpSection({
       setRevealed(false);
       showToast(t(key === null ? "mcp.generated" : "mcp.regenerated"));
     } catch {
-      showToast(t("auth.errorGeneric"));
+      showToast(t("auth.errorGeneric"), { tone: "error" });
     } finally {
       setBusy(false);
     }

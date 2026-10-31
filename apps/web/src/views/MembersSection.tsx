@@ -4,6 +4,7 @@ import type { Invite, InviteRole, Member, Role } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { ApiError } from "@balu/api-client";
 import { api, getSync } from "../lib/clients.js";
+import { copyText } from "../lib/clipboard.js";
 import { canManageMembers, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
@@ -83,9 +84,9 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
   }, [loadInvites]);
 
   function handleApiError(e: unknown) {
-    if (e instanceof ApiError && e.code === "last_owner") showToast(t("members.lastOwner"));
-    else if (e instanceof ApiError && e.code === "forbidden") showToast(t("members.forbidden"));
-    else showToast(t("auth.errorGeneric"));
+    if (e instanceof ApiError && e.code === "last_owner") showToast(t("members.lastOwner"), { tone: "error" });
+    else if (e instanceof ApiError && e.code === "forbidden") showToast(t("members.forbidden"), { tone: "error" });
+    else showToast(t("auth.errorGeneric"), { tone: "error" });
   }
 
   async function changeRole(m: Member, next: Role) {
@@ -140,7 +141,7 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
   }
 
   function copyLink(link: string) {
-    void globalThis.navigator?.clipboard?.writeText(link).then(() => showToast(t("members.copied")));
+    void copyText(link).then((ok) => showToast(t(ok ? "members.copied" : "common.copyFailed"), ok ? undefined : { tone: "error" }));
   }
 
   function fmtDate(iso: string) {
