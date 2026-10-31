@@ -146,7 +146,11 @@ export function bootSession(preferredWorkspaceId?: string): Promise<boolean> {
   return bootLoop;
 }
 
+/** Immediate re-asks of /me after another tab's sign-in, before backing off. */
+const FREE_REPLACED_RETRIES = 2;
+
 async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
+  let replaced = 0;
   for (let attempt = 0; ; attempt += 1) {
     // While retrying, another tab may have logged out. The access token this tab
     // holds stays valid on the server, so /me would boot the logged-out user.
@@ -162,6 +166,13 @@ async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
     if (outcome === "replaced") {
       // Another user signed in while /me was in flight: pick up their tokens, ask again.
       await api.hydrate();
+      // A sign-in elsewhere settles within a round or two. If the stored token's
+      // user and /me keep disagreeing (inconsistent storage), back off instead of
+      // calling /me in a tight loop.
+      replaced += 1;
+      if (replaced > FREE_REPLACED_RETRIES) {
+        await waitForRetry(bootRetryDelayMs(replaced - FREE_REPLACED_RETRIES - 1));
+      }
       continue;
     }
     if (outcome !== "unreachable") return outcome === "ready";

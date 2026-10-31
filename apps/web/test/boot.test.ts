@@ -246,6 +246,25 @@ describe("bootSession (attemptBoot classification)", () => {
     expect(useApp.getState().loginNotice).toBe("sessionExpired");
   });
 
+  it("backs off when the stored login and /me keep disagreeing, instead of looping on /me", async () => {
+    vi.useFakeTimers();
+    globalThis.localStorage.setItem("balu:auth:access", jwt("u2"));
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me("a"); // always answers for u1 while u2 is stored
+    };
+    const booted = bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(3); // two immediate re-asks, then it waits
+    await vi.advanceTimersByTimeAsync(500);
+    expect(calls).toBe(3);
+    globalThis.localStorage.setItem("balu:auth:access", jwt("u1"));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await booted).toBe(true);
+    expect(calls).toBe(4);
+  });
+
   it("a 5xx shows the unreachable screen, retries, then becomes ready", async () => {
     vi.useFakeTimers();
     let calls = 0;
