@@ -181,10 +181,79 @@ describe("auth", () => {
     await reachedAccess;
     await c.logout();
     release();
-    await login;
+    // The caller must not see a successful login for a session that was ended.
+    await expect(login).rejects.toMatchObject({ code: "signed_out", status: 401 });
     expect(c.isAuthenticated()).toBe(false);
     expect(await inner.getItem("balu:auth:access")).toBeNull();
     expect(await inner.getItem("balu:auth:refresh")).toBeNull();
+  });
+
+  it("a logout during the token write of a refresh fails the request instead of retrying it", async () => {
+    const inner = memoryKV();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const reachedAccess = new Promise<void>((r) => (started = r));
+    let armed = false;
+    const storage: AsyncKV = {
+      ...inner,
+      async setItem(k, v) {
+        if (armed && k === "balu:auth:access") {
+          started();
+          await gate;
+        }
+        await inner.setItem(k, v);
+      },
+    };
+    const { c } = await expiredSession(
+      () => json({ access_token: "a2", refresh_token: "r2" }),
+      storage,
+    );
+    armed = true;
+    const me = c.getMe().catch((e: unknown) => e);
+    await reachedAccess;
+    await c.logout();
+    release();
+    expect(await me).toMatchObject({ code: "signed_out", status: 401 });
+    expect(await inner.getItem("balu:auth:access")).toBeNull();
+  });
+
+  it("an older setTokens that gives up does not erase a newer login's stored tokens", async () => {
+    const inner = memoryKV();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let started!: () => void;
+    const reachedAccess = new Promise<void>((r) => (started = r));
+    let gated = false;
+    const storage: AsyncKV = {
+      ...inner,
+      async setItem(k, v) {
+        await inner.setItem(k, v);
+        // Hold the old write's completion, so the newer login lands in between.
+        if (!gated && k === "balu:auth:access" && v === "a1") {
+          gated = true;
+          started();
+          await gate;
+        }
+      },
+    };
+    let n = 0;
+    const fetchImpl = (async (u: any) => {
+      if (String(u).endsWith("/auth/login")) {
+        n += 1;
+        return json({ user: USER, access_token: `a${n}`, refresh_token: `r${n}` });
+      }
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const c = createApiClient({ storage, fetch: fetchImpl });
+    const first = c.login({ email: "d@example.com", password: "pw" }).catch((e: unknown) => e);
+    await reachedAccess;
+    await c.logout();
+    await c.login({ email: "d@example.com", password: "pw" });
+    release();
+    await first;
+    expect(await inner.getItem("balu:auth:access")).toBe("a2");
+    expect(await inner.getItem("balu:auth:refresh")).toBe("r2");
   });
 
   it("a refresh started while logout posts fails at once and stays silent", async () => {

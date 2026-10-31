@@ -202,22 +202,29 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
   // expiry: the user already left.
   let sessionGen = 0;
 
-  async function setTokens(t: AuthTokens): Promise<void> {
+  // Resolves false when the session ended while the tokens were being stored.
+  async function setTokens(t: AuthTokens): Promise<boolean> {
     const gen = sessionGen;
     accessToken = t.access_token;
     refreshToken = t.refresh_token;
     // A logout can land between the two writes. Undo whatever was written and
-    // stop, so the purge is not followed by a revived session in storage.
+    // stop, so the purge is not followed by a revived session in storage. Storage
+    // is async: a newer login may already have written its own tokens, so a key
+    // is only removed while it still holds ours.
     const ended = async (): Promise<boolean> => {
       if (sessionGen === gen) return false;
-      await opts.storage.removeItem(ACCESS_KEY);
-      await opts.storage.removeItem(REFRESH_KEY);
+      if ((await opts.storage.getItem(ACCESS_KEY)) === t.access_token) {
+        await opts.storage.removeItem(ACCESS_KEY);
+      }
+      if ((await opts.storage.getItem(REFRESH_KEY)) === t.refresh_token) {
+        await opts.storage.removeItem(REFRESH_KEY);
+      }
       return true;
     };
     await opts.storage.setItem(ACCESS_KEY, t.access_token);
-    if (await ended()) return;
+    if (await ended()) return false;
     await opts.storage.setItem(REFRESH_KEY, t.refresh_token);
-    await ended();
+    return !(await ended());
   }
   async function clearTokens(): Promise<void> {
     sessionGen++;
@@ -413,7 +420,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
           ),
         );
         if (sessionGen !== startedGen) throw new ApiError("signed_out", "Signed out", 401);
-        await setTokens(tokens);
+        if (!(await setTokens(tokens))) throw new ApiError("signed_out", "Signed out", 401);
         return tokens;
       } catch (e) {
         if (sessionGen !== startedGen) throw e;
@@ -501,12 +508,12 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
 
     async register(body) {
       const result = await post<AuthResult>("/auth/register", body);
-      await setTokens(result);
+      if (!(await setTokens(result))) throw new ApiError("signed_out", "Signed out", 401);
       return result;
     },
     async login(body) {
       const result = await post<AuthResult>("/auth/login", body);
-      await setTokens(result);
+      if (!(await setTokens(result))) throw new ApiError("signed_out", "Signed out", 401);
       return result;
     },
     refresh,
