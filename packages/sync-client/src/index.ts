@@ -1,6 +1,8 @@
-export { createSyncClient } from "./client.js";
+export { createSyncClient, purgeWorkspaceData, workspaceStorageKeys } from "./client.js";
 export type {
+  AccessLost,
   RejectedCommand,
+  RelocatedCommand,
   Snapshot,
   SyncClient,
   SyncClientOptions,

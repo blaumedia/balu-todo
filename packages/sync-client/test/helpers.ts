@@ -118,7 +118,7 @@ export function makeSeedServer(
  * A minimal in-memory sync server: resolves temp_ids, echoes created objects,
  * and records every request body so tests can assert batching / rewrites.
  */
-export function makeServer() {
+export function makeServer(opts: { relocate?: (cmd: any) => string[] | null } = {}) {
   const calls: Array<{ sync_token: string; commands: any[] }> = [];
   const tempMap: Record<string, string> = {};
   let counter = 0;
@@ -129,6 +129,7 @@ export function makeServer() {
     calls.push(req);
     const mapping: Record<string, string> = {};
     const objects: any = { projects: [], sections: [], tasks: [], labels: [], comments: [], members: [] };
+    const relocated: Record<string, unknown> = {};
 
     for (const cmd of req.commands ?? []) {
       const args = { ...(cmd.args ?? {}) };
@@ -145,6 +146,8 @@ export function makeServer() {
         tempMap[cmd.temp_id] = real;
         mapping[cmd.temp_id] = real;
         objects.tasks.push(makeTask({ id: real, title: args.title, project_id: args.project_id ?? null }));
+        const reasons = opts.relocate?.(cmd);
+        if (reasons) relocated[cmd.uuid] = { reasons };
       } else if (cmd.type === "comment_add") {
         const real = `C${++counter}`;
         tempMap[cmd.temp_id] = real;
@@ -159,6 +162,7 @@ export function makeServer() {
       full_sync: false,
       sync_status: {},
       temp_id_mapping: mapping,
+      relocated,
       ...objects,
     };
     return new Response(JSON.stringify(resp), {
@@ -230,4 +234,18 @@ export function makeRejectingServer(shouldReject: (cmd: any) => string | null) {
   };
 
   return { calls, store, fetch: fetchImpl as unknown as typeof fetch };
+}
+
+/** A server that answers every request with the given status and body (an object is sent as JSON). */
+export function makeErrorServer(status: number, body: unknown) {
+  const calls: Array<{ sync_token: string; commands: any[] }> = [];
+  const fetchImpl = async (_url: any, init: any): Promise<Response> => {
+    calls.push(JSON.parse(init.body));
+    const text = typeof body === "string";
+    return new Response(text ? body : JSON.stringify(body), {
+      status,
+      headers: { "content-type": text ? "text/html" : "application/json" },
+    });
+  };
+  return { calls, fetch: fetchImpl as unknown as typeof fetch };
 }

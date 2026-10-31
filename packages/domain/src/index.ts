@@ -12,3 +12,4 @@ export * from "./storage.js";
 export * from "./search.js";
 export * from "./projects.js";
 export * from "./timeout.js";
+export * from "./relocation.js";

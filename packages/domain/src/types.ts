@@ -280,11 +280,16 @@ export interface SyncRequest {
 
 export type CommandStatus = "ok" | { error_code: string; error: string };
 
+/** Why the server filed a `task_add` somewhere other than requested (contract §5.2, §5.5). */
+export type RelocationReason = "project_deleted" | "section_deleted" | "parent_deleted";
+
 export interface SyncResponse {
   sync_token: string;
   full_sync: boolean;
   sync_status: Record<string, CommandStatus>;
   temp_id_mapping: Record<string, string>;
+  /** v1.5.1: accepted `task_add`s filed elsewhere because their target was deleted, keyed by command uuid. Absent on older servers. */
+  relocated?: Record<string, { reasons: RelocationReason[] }>;
   projects: Project[];
   sections: Section[];
   tasks: Task[];
