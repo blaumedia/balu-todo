@@ -1,7 +1,7 @@
 import { todayLocalISO, type IsoDate } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { relativeDate } from '../lib/format';
 import { useT } from '../i18n';
@@ -42,6 +42,11 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
   const valueColor = rel?.tone === 'overdue' ? theme.danger : rel?.tone === 'today' ? theme.accent : theme.textPrimary;
 
   const submitText = () => {
+    if (disabled) {
+      setText('');
+      setEditing(false);
+      return;
+    }
     const trimmed = text.trim();
     if (!trimmed) {
       setEditing(false);
@@ -54,10 +59,21 @@ export function DateField({ icon, label, value, onChange, disabled = false }: Da
     setEditing(false);
   };
 
-  const onPickerChange = (e: DateTimePickerEvent, d?: Date) => {
+  // Stable identity: the Android wrapper re-opens the dialog whenever `onChange` changes.
+  const latestOnChange = useRef(onChange);
+  latestOnChange.current = onChange;
+  const onPickerChange = useCallback((e: DateTimePickerEvent, d?: Date) => {
     setShowPicker(false);
-    if (e.type === 'set' && d) onChange(dateToIso(d));
-  };
+    if (e.type === 'set' && d) latestOnChange.current(dateToIso(d));
+  }, []);
+
+  // A role drop to viewer mid-edit must not leave a stale picker or input behind.
+  useEffect(() => {
+    if (disabled) {
+      setShowPicker(false);
+      setEditing(false);
+    }
+  }, [disabled]);
 
   return (
     <View style={[styles.row, { borderBottomColor: theme.border }]}>

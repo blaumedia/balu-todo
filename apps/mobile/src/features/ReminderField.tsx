@@ -1,11 +1,11 @@
 import { todayLocalISO, type IsoDate, type IsoDateTime } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Icon } from '../components/Icon';
 import { relativeDate } from '../lib/format';
-import { combineDayAndTime, firstReminderPickerStep, type ReminderPickerStep } from '../lib/reminderPicker';
+import { combineDayAndTime, firstReminderPickerStep, reminderDialogStep, type ReminderPickerStep } from '../lib/reminderPicker';
 import { useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, radius, space } from '../theme/tokens';
@@ -53,7 +53,14 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
   const overdue = current != null && current.getTime() <= Date.now();
   const valueColor = overdue ? theme.danger : rel?.tone === 'today' ? theme.accent : theme.textPrimary;
 
+  const display = rel && current ? `${rel.text} · ${hhmm(current)}` : t('detail.none');
+
   const submitText = () => {
+    if (disabled) {
+      setText('');
+      setEditing(false);
+      return;
+    }
     const trimmed = text.trim();
     if (!trimmed) {
       setEditing(false);
@@ -80,20 +87,26 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
   };
 
   // Android dialogs: date, then time; commit only after the time dialog's OK.
-  const onDialogChange = (e: DateTimePickerEvent, d?: Date) => {
-    if (e.type !== 'set' || !d) {
+  // The handler must keep a stable identity: the Android wrapper re-opens the
+  // dialog whenever `onChange` changes, which would reset the dial mid-selection.
+  const dialogState = useRef({ step, day, onChange });
+  dialogState.current = { step, day, onChange };
+  const onDialogChange = useCallback((e: DateTimePickerEvent, d?: Date) => {
+    const cur = dialogState.current;
+    if (!cur.step) return;
+    const r = reminderDialogStep(cur.step, cur.day, e.type, d);
+    setDay(r.day);
+    setStep(r.next);
+    if (r.commit) cur.onChange(r.commit.toISOString());
+  }, []);
+
+  // A role drop to viewer mid-edit must not leave a stale picker or input behind.
+  useEffect(() => {
+    if (disabled) {
       closePicker();
-      return;
+      setEditing(false);
     }
-    if (step === 'date') {
-      setDay(d);
-      setStep('time');
-      return;
-    }
-    const picked = day ? combineDayAndTime(day, d) : d;
-    closePicker();
-    onChange(picked.toISOString());
-  };
+  }, [disabled]);
 
   // iOS wheels report every change; keep the value until Done.
   const onWheelChange = (_e: DateTimePickerEvent, d?: Date) => {
@@ -106,60 +119,60 @@ export function ReminderField({ value, onChange, disabled = false }: ReminderFie
 
   return (
     <View>
-    <View style={[styles.row, { borderBottomColor: theme.border }]}>
-      <Icon name="bell" size={20} color={theme.textTertiary} strokeWidth={2} />
-      <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.reminder')}</Text>
-      <View style={styles.right}>
-        {editing ? (
-          <TextInput
-            autoFocus
-            value={text}
-            onChangeText={setText}
-            onSubmitEditing={submitText}
-            onBlur={submitText}
-            placeholder={t('detail.datePlaceholder')}
-            placeholderTextColor={theme.textTertiary}
-            style={[styles.input, { color: theme.textPrimary, borderColor: theme.border }]}
-            returnKeyType="done"
-            editable={!disabled}
-          />
-        ) : (
+      <View style={[styles.row, { borderBottomColor: theme.border }]}>
+        <Icon name="bell" size={20} color={theme.textTertiary} strokeWidth={2} />
+        <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.reminder')}</Text>
+        <View style={styles.right}>
+          {editing ? (
+            <TextInput
+              autoFocus
+              value={text}
+              onChangeText={setText}
+              onSubmitEditing={submitText}
+              onBlur={submitText}
+              placeholder={t('detail.datePlaceholder')}
+              placeholderTextColor={theme.textTertiary}
+              style={[styles.input, { color: theme.textPrimary, borderColor: theme.border }]}
+              returnKeyType="done"
+              editable={!disabled}
+            />
+          ) : (
+            <Pressable
+              onPress={() => setEditing(true)}
+              disabled={disabled}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('detail.reminder')}, ${display}`}
+              accessibilityState={{ disabled }}
+            >
+              <Text style={[styles.value, { color: rel ? valueColor : theme.textTertiary }]}>
+                {display}
+              </Text>
+            </Pressable>
+          )}
           <Pressable
-            onPress={() => setEditing(true)}
-            disabled={disabled}
-            accessibilityRole="button"
-            accessibilityLabel={`${t('detail.reminder')}, ${rel && current ? `${rel.text} · ${hhmm(current)}` : t('detail.none')}`}
-            accessibilityState={{ disabled }}
-          >
-            <Text style={[styles.value, { color: rel ? valueColor : theme.textTertiary }]}>
-              {rel && current ? `${rel.text} · ${hhmm(current)}` : t('detail.none')}
-            </Text>
-          </Pressable>
-        )}
-        <Pressable
-          onPress={() => (step ? closePicker() : openPicker())}
-          hitSlop={8}
-          disabled={disabled}
-          accessibilityRole="button"
-          accessibilityLabel={`${t('detail.reminder')}, ${t('detail.pickDate')}`}
-          accessibilityState={{ disabled }}
-        >
-          <Icon name="calendar-days" size={18} color={theme.accent} strokeWidth={2} />
-        </Pressable>
-        {value ? (
-          <Pressable
-            onPress={() => onChange(null)}
+            onPress={() => (step ? closePicker() : openPicker())}
             hitSlop={8}
             disabled={disabled}
             accessibilityRole="button"
-            accessibilityLabel={`${t('detail.reminder')}, ${t('detail.clear')}`}
+            accessibilityLabel={`${t('detail.reminder')}, ${t('detail.pickDate')}`}
             accessibilityState={{ disabled }}
           >
-            <Icon name="x" size={16} color={theme.textTertiary} strokeWidth={2} />
+            <Icon name="calendar-days" size={18} color={theme.accent} strokeWidth={2} />
           </Pressable>
-        ) : null}
+          {value ? (
+            <Pressable
+              onPress={() => onChange(null)}
+              hitSlop={8}
+              disabled={disabled}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('detail.reminder')}, ${t('detail.clear')}`}
+              accessibilityState={{ disabled }}
+            >
+              <Icon name="x" size={16} color={theme.textTertiary} strokeWidth={2} />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
-    </View>
       {step === 'datetime' && draft && !disabled ? (
         <View style={[styles.wheel, { borderBottomColor: theme.border }]}>
           <DateTimePicker value={draft} mode="datetime" display="spinner" onChange={onWheelChange} />

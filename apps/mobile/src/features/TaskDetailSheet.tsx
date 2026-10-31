@@ -252,12 +252,12 @@ function DetailBody({
       {sections.length > 0 ? (
         <>
           <Pressable
-        style={[styles.row, { borderBottomColor: theme.border }]}
-        onPress={() => setShowSections((s) => !s)}
-        disabled={!writable}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: showSections, disabled: !writable }}
-      >
+            style={[styles.row, { borderBottomColor: theme.border }]}
+            onPress={() => setShowSections((s) => !s)}
+            disabled={!writable}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showSections, disabled: !writable }}
+          >
             <Icon name="layers" size={20} color={theme.textTertiary} strokeWidth={2} />
             <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.section')}</Text>
             <View style={styles.value}>
@@ -302,12 +302,12 @@ function DetailBody({
       {multiMember ? (
         <>
           <Pressable
-        style={[styles.row, { borderBottomColor: theme.border }]}
-        onPress={() => setShowAssignee((s) => !s)}
-        disabled={!writable}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: showAssignee, disabled: !writable }}
-      >
+            style={[styles.row, { borderBottomColor: theme.border }]}
+            onPress={() => setShowAssignee((s) => !s)}
+            disabled={!writable}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showAssignee, disabled: !writable }}
+          >
             <Icon name="user" size={20} color={theme.textTertiary} strokeWidth={2} />
             <Text style={[styles.label, { color: theme.textSecondary }]}>{t('detail.assignee')}</Text>
             <View style={styles.value}>
@@ -720,7 +720,8 @@ function SubOption({
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ selected: active, disabled }}
-      style={({ pressed }) => [styles.subOpt, pressed && { backgroundColor: theme.accentWash }]}>
+      style={({ pressed }) => [styles.subOpt, pressed && { backgroundColor: theme.accentWash }]}
+    >
       {dot ? <View style={[styles.dot, { backgroundColor: dot }]} /> : <View style={styles.dotSpacer} />}
       <Text style={[styles.subText, { color: active ? theme.accent : theme.textPrimary }]} numberOfLines={1}>
         {label}
