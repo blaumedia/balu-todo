@@ -72,7 +72,6 @@ const URL = 'https://balu.example';
 
 beforeEach(() => {
   initApi(URL);
-  fakes.made.length = 0;
 });
 
 // Let every fake finish, so no closed client lingers in the module's retired set

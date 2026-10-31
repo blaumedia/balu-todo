@@ -602,38 +602,38 @@ describe("outage recovery (contract §6.7)", () => {
     });
 
     it("writesSettled() also waits for the purge after a lost access", async () => {
-    const server = makeErrorServer(403, { detail: { code: "forbidden", message: "x" } });
-    const kv = memoryKV();
-    let release: () => void = () => undefined;
-    const gate = new Promise<void>((r) => {
-      release = r;
+      const server = makeErrorServer(403, { detail: { code: "forbidden", message: "x" } });
+      const kv = memoryKV();
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      let purging = false;
+      const storage = {
+        getItem: (k: string) => kv.getItem(k),
+        setItem: (k: string, v: string) => kv.setItem(k, v),
+        removeItem: async (k: string) => {
+          purging = true;
+          await gate;
+          return kv.removeItem(k);
+        },
+      };
+      const c = track(createSyncClient(base({ fetch: server.fetch, storage })));
+      const p = c.sync();
+      await vi.waitFor(() => expect(purging).toBe(true));
+      c.close();
+      let settled = false;
+      const w = c.writesSettled().then(() => {
+        settled = true;
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(settled).toBe(false); // the deletes are still running
+      release();
+      await w;
+      await p;
     });
-    let purging = false;
-    const storage = {
-      getItem: (k: string) => kv.getItem(k),
-      setItem: (k: string, v: string) => kv.setItem(k, v),
-      removeItem: async (k: string) => {
-        purging = true;
-        await gate;
-        return kv.removeItem(k);
-      },
-    };
-    const c = track(createSyncClient(base({ fetch: server.fetch, storage })));
-    const p = c.sync();
-    await vi.waitFor(() => expect(purging).toBe(true));
-    c.close();
-    let settled = false;
-    const w = c.writesSettled().then(() => {
-      settled = true;
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(settled).toBe(false); // the deletes are still running
-    release();
-    await w;
-    await p;
-  });
 
-  it("writesSettled() waits for a storage write already started, not for a request", async () => {
+    it("writesSettled() waits for a storage write already started, not for a request", async () => {
       const g = gated(); // the request never answers: its gate stays shut
       let finish: () => void = () => undefined;
       const slow = new Promise<void>((r) => {
@@ -806,6 +806,53 @@ describe("outage recovery (contract §6.7)", () => {
     expect(c.getSnapshot().tasks.map((t) => t.title)).toEqual(["a"]);
     expect(c.getSnapshot().pending).toBe(0);
   });
+
+  it("a 503 from /sync keeps the queue and is retried", async () => {
+    const ok = makeServer();
+    let calls = 0;
+    let up = false;
+    const fetchImpl = ((u: any, init: any) => {
+      calls += 1;
+      if (!up) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ detail: { code: "unavailable", message: "db" } }), {
+            status: 503,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      return ok.fetch(u, init);
+    }) as unknown as typeof fetch;
+    const storage = memoryKV();
+    const onAccessLost = vi.fn();
+    const onCommandsRejected = vi.fn();
+    const c = track(
+      createSyncClient(
+        base({
+          fetch: fetchImpl,
+          storage,
+          onAccessLost,
+          onCommandsRejected,
+          retryBaseMs: 5,
+          retryMaxMs: 20,
+          autoSyncMs: 1_000_000,
+        }),
+      ),
+    );
+    c.mutate({ type: "task_add", args: { title: "a" } });
+    c.start();
+    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(() => expect(c.getStatus()).toBe("error"));
+    expect(c.getSnapshot().pending).toBe(1);
+    expect(await storage.getItem(workspaceStorageKeys("w1").queue)).not.toBeNull();
+    const failed = calls;
+    up = true;
+    await vi.waitFor(() => expect(c.getStatus()).toBe("synced")); // the retry got through
+    expect(calls).toBeGreaterThan(failed);
+    expect(c.getSnapshot().pending).toBe(0);
+    expect(onAccessLost).not.toHaveBeenCalled();
+    expect(onCommandsRejected).not.toHaveBeenCalled();
+  });
 });
 
 describe("visibility (contract §6.7)", () => {
@@ -929,53 +976,6 @@ describe("lost access (contract §6.8)", () => {
       expect(onAccessLost).not.toHaveBeenCalled();
       expect(await storage.getItem(workspaceStorageKeys("w1").queue)).not.toBeNull();
     }
-  });
-
-  it("a 503 from /sync keeps the queue and retries with backoff", async () => {
-    const ok = makeServer();
-    let calls = 0;
-    let up = false;
-    const fetchImpl = ((u: any, init: any) => {
-      calls += 1;
-      if (!up) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ detail: { code: "unavailable", message: "db" } }), {
-            status: 503,
-            headers: { "content-type": "application/json" },
-          }),
-        );
-      }
-      return ok.fetch(u, init);
-    }) as unknown as typeof fetch;
-    const storage = memoryKV();
-    const onAccessLost = vi.fn();
-    const onCommandsRejected = vi.fn();
-    const c = track(
-      createSyncClient(
-        base({
-          fetch: fetchImpl,
-          storage,
-          onAccessLost,
-          onCommandsRejected,
-          retryBaseMs: 5,
-          retryMaxMs: 20,
-          autoSyncMs: 1_000_000,
-        }),
-      ),
-    );
-    c.mutate({ type: "task_add", args: { title: "a" } });
-    c.start();
-    await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(1));
-    await vi.waitFor(() => expect(c.getStatus()).toBe("error"));
-    expect(c.getSnapshot().pending).toBe(1);
-    expect(await storage.getItem(workspaceStorageKeys("w1").queue)).not.toBeNull();
-    const failed = calls;
-    up = true;
-    await vi.waitFor(() => expect(c.getStatus()).toBe("synced")); // the retry got through
-    expect(calls).toBeGreaterThan(failed);
-    expect(c.getSnapshot().pending).toBe(0);
-    expect(onAccessLost).not.toHaveBeenCalled();
-    expect(onCommandsRejected).not.toHaveBeenCalled();
   });
 
   it("purgeWorkspaceData removes one workspace's keys and counts its queue", async () => {
