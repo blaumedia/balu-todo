@@ -619,4 +619,36 @@ describe("logout while a boot attempt is in flight (review f9966f34)", () => {
     expect(await run).toBe(false);
     expect(useApp.getState().boot).toBe("login");
   });
+
+  it("an answer arriving after the logout is not adopted by the ended loop", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me("a");
+    };
+    useApp.setState({ boot: "loading", user: null, workspace: null, memberships: [] } as any);
+    const run = bootSession();
+    endBootAttempts();
+    release();
+    expect(await run).toBe(false);
+    expect(useApp.getState().user).toBeNull();
+    expect(useApp.getState().boot).toBe("loading");
+  });
+
+  it("a refused /me arriving after the logout does not expire the new login", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      throw new ApiError("invalid_token", "refused", 401);
+    };
+    useApp.setState({ boot: "loading", loginNotice: null } as any);
+    const run = bootSession();
+    endBootAttempts();
+    release();
+    expect(await run).toBe(false);
+    expect(useApp.getState().loginNotice).toBeNull();
+    expect(useApp.getState().boot).toBe("loading");
+  });
 });

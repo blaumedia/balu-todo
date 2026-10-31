@@ -184,7 +184,7 @@ async function runBootLoop(preferredWorkspaceId: string | undefined, epoch: numb
       return false;
     }
     const loginBefore = globalThis.localStorage?.getItem(REFRESH_KEY) ?? null;
-    const outcome = await attemptBoot(preferredWorkspaceId);
+    const outcome = await attemptBoot(preferredWorkspaceId, ended);
     if (ended()) return false;
     if (outcome === "gone") {
       // Logged out and in again elsewhere while /me was in flight (a different
@@ -220,11 +220,17 @@ async function runBootLoop(preferredWorkspaceId: string | undefined, epoch: numb
   }
 }
 
-async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> {
+/**
+ * `ended` says a logout ended the loop this attempt belongs to: its answer is for
+ * a login that is gone, so it must not expire the session of, adopt the data for
+ * or start sync under whoever signed in since (even as the same user).
+ */
+async function attemptBoot(preferredWorkspaceId: string | undefined, ended: () => boolean): Promise<BootAttempt> {
   let me: MeResponse;
   try {
     me = await api.getMe();
   } catch (e) {
+    if (ended()) return "gone";
     if (e instanceof ApiError && e.status === 401 && e.code !== "signed_out") {
       await expireSession();
       return "login";
@@ -234,6 +240,7 @@ async function attemptBoot(preferredWorkspaceId?: string): Promise<BootAttempt> 
     lastRetryAfterMs = e instanceof ApiError ? e.retryAfterMs : null;
     return "unreachable";
   }
+  if (ended()) return "gone";
   // Logged out in another tab while /me was in flight: the answer was for a login
   // that no longer exists, and adopting its user would re-create the owner key.
   if (!loginStored()) return "gone";
