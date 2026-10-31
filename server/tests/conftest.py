@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 import uuid
 
 # Configure the environment BEFORE importing the app (settings are cached).
@@ -103,6 +105,63 @@ def cmd(type_: str, uuid_: str | None = None, temp_id: str | None = None, **args
     if temp_id is not None:
         body["temp_id"] = temp_id
     return body
+
+
+def wait_for_lock_waiters(count: int, timeout: float = 10.0) -> None:
+    """Block until `count` backends of the test database wait on a lock.
+
+    The race tests need the request under test to be *at* the lock, not merely
+    unfinished. One connection per poll: pg_stat_activity is snapshotted once per
+    transaction.
+    """
+    engine = get_engine()
+    deadline = time.monotonic() + timeout
+    while True:
+        with engine.connect() as conn:
+            waiting = conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            ).scalar_one()
+        if waiting >= count:
+            return
+        if time.monotonic() > deadline:
+            raise AssertionError(f"expected {count} lock waiter(s), saw {waiting}")
+        time.sleep(0.02)
+
+
+def strand(own_ws: uuid.UUID) -> None:
+    """Test setup: delete a user's own workspace so only shared ones remain."""
+    with get_sessionmaker()() as s:
+        s.execute(text("DELETE FROM workspaces WHERE id = :w"), {"w": own_ws})
+        s.commit()
+
+
+class Background:
+    """Run `fn` in a daemon thread; `result()` joins (bounded) and returns or re-raises."""
+
+    def __init__(self, fn) -> None:
+        self._outcome: dict = {}
+        self._done = threading.Event()
+
+        def run() -> None:
+            try:
+                self._outcome["value"] = fn()
+            except BaseException as exc:  # re-raised by result()
+                self._outcome["error"] = exc
+            finally:
+                self._done.set()
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+
+    def result(self, timeout: float = 15.0):
+        self._thread.join(timeout)
+        assert self._done.is_set(), "background call did not finish"
+        if "error" in self._outcome:
+            raise self._outcome["error"]
+        return self._outcome["value"]
 
 
 @pytest.fixture

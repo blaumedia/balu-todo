@@ -66,8 +66,8 @@ Rules:
 | `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call |
 | `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` |
 | `POST /workspaces` | `{name}` → `201 {workspace}`; creator becomes `owner` |
-| `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin |
-| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. |
+| `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin; a workspace deleted meanwhile → `404 not_found` |
+| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. An invite accepted while the delete is in flight either lands before it (and its member is covered by the rescue) or fails with `400 invalid_token`. |
 | `GET /healthz` | `200 {"status":"ok"}` — no auth, for compose healthchecks |
 
 Object shapes:
@@ -465,9 +465,9 @@ Invites expire after 14 days.
 | `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. No mail is sent (the client shows/copies the link `/invite/<token>`), but when `email` is set the invite is **bound** to it — see accept. |
 | `GET /workspaces/{id}/invites` | `{invites: [...]}`, pending only; role ≥ admin |
 | `DELETE /workspaces/{id}/invites/{invite_id}` | revoke → `204`; role ≥ admin |
-| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. |
+| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. Concurrent accepts by the same user both get `200` and create one membership; an accept racing a revoke or a workspace delete either completes first or gets `400 invalid_token`. |
 | `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin, subject to the rank rules below; demoting the **last owner** → `400 last_owner` |
-| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. A member left with **no** workspace by the removal (or by leaving) immediately gets a fresh default one, exactly as after a workspace delete (§2). |
 
 **Rank rules (v1.2.1).** Roles rank `viewer < member < admin < owner`.
 

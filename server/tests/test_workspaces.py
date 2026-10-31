@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import func, select
 
 from balu.models import Membership, Project, Task
-from tests.conftest import auth_headers, cmd, register_user
+from tests.conftest import auth_headers, cmd, register_user, strand
 
 
 def _join(client, owner, role="member") -> dict:
@@ -176,3 +176,130 @@ def test_update_missing_workspace(client, user):
         json={"name": "X"},
     )
     assert resp.status_code == 404
+
+
+def _own_ws(client, who, shared_ws: str) -> str:
+    me = client.get("/api/v1/me", headers=who["headers"]).json()
+    return next(
+        m["workspace"]["id"] for m in me["memberships"] if m["workspace"]["id"] != shared_ws
+    )
+
+
+def test_delete_waits_for_an_uncommitted_accept_and_rescues_the_new_member(client, user):
+    from balu.db import get_sessionmaker
+    from balu.sync.engine import bump_version
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    nina = register_user(client, email=None, name="Nina")
+    nina_headers = auth_headers(nina["access_token"])
+    me = client.get("/api/v1/me", headers=nina_headers).json()
+    strand(uuid.UUID(me["memberships"][0]["workspace"]["id"]))
+    ws = uuid.UUID(user["workspace_id"])
+    with get_sessionmaker()() as s0:
+        v = bump_version(s0, ws)
+        s0.add(
+            Membership(
+                workspace_id=ws, user_id=uuid.UUID(nina["user"]["id"]), role="member", version=v
+            )
+        )
+        s0.flush()
+        bg = Background(
+            lambda: client.delete(f"/api/v1/workspaces/{ws}", headers=user["headers"])
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    assert bg.result().status_code == 204
+    me = client.get("/api/v1/me", headers=nina_headers).json()
+    assert len(me["memberships"]) == 1
+    assert me["memberships"][0]["role"] == "owner"
+    assert me["memberships"][0]["workspace"]["name"] == "Nina"
+
+
+def test_delete_waits_for_a_members_uncommitted_leave_elsewhere(client, user):
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.sync.engine import bump_version
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    otto = _join(client, user)
+    own = uuid.UUID(_own_ws(client, otto, user["workspace_id"]))
+    ws = uuid.UUID(user["workspace_id"])
+    with get_sessionmaker()() as s0:
+        # Otto deleting his own workspace P, uncommitted.
+        bump_version(s0, own)
+        s0.execute(
+            text("SELECT id FROM users WHERE id = :u FOR NO KEY UPDATE"),
+            {"u": uuid.UUID(otto["user"]["id"])},
+        )
+        s0.execute(text("DELETE FROM workspaces WHERE id = :p"), {"p": own})
+        s0.flush()
+        bg = Background(
+            lambda: client.delete(f"/api/v1/workspaces/{ws}", headers=user["headers"])
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    assert bg.result().status_code == 204
+    me = client.get("/api/v1/me", headers=otto["headers"]).json()
+    assert len(me["memberships"]) == 1
+    assert me["memberships"][0]["role"] == "owner"
+    assert me["memberships"][0]["workspace"]["name"] == "Otto"
+
+
+def test_rename_waits_for_an_uncommitted_delete(client, user):
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    ws = uuid.UUID(user["workspace_id"])
+    with get_sessionmaker()() as s0:
+        s0.execute(text("DELETE FROM workspaces WHERE id = :w"), {"w": ws})
+        bg = Background(
+            lambda: client.patch(
+                f"/api/v1/workspaces/{ws}", headers=user["headers"], json={"name": "New"}
+            )
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    resp = bg.result()
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["code"] == "not_found"
+
+
+def test_rename_by_an_admin_demoted_meanwhile_is_forbidden(client, user):
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.sync.engine import bump_version
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    admin = _join(client, user, role="admin")
+    ws = uuid.UUID(user["workspace_id"])
+    old_name = next(
+        m["workspace"]["name"]
+        for m in client.get("/api/v1/me", headers=user["headers"]).json()["memberships"]
+        if m["workspace"]["id"] == user["workspace_id"]
+    )
+    with get_sessionmaker()() as s0:
+        bump_version(s0, ws)
+        s0.execute(
+            text("UPDATE memberships SET role = 'member' WHERE workspace_id = :w AND user_id = :u"),
+            {"w": ws, "u": uuid.UUID(admin["user"]["id"])},
+        )
+        bg = Background(
+            lambda: client.patch(
+                f"/api/v1/workspaces/{ws}", headers=admin["headers"], json={"name": "Hijack"}
+            )
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    resp = bg.result()
+    assert resp.status_code == 403
+    assert resp.json()["detail"]["code"] == "forbidden"
+    names = {
+        m["workspace"]["name"]
+        for m in client.get("/api/v1/me", headers=user["headers"]).json()["memberships"]
+        if m["workspace"]["id"] == user["workspace_id"]
+    }
+    assert names == {old_name}
