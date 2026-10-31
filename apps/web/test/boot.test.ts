@@ -257,12 +257,35 @@ describe("bootSession (attemptBoot classification)", () => {
     const booted = bootSession();
     await vi.advanceTimersByTimeAsync(0);
     expect(calls).toBe(3); // two immediate re-asks, then it waits
+    expect(useApp.getState().boot).toBe("unreachable"); // with a screen, not a blank "loading"
     await vi.advanceTimersByTimeAsync(500);
     expect(calls).toBe(3);
     globalThis.localStorage.setItem("balu:auth:access", jwt("u1"));
     await vi.advanceTimersByTimeAsync(1000);
     expect(await booted).toBe(true);
     expect(calls).toBe(4);
+  });
+
+  it("replaced rounds do not raise the backoff of a later outage", async () => {
+    vi.useFakeTimers();
+    globalThis.localStorage.setItem("balu:auth:access", jwt("u2"));
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      if (calls <= 3) return me("a"); // disagrees with the stored u2: replaced rounds
+      throw apiError(503);
+    };
+    void bootSession();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(3);
+    await vi.advanceTimersByTimeAsync(1000); // the replaced backoff ends, the outage starts
+    expect(calls).toBe(4);
+    fake.getMe = async () => {
+      calls += 1;
+      throw apiError(503);
+    };
+    await vi.advanceTimersByTimeAsync(1000); // the first outage wait is 1 s, not 8 s
+    expect(calls).toBe(5);
   });
 
   it("a 5xx shows the unreachable screen, retries, then becomes ready", async () => {

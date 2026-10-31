@@ -151,7 +151,8 @@ const FREE_REPLACED_RETRIES = 2;
 
 async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
   let replaced = 0;
-  for (let attempt = 0; ; attempt += 1) {
+  let unreachable = 0;
+  for (;;) {
     // While retrying, another tab may have logged out. The access token this tab
     // holds stays valid on the server, so /me would boot the logged-out user.
     if (!loginStored()) {
@@ -167,17 +168,20 @@ async function runBootLoop(preferredWorkspaceId?: string): Promise<boolean> {
       // Another user signed in while /me was in flight: pick up their tokens, ask again.
       await api.hydrate();
       // A sign-in elsewhere settles within a round or two. If the stored token's
-      // user and /me keep disagreeing (inconsistent storage), back off instead of
-      // calling /me in a tight loop.
+      // user and /me keep disagreeing (inconsistent storage), show the unreachable
+      // screen and back off instead of calling /me in a tight loop with no screen.
+      // Counted apart from the outage backoff, so these rounds do not raise it.
       replaced += 1;
       if (replaced > FREE_REPLACED_RETRIES) {
+        useApp.getState().setBoot("unreachable");
         await waitForRetry(bootRetryDelayMs(replaced - FREE_REPLACED_RETRIES - 1));
       }
       continue;
     }
     if (outcome !== "unreachable") return outcome === "ready";
     useApp.getState().setBoot("unreachable");
-    await waitForRetry(bootRetryDelayMs(attempt));
+    await waitForRetry(bootRetryDelayMs(unreachable));
+    unreachable += 1;
   }
 }
 
