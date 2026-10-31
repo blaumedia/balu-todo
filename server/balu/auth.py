@@ -121,9 +121,18 @@ def _lock_family(db: Session, family_id: uuid.UUID) -> None:
     transaction-scoped lock per family, taken before any family row is touched,
     removes both. Released at commit or rollback.
     """
+    # The wait is for a sibling refresh only; a lock_timeout here would fail the
+    # refresh and, client side, log the user out. Lift the timeout for the wait
+    # and put the connection's value back for the rest of the transaction. The
+    # single SELECT relies on Postgres evaluating its target list left to right
+    # (true in practice, not documented).
     db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtextextended(:f, 0))"),
-        {"f": str(family_id)},
+        text(
+            "SELECT set_config('lock_timeout', '0', true), "
+            "pg_advisory_xact_lock(hashtextextended(:f, 0)), "
+            "set_config('lock_timeout', :prev, true)"
+        ),
+        {"f": str(family_id), "prev": db.execute(text("SHOW lock_timeout")).scalar_one()},
     )
 
 

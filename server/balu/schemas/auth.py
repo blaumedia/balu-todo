@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated
+
+from pydantic import BaseModel, EmailStr, Field, StringConstraints
 
 from .user import UserOut
 
@@ -10,7 +12,7 @@ from .user import UserOut
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
-    name: str = Field(min_length=1, max_length=200)
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class LoginIn(BaseModel):

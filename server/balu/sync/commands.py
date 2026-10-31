@@ -22,6 +22,7 @@ from sqlalchemy.exc import NoResultFound, StatementError
 from sqlalchemy.orm import Session, sessionmaker
 
 from ..attachments import remove_blob
+from ..db import describe_transient_error, is_transient_db_error
 from ..events import (
     AssignmentEvent,
     CommentEvent,
@@ -951,6 +952,10 @@ def _replay(
         relocated[cmd_uuid] = stored_relocated
 
 
+class TransientDbError(Exception):
+    """A temporary database failure while applying a command (retry the request)."""
+
+
 def process_commands(
     sm: sessionmaker[Session],
     workspace_id: uuid.UUID,
@@ -968,9 +973,9 @@ def process_commands(
     for every task_add the server filed somewhere other than requested because its
     target was deleted (contract §5.5); a replay reports the stored entry again.
 
-    `role` is the caller's role as the router read it before any lock. It is not
-    trusted: each command re-reads the membership under the workspace lock and
-    uses that role.
+    `role` is the caller's role as the router read it before any lock. It is
+    trusted only to deny: each command re-reads the membership under the
+    workspace lock and uses that role.
     """
     sync_status: dict[str, Any] = {}
     temp_id_mapping: dict[str, str] = {}
@@ -1013,6 +1018,12 @@ def process_commands(
 
         session = sm()
         try:
+            # Fast reject before the lock: a viewer's batch must not take the
+            # workspace row lock once per command. The router's role may be stale
+            # (only ever a denial, as before v1.5.2); the authoritative check is
+            # the one under the lock below.
+            if ROLE_RANK.get(role, 0) < ROLE_RANK["member"]:
+                raise CommandError("forbidden", "viewer role is read-only")
             if handler is None:
                 raise CommandError("invalid_args", f"unknown command type: {command.type}")
             ctx = Ctx(
@@ -1133,7 +1144,24 @@ def process_commands(
             session.rollback()
             status = {"error_code": exc.code, "error": exc.message}
             sync_status[str(cmd_uuid)] = status
-        except Exception as exc:  # unexpected -> treat as invalid_args, keep going
+        except Exception as exc:
+            # unexpected -> invalid_args (transient DB errors abort the request)
+            if is_transient_db_error(exc):
+                # The database, not the command, is at fault (restart, dropped
+                # connection, pool or lock wait timeout): a permanent
+                # `invalid_args` made clients drop the user's queued edit. Fail
+                # the request instead - commands already committed replay as
+                # `ok`, the rest are judged again when the client resends.
+                try:
+                    session.rollback()
+                except Exception:  # the connection may be gone already
+                    logger.warning("rollback after a transient database error failed")
+                logger.error(
+                    "command %s (%s) hit a transient database error in workspace %s: "
+                    "%s",
+                    cmd_uuid, command.type, workspace_id, describe_transient_error(exc),
+                )
+                raise TransientDbError(type(exc).__name__) from exc
             session.rollback()
             # Never leak the driver/ORM message to the client: it carries table
             # names, constraint names and sometimes parameter values (S6).

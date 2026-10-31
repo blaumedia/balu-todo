@@ -77,3 +77,13 @@ def rate_limited(
     # Retry-After is what HTTP clients actually look at; without it a caller can
     # only guess, and tends to guess "immediately".
     return ApiError(429, "rate_limited", message, headers={"Retry-After": str(retry_after)})
+
+
+def unavailable(retry_after: int = 2) -> ApiError:
+    # A temporary database failure: the client keeps its queue and retries.
+    return ApiError(
+        503,
+        "unavailable",
+        "Temporarily unavailable, retry",
+        headers={"Retry-After": str(retry_after)},
+    )

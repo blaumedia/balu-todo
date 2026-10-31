@@ -9,10 +9,14 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 from balu import models  # noqa: F401  (import registers all model tables)
 from balu.config import get_settings
-from balu.db import Base
+from balu.db import Base, validate_database_url
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# Every way to run migrations passes here: an ambiguous '@' must not reach a connect error.
+_database_url = get_settings().database_url
+validate_database_url(_database_url)
+# '%' doubled: ConfigParser interpolation (percent-encoded passwords).
+config.set_main_option("sqlalchemy.url", _database_url.replace("%", "%%"))
 
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name, disable_existing_loggers=False)

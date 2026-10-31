@@ -21,7 +21,11 @@ last-write-wins at the patch level (see §6).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`, `internal_error`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`,
+  `unavailable` (503, carries `Retry-After`; a temporary database failure,
+  retryable - but for a non-sync write the outcome may be unknown, e.g. the connection
+  dropped during COMMIT, so re-read before retrying),
+  `internal_error`.
   Error messages are for humans and never carry internal detail (driver messages,
   the submitted body, transport hostnames) — that goes to the server log.
 
@@ -35,7 +39,7 @@ JWT bearer auth. `Authorization: Bearer <access_token>` on every authenticated r
 
 | Endpoint | Body | Response |
 |---|---|---|
-| `POST /auth/register` | `{email, password, name}` | `201 {user, access_token, refresh_token}` |
+| `POST /auth/register` | `{email, password, name}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) | `201 {user, access_token, refresh_token}` |
 | `POST /auth/login` | `{email, password}` | `200 {user, access_token, refresh_token}` |
 | `POST /auth/refresh` | `{refresh_token}` | `200 {access_token, refresh_token}` |
 | `POST /auth/logout` | `{refresh_token}` | `204` (invalidates the whole session family) |
@@ -68,7 +72,7 @@ Rules:
 | Endpoint | Response / notes |
 |---|---|
 | `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call |
-| `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` |
+| `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) |
 | `POST /workspaces` | `{name}` → `201 {workspace}`; creator becomes `owner` |
 | `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin; a workspace deleted meanwhile → `404 not_found` |
 | `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. An invite accepted while the delete is in flight either lands before it (and its member is covered by the rescue) or fails with `400 invalid_token`. |
@@ -412,6 +416,14 @@ section or parent was deleted, §5.5; also the workspace itself, if it was delet
 the request was in flight), `forbidden` (viewer role; a caller removed from the workspace
 or demoted to viewer while the request was in flight - the role is checked per command,
 under the workspace lock; or comment edit/delete by a non-author non-admin), `name_taken` (labels).
+
+A temporary database failure while applying a command (restart, dropped or failed
+connection, pool or lock-wait timeout, deadlock, serialization failure, v1.5.2) is **not**
+a per-command error: the whole request fails with
+`503 {"detail": {"code": "unavailable", ...}}` and a `Retry-After` header. Commands that
+committed before the failure replay as `ok`; the rest are judged again when the client
+resends the same uuids. Clients keep their queue on any non-2xx response and must treat
+`503` as retryable, never as a rejection.
 
 Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
 comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.

@@ -9,10 +9,11 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
 from ..db import get_db, get_sessionmaker
+from ..errors import unavailable
 from ..events import EventSender, get_event_sender
 from ..models import User
 from ..schemas.sync import SyncRequest, SyncResponse
-from ..sync.commands import process_commands
+from ..sync.commands import TransientDbError, process_commands
 from ..sync.engine import collect_changes, current_version, decode_token, encode_token
 from .workspaces import _parse_ws_id, get_membership
 
@@ -29,19 +30,30 @@ def sync(
 ) -> SyncResponse:
     ws_id = _parse_ws_id(workspace_id)
     membership = get_membership(db, ws_id, user.id)
+    user_id = user.id
+    role = membership.role
 
     # Apply commands first (each in its own transaction via the sessionmaker).
     sm = get_sessionmaker()
     relocated: dict[str, Any] = {}
-    sync_status, temp_id_mapping = process_commands(
-        sm,
-        ws_id,
-        user.id,
-        membership.role,
-        body.commands,
-        event_sender=event_sender,
-        relocated=relocated,
-    )
+    # Release this request's connection: authentication opened a transaction that
+    # would sit idle while every command checks out a connection of its own, so
+    # enough concurrent syncs held one each and starved the pool waiting for a
+    # second.
+    db.rollback()
+    try:
+        sync_status, temp_id_mapping = process_commands(
+            sm,
+            ws_id,
+            user_id,
+            role,
+            body.commands,
+            event_sender=event_sender,
+            relocated=relocated,
+        )
+    except TransientDbError:
+        # Retryable: sync-client keeps its queue on any non-2xx response.
+        raise unavailable() from None
 
     # Then read the (post-command) changes for this client.
     since = decode_token(body.sync_token)

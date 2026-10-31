@@ -108,6 +108,14 @@ start without them, and the server refuses to boot on a weak (<32 char) or
 placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to
 bypass the key check.
 
+`BALU_DB_PASSWORD` is inserted into `DATABASE_URL` as is (and passed unchanged to
+Postgres), so it must stay URL-safe: no URL-reserved characters (`@ / : ? # %`); the
+generated hex value is safe. Percent-encoding (`@` as `%40`) applies only to a
+hand-written `DATABASE_URL`, where Postgres was given the decoded password: the only
+unencoded `@` may be the one before the host, and the server (and every migration
+run) refuses to start when the URL has another one, or one after a `/`, `?` or `#`
+(the error does not print the URL).
+
 ### Build it yourself instead
 
 The compose file in this repo builds from source rather than pulling. Requires

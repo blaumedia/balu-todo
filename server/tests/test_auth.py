@@ -306,3 +306,22 @@ def test_register_race_on_one_email_is_email_taken(client):
     resp = bg.result()
     assert resp.status_code == 409
     assert resp.json()["detail"]["code"] == "email_taken"
+
+
+def test_register_strips_the_name_and_rejects_a_blank_one(client):
+    ok = client.post(
+        "/api/v1/auth/register",
+        json={"email": "pad@example.com", "password": "password123", "name": "  Anna  "},
+    )
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["user"]["name"] == "Anna"
+    blank = client.post(
+        "/api/v1/auth/register",
+        json={"email": "blank@example.com", "password": "password123", "name": "   "},
+    )
+    assert blank.status_code == 422
+
+
+def test_patch_me_rejects_a_blank_name(client, user):
+    resp = client.patch("/api/v1/me", headers=user["headers"], json={"name": "   "})
+    assert resp.status_code == 422

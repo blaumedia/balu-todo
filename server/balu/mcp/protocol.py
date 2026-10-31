@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy.exc import StatementError
 
 from .. import __version__
+from ..db import describe_transient_error, is_transient_db_error
 from .tools import ToolContext, ToolError, call_tool, tool_specs
 
 logger = logging.getLogger("balu.mcp")
@@ -123,6 +124,14 @@ def _tools_call(request_id: Any, params: dict, ctx: ToolContext) -> dict[str, An
             report["applied"] = exc.applied
         return _result(request_id, {"content": _text_content(report), "isError": True})
     except Exception as exc:
+        if is_transient_db_error(exc):
+            # Same answer as a transient failure inside a write: the model may retry.
+            logger.error(
+                "MCP tool %s hit a transient database error: %s",
+                name, describe_transient_error(exc),
+            )
+            report = {"error": "Database temporarily unavailable, retry"}
+            return _result(request_id, {"content": _text_content(report), "isError": True})
         # Never hand a driver/ORM message to an MCP client (S6) - log it instead.
         # A StatementError's text can carry Postgres's DETAIL (user content): type only.
         if isinstance(exc, StatementError):
