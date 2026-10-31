@@ -187,23 +187,34 @@ describe("clients sync notice tone", () => {
   it.each(["rejected first", "relocated first"])("rejected and relocated in one tick are one error toast (%s)", async (order) => {
     initSync("w1", "u1");
     const o = fakes.options[0]!;
-    if (order === "rejected first") {
-      o.onCommandsRejected(rejected);
-      o.onCommandsRelocated(relocated);
-    } else {
-      o.onCommandsRelocated(relocated);
-      o.onCommandsRejected(rejected);
+    const realShowToast = useApp.getState().showToast;
+    const showToast = vi.fn(realShowToast);
+    useApp.setState({ showToast });
+    try {
+      if (order === "rejected first") {
+        o.onCommandsRejected(rejected);
+        o.onCommandsRelocated(relocated);
+      } else {
+        o.onCommandsRelocated(relocated);
+        o.onCommandsRejected(rejected);
+      }
+      await flushTick();
+    } finally {
+      useApp.setState({ showToast: realShowToast });
     }
-    await flushTick();
+    // one toast, and it keeps the longer rejection duration (6000 ms, not the
+    // 5000 ms of a relocation) whichever notice arrived first
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast.mock.calls[0]![1]).toMatchObject({ durationMs: 6000, tone: "error" });
     const { toast, toastTone } = useApp.getState();
     expect(toastTone).toBe("error");
     // separate single-notice toasts, for comparing the combined text against
     useApp.getState().dismissToast();
-    fakes.options[0]!.onCommandsRelocated(relocated);
+    o.onCommandsRelocated(relocated);
     await flushTick();
     const relocatedOnly = useApp.getState().toast!;
     useApp.getState().dismissToast();
-    fakes.options[0]!.onCommandsRejected(rejected);
+    o.onCommandsRejected(rejected);
     await flushTick();
     const rejectedOnly = useApp.getState().toast!;
     expect(toast).toContain(relocatedOnly);
