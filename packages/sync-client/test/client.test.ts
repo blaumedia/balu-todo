@@ -842,7 +842,8 @@ describe("outage recovery (contract §6.7)", () => {
     c.mutate({ type: "task_add", args: { title: "a" } });
     c.start();
     await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(1));
-    await vi.waitFor(() => expect(c.getStatus()).toBe("error"));
+    // A busy server is "offline, retrying", not a red sync error (contract: 503 is retryable).
+    await vi.waitFor(() => expect(c.getStatus()).toBe("offline"));
     expect(c.getSnapshot().pending).toBe(1);
     expect(await storage.getItem(workspaceStorageKeys("w1").queue)).not.toBeNull();
     const failed = calls;
