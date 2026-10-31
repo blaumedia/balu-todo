@@ -8,6 +8,15 @@ export {
   type QuickAddTarget,
 } from '@balu/nl-parser';
 
+/**
+ * Whether `addTask`/`mutate()` actually saved the edit. A client without access
+ * (or closed, or none at all) drops it: show no success feedback then, it would be
+ * false.
+ */
+export function wasSaved(result: { dropped?: boolean } | undefined): boolean {
+  return result !== undefined && !result.dropped;
+}
+
 export interface ComposeCtx {
   context: ComposeContext;
   projects: Project[];

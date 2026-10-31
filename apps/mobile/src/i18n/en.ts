@@ -43,6 +43,8 @@ export const en = {
   'sync.changesDiscarded': '{n} unsynced change(s) could not be saved.',
   'sync.relocatedTitle': 'Tasks filed elsewhere',
   'sync.accessLostTitle': 'Workspace unavailable',
+  'boot.noWorkspaceTitle': 'No workspace found',
+  'boot.noWorkspaceBody': 'Your account does not belong to a workspace yet. Sign in again to retry; a new workspace is set up if needed.',
 
   'quickadd.placeholder': 'Add a task — try dates, #project, @label, !p1',
   'quickadd.hint': 'Return to add · another stays open',

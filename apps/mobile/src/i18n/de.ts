@@ -46,6 +46,8 @@ export const de: Record<TranslationKey, string> = {
   'sync.changesDiscarded': '{n} nicht synchronisierte Änderung(en) konnten nicht gespeichert werden.',
   'sync.relocatedTitle': 'Aufgaben woanders abgelegt',
   'sync.accessLostTitle': 'Arbeitsbereich nicht verfügbar',
+  'boot.noWorkspaceTitle': 'Kein Arbeitsbereich gefunden',
+  'boot.noWorkspaceBody': 'Dein Konto gehört noch zu keinem Arbeitsbereich. Melde dich erneut an, um es noch einmal zu versuchen; bei Bedarf wird ein neuer angelegt.',
 
   'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',

@@ -9,7 +9,7 @@ import { useMyRole } from '../hooks/use-my-role';
 import { addTask } from '../lib/actions';
 import { shouldCloseWriteSheet } from '../lib/role';
 import { interpretChange } from '../lib/quickAddInput';
-import { composeTaskArgs, resolveQuickAddContext } from '../lib/quickadd';
+import { composeTaskArgs, resolveQuickAddContext, wasSaved } from '../lib/quickadd';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useSnapshot } from '../store/useSnapshot';
@@ -74,7 +74,9 @@ export function QuickAddSheet() {
       labels: snap.labels,
       today,
     });
-    addTask(args);
+    // Dropped (access to the workspace was just lost, the app is moving away): keep
+    // the text and say nothing - "added" would be false.
+    if (!wasSaved(addTask(args))) return;
     if (target.redirected && args['project_id'] === undefined) {
       // The context is dead, so close rather than repeat this for every next task.
       setText('');

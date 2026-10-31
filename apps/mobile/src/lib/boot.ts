@@ -34,6 +34,13 @@ async function resumeReminders(): Promise<void> {
   else useApp.getState().setRemindersEnabled(false);
 }
 
+/** /me answered with no workspace at all (an account the old server left workspace-less). */
+export class NoWorkspaceError extends Error {
+  constructor() {
+    super('no workspace');
+  }
+}
+
 /** Fetch /me, pick the boot workspace, wire up the sync client. */
 export async function establishSession(
   serverUrl: string,
@@ -65,6 +72,9 @@ export async function establishSession(
   // same workspace on every launch.
   const lastUsed = await sqliteKV.getItem(SETTINGS.lastWorkspaceId);
   const membership = pickMembership(me.memberships, preferredWorkspaceId, lastUsed);
+  // Boot and landing outside a lost workspace only: a switch has its own "exact or
+  // nothing" answer. The server sets such an account up on /me, so asking again helps.
+  if (!membership && me.memberships.length === 0 && !requireExact) throw new NoWorkspaceError();
   if (!membership) return false;
   // Bail out before any mutation. pickMembership falls back to last-used/first
   // when the requested workspace vanished from /me (membership revoked while the
@@ -173,24 +183,30 @@ async function landOutside(lostId: string): Promise<void> {
   if (serverUrl && api) {
     // No preferred id: the remembered last-used id is the lost one and /me no
     // longer lists it, so pickMembership lands in the first survivor.
-    for (let attempt = 0; attempt < 2 && !ok && isOpen(lostId); attempt++) {
+    for (let attempt = 0; !ok && isOpen(lostId); attempt++) {
       try {
         ok = await establishSession(serverUrl, api, null, false, () => isOpen(lostId));
       } catch {
         ok = false;
       }
-    }
-    // The user switched workspace while /me was in flight: keep their choice.
-    if (!ok && !isOpen(lostId)) return;
-    if (!ok) {
+      if (ok || !isOpen(lostId)) break;
+      if (attempt < 1) continue; // one immediate second try, as before
       const { user, memberships } = useApp.getState();
       const survivors = memberships.filter((m) => m.workspace.id !== lostId);
       if (user && survivors[0]) {
         useApp.getState().setSession(user, survivors, survivors[0].workspace);
         initSync(serverUrl, survivors[0].workspace.id, user.id);
         ok = true;
+        break;
       }
+      // /me keeps failing and the store knows no other workspace (offline boot from
+      // the cached session): the user is still signed in, so dropping them on the
+      // login step would be wrong. Keep asking with backoff until /me answers or
+      // they leave (switch, logout, expiry).
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * 2 ** (attempt - 1), 30_000)));
     }
+    // The user switched workspace (or left) while /me was in flight: keep their choice.
+    if (!ok && !isOpen(lostId)) return;
   }
   if (!ok) {
     teardownSync();
@@ -274,9 +290,24 @@ export async function bootApp(): Promise<void> {
   }
 
   try {
-    const ok = await establishSession(serverUrl, api);
+    let ok: boolean;
+    try {
+      ok = await establishSession(serverUrl, api);
+    } catch (e) {
+      // The server sets such an account up on /me, so one more ask normally lands.
+      if (!(e instanceof NoWorkspaceError)) throw e;
+      ok = await establishSession(serverUrl, api);
+    }
     if (!ok) store.setBoot('onboarding');
   } catch (e) {
+    if (e instanceof NoWorkspaceError) {
+      // Signed in, but no workspace and the server did not set one up: say so
+      // instead of showing the login step with no explanation.
+      const t = makeT(store.locale);
+      Alert.alert(t('boot.noWorkspaceTitle'), t('boot.noWorkspaceBody'));
+      store.setBoot('onboarding');
+      return;
+    }
     // A refused session is not "offline": booting the cached session would keep
     // an account running whose tokens are gone.
     if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
@@ -338,17 +369,24 @@ setSessionExpiredHandler(() => {
  * and the Android back button returned to it.
  */
 export async function logout(): Promise<void> {
+  let revoked: Promise<void> = Promise.resolve();
   try {
     // Close first and wait for storage writes already started, so nothing re-persists after the purge.
     stopReminderScheduler();
     await teardownSyncSettled();
 
+    // Started, not awaited: the request can take its whole timeout in an outage,
+    // and an app killed meanwhile must not come back signed in with all its data.
+    // api.logout() drops the stored tokens before it posts, and the revoke never
+    // needs local state, so the purge does not wait for it.
     const api = getApi();
-    try {
-      await api?.logout();
-    } catch {
-      /* best-effort */
-    }
+    revoked = (async () => {
+      try {
+        await api?.logout();
+      } catch {
+        /* best-effort */
+      }
+    })();
     await purgeUserData();
   } finally {
     // A failing purge must still end the session in the UI and leave the screen.
@@ -360,4 +398,5 @@ export async function logout(): Promise<void> {
       /* router not ready */
     }
   }
+  await revoked;
 }
