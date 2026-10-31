@@ -31,7 +31,7 @@ from ..ratelimit import (
 )
 from ..schemas.auth import AuthResponse, LoginIn, LogoutIn, RefreshIn, RegisterIn, TokenPair
 from ..schemas.user import user_out
-from ..services import create_workspace_with_owner
+from ..services import create_workspace_with_owner, rescue_workspaceless_account
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -123,6 +123,7 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)) -> Aut
         )
 
     limiter.forget(streak)
+    rescue_workspaceless_account(db, user.id)
     access = create_access_token(user.id)
     refresh = issue_refresh_token(db, user.id)
     db.commit()

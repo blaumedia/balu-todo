@@ -4,6 +4,8 @@ and the current-user dependency.
 
 from __future__ import annotations
 
+import threading
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -93,8 +95,51 @@ def decode_access_token(token: str) -> uuid.UUID:
 # ---------------------------------------------------------------------------
 # Refresh tokens (opaque, hashed, rotated, family-scoped)
 # ---------------------------------------------------------------------------
+# The reuse window (§1) must hand a second presentation of the predecessor the
+# same successor, but only hashes are stored. The plaintext successor is kept in
+# this process for the grace window, keyed by the hash of the token it replaced.
+# Assumes one server process (the Dockerfile runs a single uvicorn worker). With
+# several workers, or after a restart, a retry misses the cache and is judged a
+# replay (family burned, the user logs in again): safe, only less friendly.
+# Nothing derivable from the secret key or a database dump is ever a live token.
+_SUCCESSOR_CACHE_MAX = 10_000
+_successors: dict[str, tuple[str, float]] = {}
+_successors_lock = threading.Lock()
+_clock = time.monotonic
+
+
+def _remember_successor(old_hash: str, successor_raw: str) -> None:
+    now = _clock()
+    expiry = now + get_settings().refresh_reuse_grace_seconds
+    with _successors_lock:
+        # Every entry has the same grace period, so insertion order is expiry
+        # order: drop expired entries from the front only, never scan the cache.
+        while _successors:
+            oldest = next(iter(_successors))
+            if _successors[oldest][1] > now:
+                break
+            del _successors[oldest]
+        _successors.pop(old_hash, None)
+        _successors[old_hash] = (successor_raw, expiry)
+        while len(_successors) > _SUCCESSOR_CACHE_MAX:
+            del _successors[next(iter(_successors))]
+
+
+def _recall_successor(old_hash: str) -> str | None:
+    with _successors_lock:
+        entry = _successors.get(old_hash)
+        if entry is None:
+            return None
+        if entry[1] <= _clock():
+            del _successors[old_hash]
+            return None
+        return entry[0]
+
+
 def issue_refresh_token(
-    db: Session, user_id: uuid.UUID, family_id: uuid.UUID | None = None
+    db: Session,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID | None = None,
 ) -> str:
     settings = get_settings()
     raw = new_token()
@@ -148,14 +193,16 @@ def _find_refresh_token(db: Session, raw: str, fresh: bool = False) -> RefreshTo
 def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
     """Validate `raw`, rotate it, return (user_id, new_raw_token).
 
-    Replay of an already-rotated token invalidates the whole session family.
+    Replay of an already-rotated token invalidates the whole session family,
+    except the immediate predecessor within `refresh_reuse_grace_seconds`.
     """
     row = _find_refresh_token(db, raw)
     if row is None:
         raise invalid_token()
     # Two refreshes presenting one token both read it unrevoked and both issued
     # a live successor, which defeats the replay defence (§1); under the family
-    # lock the second is judged a replay.
+    # lock the second sees the rotation and, within the reuse window, gets the
+    # same successor.
     _lock_family(db, row.family_id)
     row = _find_refresh_token(db, raw, fresh=True)
     if row is None:
@@ -167,6 +214,28 @@ def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
         expires_at = expires_at.replace(tzinfo=UTC)
 
     if row.revoked:
+        # The immediate predecessor, re-presented within the reuse window of its
+        # rotation (lost response, client timeout, two tabs): answer with the
+        # same successor (from the in-process cache), which is still live.
+        # Evaluated under the family lock, so it sees a rotation that just
+        # committed.
+        cached = _recall_successor(row.token_hash)
+        successor = _find_refresh_token(db, cached, fresh=True) if cached else None
+        if (
+            cached is not None
+            and successor is not None
+            and successor.family_id == row.family_id
+            and not successor.revoked
+        ):
+            rotated_at = successor.created_at
+            if rotated_at.tzinfo is None:
+                rotated_at = rotated_at.replace(tzinfo=UTC)
+            successor_expiry = successor.expires_at
+            if successor_expiry.tzinfo is None:
+                successor_expiry = successor_expiry.replace(tzinfo=UTC)
+            grace = timedelta(seconds=get_settings().refresh_reuse_grace_seconds)
+            if now - rotated_at <= grace and successor_expiry > now:
+                return row.user_id, cached
         # Replay detected: burn the whole family and persist it (the request's
         # error path would otherwise roll the burn back). The family lock makes
         # this UPDATE see any successor a concurrent rotation just committed.
@@ -181,6 +250,7 @@ def rotate_refresh_token(db: Session, raw: str) -> tuple[uuid.UUID, str]:
 
     row.revoked = True
     new_raw = issue_refresh_token(db, row.user_id, family_id=row.family_id)
+    _remember_successor(row.token_hash, new_raw)
     return row.user_id, new_raw
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+
 import balu.config
 from tests.conftest import auth_headers, register_user
 
@@ -67,7 +69,8 @@ def test_refresh_rotation_and_replay_invalidates_family(client):
     second_refresh = r1.json()["refresh_token"]
     assert second_refresh != first_refresh
 
-    # Replaying the old (rotated) token -> 401 invalid_token
+    # Replaying the old (rotated) token after the reuse window -> 401 invalid_token
+    _age_rotation(second_refresh, 61)
     replay = client.post("/api/v1/auth/refresh", json={"refresh_token": first_refresh})
     assert replay.status_code == 401
     assert replay.json()["detail"]["code"] == "invalid_token"
@@ -191,7 +194,7 @@ def test_logout_invalidates_earlier_tokens_in_the_family(client, user):
         assert resp.status_code == 401, token
 
 
-def test_concurrent_refresh_with_one_token_is_a_replay(client):
+def test_concurrent_refresh_with_one_token_gets_the_same_successor(client):
     from balu.auth import rotate_refresh_token
     from balu.db import get_sessionmaker
     from tests.conftest import Background, wait_for_lock_waiters
@@ -207,11 +210,155 @@ def test_concurrent_refresh_with_one_token_is_a_replay(client):
         wait_for_lock_waiters(1)
         s0.commit()
     resp = bg.result()
-    assert resp.status_code == 401
-    assert resp.json()["detail"]["code"] == "invalid_token"
-    # The family is burned, exactly as for a sequential replay.
+    # v1.5.2 reuse window: the second presentation of the predecessor is answered
+    # with the successor the first one created, not judged a replay.
+    assert resp.status_code == 200
+    assert resp.json()["refresh_token"] == new_raw
+    assert resp.json()["access_token"]
     again = client.post("/api/v1/auth/refresh", json={"refresh_token": new_raw})
-    assert again.status_code == 401
+    assert again.status_code == 200
+
+
+def _age_rotation(token_raw: str, seconds: int) -> None:
+    """Move a token's creation (= its predecessor's rotation time) into the past."""
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.tokens import hash_token
+
+    with get_sessionmaker()() as s:
+        s.execute(
+            text(
+                "UPDATE refresh_tokens SET created_at = created_at - make_interval(secs => :s) "
+                "WHERE token_hash = :h"
+            ),
+            {"s": seconds, "h": hash_token(token_raw)},
+        )
+        s.commit()
+
+
+def test_predecessor_within_the_window_gets_the_same_successor(client):
+    data = register_user(client)
+    t0 = data["refresh_token"]
+    r1 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0})
+    r2 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0})
+    assert (r1.status_code, r2.status_code) == (200, 200)
+    assert r1.json()["refresh_token"] == r2.json()["refresh_token"]
+    # The family is alive: the successor rotates on.
+    r3 = client.post("/api/v1/auth/refresh", json={"refresh_token": r1.json()["refresh_token"]})
+    assert r3.status_code == 200
+
+
+def test_predecessor_after_the_window_burns_the_family(client):
+    data = register_user(client)
+    t0 = data["refresh_token"]
+    t1 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).json()["refresh_token"]
+    _age_rotation(t1, 61)
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).status_code == 401
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t1}).status_code == 401
+
+
+def test_predecessor_after_a_restart_burns_the_family(client):
+    """The successor lives in process memory; a cache miss is a replay."""
+    from balu import auth as auth_mod
+
+    data = register_user(client)
+    t0 = data["refresh_token"]
+    t1 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).json()["refresh_token"]
+    auth_mod._successors.clear()
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).status_code == 401
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t1}).status_code == 401
+
+
+def test_predecessor_with_an_expired_successor_burns_the_family(client):
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.tokens import hash_token
+
+    data = register_user(client)
+    t0 = data["refresh_token"]
+    t1 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).json()["refresh_token"]
+    with get_sessionmaker()() as s:
+        s.execute(
+            text("UPDATE refresh_tokens SET expires_at = now() - interval '1 second' "
+                 "WHERE token_hash = :h"),
+            {"h": hash_token(t1)},
+        )
+        s.commit()
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).status_code == 401
+
+
+def test_successor_cache_is_bounded_and_expires(monkeypatch):
+    from balu import auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "_successors", {})
+    monkeypatch.setattr(auth_mod, "_SUCCESSOR_CACHE_MAX", 3)
+    for i in range(5):
+        auth_mod._remember_successor(f"h{i}", f"t{i}")
+    assert len(auth_mod._successors) == 3
+    assert auth_mod._recall_successor("h4") == "t4"
+    assert auth_mod._recall_successor("h0") is None
+    monkeypatch.setattr(auth_mod, "_clock", lambda: 10**9)
+    assert auth_mod._recall_successor("h4") is None
+    assert "h4" not in auth_mod._successors
+
+
+def test_successor_cache_keeps_insertion_order_equal_to_expiry_order(monkeypatch):
+    from balu import auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "_successors", {})
+    now = [100.0]
+    monkeypatch.setattr(auth_mod, "_clock", lambda: now[0])
+    grace = auth_mod.get_settings().refresh_reuse_grace_seconds
+    auth_mod._remember_successor("a", "ta")
+    now[0] += 1
+    auth_mod._remember_successor("b", "tb")
+    now[0] += 1
+    auth_mod._remember_successor("a", "ta2")
+    # "b" has expired, the re-inserted "a" has not: "a" must have moved behind "b".
+    now[0] = 100.0 + grace + 1.5
+    auth_mod._remember_successor("c", "tc")
+    assert list(auth_mod._successors) == ["a", "c"]
+
+
+def test_successor_is_not_derivable_from_the_secret_and_row_ids(client):
+    """A token minted from the secret and a database row id must not be live."""
+    import hashlib
+    import hmac as hmac_mod
+
+    from sqlalchemy import text
+
+    from balu.config import get_settings
+    from balu.db import get_sessionmaker
+
+    data = register_user(client)
+    first = client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
+    assert first.status_code == 200
+    with get_sessionmaker()() as s:
+        ids = [str(r[0]) for r in s.execute(text("SELECT id FROM refresh_tokens"))]
+    for rid in ids:
+        forged = hmac_mod.new(
+            get_settings().secret_key.encode(),
+            b"balu-refresh-successor:" + rid.encode(),
+            hashlib.sha256,
+        ).digest()
+        tok = base64.urlsafe_b64encode(forged).rstrip(b"=").decode()
+        assert client.post("/api/v1/auth/refresh", json={"refresh_token": tok}).status_code == 401
+
+
+def test_predecessors_predecessor_burns_the_family_even_in_the_window(client):
+    t0, t1, t2 = _family_of_three(client)
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).status_code == 401
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t2}).status_code == 401
+
+
+def test_predecessor_after_logout_does_not_resurrect_the_session(client):
+    data = register_user(client)
+    t0 = data["refresh_token"]
+    t1 = client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).json()["refresh_token"]
+    assert client.post("/api/v1/auth/logout", json={"refresh_token": t1}).status_code == 204
+    assert client.post("/api/v1/auth/refresh", json={"refresh_token": t0}).status_code == 401
 
 
 def _family_of_three(client) -> tuple[str, str, str]:

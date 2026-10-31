@@ -303,3 +303,93 @@ def test_rename_by_an_admin_demoted_meanwhile_is_forbidden(client, user):
         if m["workspace"]["id"] == user["workspace_id"]
     }
     assert names == {old_name}
+
+
+# ── accounts already without a workspace (whatif 715dc0eb scenario 6) ───────
+def _strand_all(client, who) -> None:
+    """Leave `who` with zero memberships, as released servers allowed."""
+    me = client.get("/api/v1/me", headers=who["headers"]).json()
+    for m in me["memberships"]:
+        strand(uuid.UUID(m["workspace"]["id"]))
+
+
+def test_me_rescues_an_account_without_a_workspace(client):
+    nina = register_user(client, name="Nina")
+    nina["headers"] = auth_headers(nina["access_token"])
+    _strand_all(client, nina)
+    me = client.get("/api/v1/me", headers=nina["headers"]).json()
+    assert len(me["memberships"]) == 1
+    assert me["memberships"][0]["role"] == "owner"
+    assert me["memberships"][0]["workspace"]["name"] == "Nina"
+    # Idempotent: the next call finds it.
+    again = client.get("/api/v1/me", headers=nina["headers"]).json()
+    assert again["memberships"] == me["memberships"]
+
+
+def test_login_rescues_an_account_without_a_workspace(client):
+    email = "stranded@example.com"
+    nina = register_user(client, email=email, name="Nina")
+    nina["headers"] = auth_headers(nina["access_token"])
+    _strand_all(client, nina)
+    resp = client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "password123"}
+    )
+    assert resp.status_code == 200
+    # Count in the database before /me, which would create the workspace itself.
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+
+    with get_sessionmaker()() as s:
+        n = s.execute(
+            text("SELECT count(*) FROM memberships m JOIN users u ON u.id = m.user_id "
+                 "WHERE u.email = :e AND NOT m.is_deleted"),
+            {"e": email},
+        ).scalar_one()
+    assert n == 1
+    me = client.get("/api/v1/me", headers=auth_headers(resp.json()["access_token"])).json()
+    assert [m["workspace"]["name"] for m in me["memberships"]] == ["Nina"]
+
+
+def test_me_common_path_runs_no_count_query(client):
+    from sqlalchemy import event
+
+    from balu.db import get_engine
+
+    nina = register_user(client, name="Nina")
+    seen: list[str] = []
+
+    def spy(conn, cursor, statement, *a):
+        seen.append(statement.lower())
+
+    engine = get_engine()
+    event.listen(engine, "before_cursor_execute", spy)
+    try:
+        resp = client.get("/api/v1/me", headers=auth_headers(nina["access_token"]))
+    finally:
+        event.remove(engine, "before_cursor_execute", spy)
+    assert resp.status_code == 200
+    assert not [q for q in seen if "memberships" in q and "count(" in q]
+    assert len([q for q in seen if "from memberships" in q]) == 1
+
+
+def test_parallel_me_on_a_workspaceless_account_makes_one_workspace(client):
+    from balu.db import get_sessionmaker
+    from balu.services import lock_users
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    nina = register_user(client, name="Nina")
+    nina["headers"] = auth_headers(nina["access_token"])
+    _strand_all(client, nina)
+    uid = uuid.UUID(nina["user"]["id"])
+    with get_sessionmaker()() as s0:
+        lock_users(s0, [uid])
+        calls = [
+            Background(lambda: client.get("/api/v1/me", headers=nina["headers"]))
+            for _ in range(2)
+        ]
+        wait_for_lock_waiters(2)
+        s0.commit()
+    assert [c.result().status_code for c in calls] == [200, 200]
+    me = client.get("/api/v1/me", headers=nina["headers"]).json()
+    assert len(me["memberships"]) == 1

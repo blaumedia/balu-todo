@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 
-from sqlalchemy import func, select, text
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.orm import Session
 
 from .errors import forbidden, not_found
@@ -88,7 +88,9 @@ def lock_users(db: Session, user_ids: Iterable[uuid.UUID]) -> None:
 
     Serialises the per-account invariants that span workspaces: "every account
     keeps at least one workspace" (counted across all of a user's memberships)
-    and the user's channel list. Take it after the workspace lock, never before.
+    and the user's channel list. Take it after the workspace lock, never before
+    (a workspace row created in the same transaction may be locked after it: no
+    other transaction can see that row yet).
     NO KEY UPDATE does not conflict with the KEY SHARE lock a foreign-key insert
     takes, so accepts, commands and token issuance never wait on it.
     """
@@ -119,3 +121,25 @@ def rescue_if_workspaceless(db: Session, user_id: uuid.UUID) -> Workspace | None
     if member is None:
         return None
     return create_workspace_with_owner(db, member.name.strip() or "My workspace", user_id)
+
+
+def rescue_workspaceless_account(db: Session, user_id: uuid.UUID) -> Workspace | None:
+    """Lazy rescue for an account that is already without a workspace.
+
+    Released servers let an account leave or lose its last workspace, so such
+    accounts exist (whatif 715dc0eb scenario 6). `/me` and login call this: the
+    common case is one unlocked existence check; only a workspaceless account
+    takes `lock_users` (no workspace lock is held by these callers; the new
+    workspace row it creates is locked after the users lock, which is harmless
+    as no other transaction can see it yet) and re-counts under it, so two
+    parallel requests make exactly one workspace. The caller commits.
+    """
+    has_membership = db.execute(
+        select(
+            exists().where(Membership.user_id == user_id, Membership.is_deleted.is_(False))
+        )
+    ).scalar_one()
+    if has_membership:
+        return None
+    lock_users(db, [user_id])
+    return rescue_if_workspaceless(db, user_id)

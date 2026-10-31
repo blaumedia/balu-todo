@@ -63,15 +63,22 @@ Rules:
 - Password: min 8 chars, hashed with argon2id (fallback bcrypt acceptable if argon2 is a
   packaging problem — pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
-  invalidates the whole session family (replay defense). Two refreshes presenting the
-  same token at the same time are serialised: one rotates it, the other is a replay
-  (`401`, family invalidated).
+  invalidates the whole session family (replay defense), with one exception (v1.5.2):
+  the **immediately previous** token of a family, presented again within 60 seconds of
+  its rotation, is answered `200` with the **same** successor refresh token (plus a fresh
+  access token) and the family stays alive. This covers a lost response, a client timeout
+  followed by a retry, and two tabs refreshing at once. The successor must still be live
+  (not revoked, not expired). The server keeps that successor in memory for the 60 seconds
+  only, so after a server restart (or on another server process) the retry is a replay.
+  Any older token, and the predecessor after 60 seconds, is a replay (`401`, family
+  invalidated). Two refreshes presenting the same token at the same
+  time are serialised: one rotates it, the other gets that successor.
 
 ## 2. Account & workspaces (REST)
 
 | Endpoint | Response / notes |
 |---|---|
-| `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call |
+| `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call. v1.5.2: an account that has no workspace at all (possible on servers before v1.5.2) gets a fresh default one on this call, owned by it and named like the one registration creates; `POST /auth/login` does the same. Parallel calls create exactly one. |
 | `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) |
 | `POST /workspaces` | `{name}` → `201 {workspace}`; creator becomes `owner` |
 | `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin; a workspace deleted meanwhile → `404 not_found` |
