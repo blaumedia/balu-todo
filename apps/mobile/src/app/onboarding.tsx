@@ -163,6 +163,7 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
 function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeServer: () => void }) {
   const theme = useTheme();
   const { t } = useT();
+  const loginNotice = useApp((s) => s.loginNotice);
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -211,6 +212,11 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         ) : null}
         <Text style={[styles.changeLink, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
       </Pressable>
+      {loginNotice === 'sessionExpired' ? (
+        <Text style={[styles.notice, { color: theme.textPrimary, borderColor: theme.border }]}>
+          {t('auth.sessionExpired')}
+        </Text>
+      ) : null}
 
       {mode === 'register' ? (
         <Field icon="settings" placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
@@ -270,6 +276,7 @@ const styles = StyleSheet.create({
   warning: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, gap: space.s2 },
   warningTitle: { fontSize: font.secondary, fontWeight: font.weightSemibold },
   insecureBadge: { fontSize: font.caption, fontWeight: font.weightMedium },
+  notice: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, fontSize: font.secondary },
   serverChip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space.s2 },
   serverText: { fontSize: font.caption, flexShrink: 1 },
   changeLink: { fontSize: font.caption, fontWeight: font.weightMedium, marginLeft: 'auto' },

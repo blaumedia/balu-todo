@@ -4,7 +4,9 @@ import { parseAppUrl, type ViewSel } from "../lib/url.js";
 
 export type { ViewSel };
 
-type Boot = "loading" | "login" | "ready";
+type Boot = "loading" | "login" | "unreachable" | "noWorkspace" | "ready";
+
+export type LoginNotice = "sessionExpired";
 
 const THEME_KEY = "balu:theme";
 const WORKSPACE_KEY = "balu:workspace";
@@ -145,6 +147,9 @@ export interface AppState {
   revalidateToast(): void;
   /** Pause the dismiss timer while the toast is hovered or focused; it runs again once both holds are released. */
   holdToast(source: "hover" | "focus", hold: boolean): void;
+  /** Shown above the login form (lib/boot.ts expireSession). */
+  loginNotice: LoginNotice | null;
+  setLoginNotice(notice: LoginNotice | null): void;
 
   setBoot(b: Boot): void;
   setSession(user: User, memberships: Membership[], workspace: Workspace): void;
@@ -185,6 +190,7 @@ export const useApp = create<AppState>((set, get) => ({
   toastAction: null,
   toastTone: "success",
   toastSeq: 0,
+  loginNotice: null,
   showToast: (message, opts) => {
     // An error is only replaced by another error; anything else (action
     // toasts included) is deferred until the error has expired.
@@ -206,9 +212,10 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setBoot: (boot) => set({ boot }),
+  setLoginNotice: (loginNotice) => set({ loginNotice }),
   setSession: (user, memberships, workspace) => {
     rememberWorkspaceId(workspace.id);
-    set({ user, memberships, workspace, locale: user.locale, boot: "ready" });
+    set({ user, memberships, workspace, locale: user.locale, boot: "ready", loginNotice: null });
   },
   setUser: (user) => set({ user, locale: user.locale }),
   setMemberships: (memberships) => set({ memberships }),
@@ -261,6 +268,7 @@ export const useApp = create<AppState>((set, get) => ({
       fullscreenTaskId: null,
       quickAddOpen: false,
       paletteOpen: false,
+      loginNotice: null,
     });
   },
 }));

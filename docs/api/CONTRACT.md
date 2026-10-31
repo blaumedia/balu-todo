@@ -58,6 +58,8 @@ Rules:
   packaging problem — pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
   invalidates the whole session family (replay defense).
+- Clients end a session only when `POST /auth/refresh` answers `401`. A network error, a timeout, `429` or `5xx` keeps the tokens and is retried. On that 401 the apps show their login screen and keep the local queue and replica: they sync once the same user signs in again, and are wiped first when a different user signs in on that device.
+- Clients must not refresh with the same refresh token twice at once, otherwise the replay defense above logs them all out: tabs sharing one storage re-read the stored tokens before refreshing and order refreshes (Web Locks where available, otherwise a best-effort, short-lived lease in the shared storage, since plain http has no Web Locks; it is re-checked right before the request but is not a hard guarantee). A single-realm client that owns its storage (mobile) uses the in-process single flight only. Stored tokens of a different user (JWT `sub`) are never adopted: a tab whose session was ended or replaced by another tab drops its in-memory state and re-reads storage.
 
 ## 2. Account & workspaces (REST)
 
@@ -452,8 +454,21 @@ whenever any command in a flush was rejected, then reports the failures to the a
 5. On `full_sync: true`: replace replica wholesale.
 6. temp_id bookkeeping: after flush, rewrite queued commands and replica ids via
    `temp_id_mapping`.
-7. Poll cadence v1: pull on app focus + after every flush + every 60 s while visible.
-   (WebSocket/SSE push is a later optimization; the protocol doesn't change.)
+7. Poll cadence v1: pull on app focus, page visible and app foreground + after every
+   flush + every 60 s while visible (a background tab still pushes queued changes). A
+   sync request, including its token refresh, is abandoned if the response headers have
+   not arrived after 30 s (reading the body has its own, longer 120 s limit, so a large
+   full sync on a slow link can finish); a failed sync is
+   retried after 2 s, doubling to 30 s, reset on success or when the app regains focus,
+   visibility, network or the foreground. (WebSocket/SSE push is a later optimization;
+   the protocol doesn't change.)
+8. `403 forbidden` or `404 not_found` (with the error envelope) from the sync endpoint
+   means the user can no longer reach the workspace (§7 removal, workspace deletion).
+   The client stops syncing it, deletes its local queue, replica and token, and tells
+   the app how many queued changes were discarded; the app moves to a workspace `/me`
+   still lists. A 403/404 without the envelope (e.g. from a proxy) is a transient error.
+9. `relocated` entries (§5.2) are reported to the app after the flush so it can say
+   where the task went.
 
 ## 7. Invites & member management (REST) — v1.1
 

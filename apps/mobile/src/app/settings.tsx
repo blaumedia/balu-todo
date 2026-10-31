@@ -21,7 +21,7 @@ import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
-import { getApi, initSync } from '../lib/clients';
+import { clearExpectedAccessLoss, expectAccessLoss, getApi, initSync, purgeWorkspaceStorage } from '../lib/clients';
 import { establishSession, logout, switchWorkspace } from '../lib/boot';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
@@ -172,9 +172,11 @@ export default function SettingsScreen() {
     setSwitching(true);
     try {
       try {
+        expectAccessLoss(doomedId);
         await api.deleteWorkspace(doomedId);
       } catch {
         // Nothing happened server-side, so the live session is still valid.
+        clearExpectedAccessLoss(doomedId);
         Alert.alert(t('workspace.deleteError'));
         return;
       }
@@ -202,6 +204,7 @@ export default function SettingsScreen() {
           ok = true;
         }
       }
+      void purgeWorkspaceStorage(doomedId);
       if (!ok) Alert.alert(t('workspace.deleteError'));
       cancelDelete();
       // Same hygiene as a switch: everything under this screen still belongs to
@@ -235,15 +238,28 @@ export default function SettingsScreen() {
     bestEffortPatch({ locale: value });
   };
 
-  const doLogout = async () => {
-    await logout();
-    router.replace('/onboarding');
+  // Re-entry guard: a second tap while the first logout runs would post and
+  // purge twice. The ref blocks synchronously, the state disables the button.
+  const leaving = useRef(false);
+  const [leavingUi, setLeavingUi] = useState(false);
+  const leave = async (afterLogout?: () => void) => {
+    if (leaving.current) return;
+    leaving.current = true;
+    setLeavingUi(true);
+    try {
+      try {
+        await logout();
+      } catch {
+        /* logout() already ended the session and left the screen; a failed purge has no UI to report to */
+      }
+      afterLogout?.();
+    } finally {
+      leaving.current = false;
+      setLeavingUi(false);
+    }
   };
-  const changeServer = async () => {
-    await logout();
-    setServerUrl(null);
-    router.replace('/onboarding');
-  };
+  const doLogout = () => leave();
+  const changeServer = () => leave(() => setServerUrl(null));
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
@@ -526,12 +542,12 @@ export default function SettingsScreen() {
             </Text>
           </View>
         </View>
-        <Pressable onPress={changeServer} style={styles.linkRow}>
+        <Pressable onPress={changeServer} disabled={leavingUi} style={[styles.linkRow, leavingUi && { opacity: 0.5 }]}>
           <Icon name="smartphone" size={16} color={theme.accent} strokeWidth={2} />
           <Text style={[styles.link, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
         </Pressable>
 
-        <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} style={{ marginTop: space.s6 }} />
+        <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} disabled={leavingUi} style={{ marginTop: space.s6 }} />
         <View style={{ height: space.s8 }} />
       </ScrollView>
     </View>

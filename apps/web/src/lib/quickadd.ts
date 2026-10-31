@@ -1,4 +1,5 @@
 import type { IsoDate, Label, Project } from "@balu/domain";
+import { wasSaved } from "@balu/sync-client";
 import { composeTaskArgs as compose, resolveProjectId, resolveQuickAddContext, type ComposeContext, type ParseResult, type QuickAddTarget } from "@balu/nl-parser";
 import type { ViewSel } from "../store/app.js";
 
@@ -34,6 +35,20 @@ export function quickAddTarget(
  *  project was redirected and the user did not name a project via `#`. */
 export function shouldNotifyInbox(target: QuickAddTarget, args: Record<string, unknown>): boolean {
   return target.redirected && args["project_id"] === undefined;
+}
+
+/**
+ * What quick-add does once `mutate()` answered. A dropped edit (access lost, client
+ * closed, no client) was not saved: keep what the user typed and say nothing - a
+ * success toast would be false and would replace the notice that explains the loss.
+ */
+export function afterQuickAdd(
+  added: { dropped?: boolean } | undefined,
+  target: QuickAddTarget,
+  args: Record<string, unknown>,
+): { clearInput: boolean; notifyInbox: boolean } {
+  const saved = wasSaved(added);
+  return { clearInput: saved, notifyInbox: saved && shouldNotifyInbox(target, args) };
 }
 
 /**

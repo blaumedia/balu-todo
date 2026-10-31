@@ -1,4 +1,5 @@
 import { activeProjects, todayLocalISO } from '@balu/domain';
+import { wasSaved } from '@balu/sync-client';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -74,7 +75,9 @@ export function QuickAddSheet() {
       labels: snap.labels,
       today,
     });
-    addTask(args);
+    // Dropped (access to the workspace was just lost, the app is moving away): keep
+    // the text and say nothing - "added" would be false.
+    if (!wasSaved(addTask(args))) return;
     if (target.redirected && args['project_id'] === undefined) {
       // The context is dead, so close rather than repeat this for every next task.
       setText('');

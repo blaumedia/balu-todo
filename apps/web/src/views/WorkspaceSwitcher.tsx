@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Workspace } from "@balu/domain";
-import { api, initSync } from "../lib/clients.js";
+import { api, getSync, initSync } from "../lib/clients.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
 import { Icon } from "../components/Icon.js";
@@ -41,6 +41,11 @@ export function WorkspaceSwitcher() {
   function switchTo(ws: Workspace) {
     setOpen(false);
     if (ws.id === workspace!.id) return;
+    // initSync stops the old client, and stop() cancels its debounced flush, so
+    // push the outgoing queue now (as mobile does, lib/boot.ts switchWorkspace).
+    // Not awaited: the request can take up to the 30 s sync timeout, and nothing
+    // is lost either way - the queue stays persisted under the old workspace.
+    void getSync()?.flush().catch(() => {});
     initSync(ws.id, user!.id);
     setWorkspace(ws);
   }
@@ -56,6 +61,7 @@ export function WorkspaceSwitcher() {
       // Refresh memberships so the new workspace appears in the list.
       const me = await api.getMe().catch(() => null);
       if (me) setMemberships(me.memberships);
+      void getSync()?.flush().catch(() => {}); // push the outgoing queue, see switchTo
       initSync(ws.id, user!.id);
       setWorkspace(ws);
     } catch {

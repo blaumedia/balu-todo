@@ -1,45 +1,35 @@
 import { useApp } from "../store/app.js";
-import { api, teardownSync } from "./clients.js";
-
-/**
- * Keys that survive a logout. Only device-level display preferences — anything
- * else under `balu:` belongs to the account that is signing out.
- */
-const KEEP = new Set(["balu:theme"]);
-
-/**
- * Remove every `balu:*` key this app owns: the api-client's tokens
- * (`balu:auth:*`), the sync-client's per-workspace replica/queue/token
- * (`balu:{replica,queue,token}:<ws>`) and the last-used workspace.
- *
- * Without this the next person to use the browser still has the previous user's
- * tasks, notes and comments on disk, and any command left in the queue would be
- * flushed under whichever account logs in next.
- */
-export function purgeLocalData(): void {
-  const ls = globalThis.localStorage;
-  if (!ls) return;
-  const doomed: string[] = [];
-  for (let i = 0; i < ls.length; i += 1) {
-    const key = ls.key(i);
-    if (key !== null && key.startsWith("balu:") && !KEEP.has(key)) doomed.push(key);
-  }
-  for (const key of doomed) ls.removeItem(key);
-}
+import { api, closeSync } from "./clients.js";
+import { endBootAttempts } from "./bootRetry.js";
+import { OWNER_KEY, purgeLocalData } from "./localData.js";
 
 /** The one logout path: stop syncing, revoke server-side, wipe local state. */
 export async function logout(): Promise<void> {
-  // Stop the sync client first so nothing re-persists after the purge.
-  teardownSync();
-  try {
-    await api.logout();
-  } catch {
+  // Close every sync client first, so nothing re-persists after the purge (a
+  // queue written back without an owner key would be adopted, and flushed, by the
+  // next user). Not awaited: a closed client never writes again and localStorage
+  // writes are synchronous. api.logout() does not wait for a running refresh
+  // either (its token write is generation-aware), so nothing here stalls.
+  closeSync();
+  // Before the tokens go: another tab seeing the refresh key vanish must find the
+  // owner key already gone, or it takes this logout for an expiry and keeps the data.
+  globalThis.localStorage?.removeItem(OWNER_KEY);
+  // Started, not awaited: the request can take its whole timeout during an
+  // outage, and a tab closed meanwhile must not reopen signed in with all the
+  // data. api.logout() drops the stored tokens before it posts, and the revoke
+  // never needs local state, so the purge does not wait for it.
+  const revoked = api.logout().catch(() => {
     /* best-effort: local state is cleared regardless */
-  }
+  });
   purgeLocalData();
   useApp.getState().reset();
   // The address bar must not keep the previous account's project/task ids on
   // screen. Shell unmounts with `reset()`, so useUrlSync's effect never runs to
   // rewrite it - do it here. replaceState, not assign(): no new history entry.
   globalThis.history?.replaceState(null, "", "/");
+  // A boot loop in flight (waiting on an unreachable server, or on a /me or refresh
+  // that has not answered) must stop for good, so a later login neither joins it nor
+  // gets purged by it.
+  endBootAttempts();
+  await revoked;
 }

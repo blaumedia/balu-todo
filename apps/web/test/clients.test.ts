@@ -1,31 +1,122 @@
-// @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ listeners: new Set<() => void>(), stop: vi.fn() }));
-vi.mock("@balu/api-client", () => ({
-  createApiClient: () => ({ getAccessToken: () => null, refresh: async () => {} }),
-}));
-vi.mock("@balu/sync-client", () => ({
-  localStorageKV: () => ({}),
-  createSyncClient: () => ({
-    start: vi.fn(),
-    stop: h.stop,
-    subscribe: (l: () => void) => {
-      h.listeners.add(l);
-      return () => void h.listeners.delete(l);
-    },
-  }),
+// A fake sync client with a controllable in-flight request: close() is what the
+// real client honours by never writing again; the fake records when a late
+// "write" would have landed.
+const fakes = vi.hoisted(() => ({
+  listeners: new Set<() => void>(),
+  made: [] as Array<{
+    workspaceId: string;
+    closed: boolean;
+    stopped: boolean;
+    release: () => void;
+    lateWrites: string[];
+  }>,
 }));
 
-import { initSync, teardownSync } from "../src/lib/clients.js";
+vi.mock("@balu/sync-client", async (orig) => ({
+  ...(await orig<typeof import("@balu/sync-client")>()),
+  localStorageKV: () => ({
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  }),
+  createSyncClient: (opts: { workspaceId: string }) => {
+    let release: () => void = () => {};
+    const flight = new Promise<void>((r) => {
+      release = r;
+    });
+    const rec = { workspaceId: opts.workspaceId, closed: false, stopped: false, release, lateWrites: [] as string[] };
+    fakes.made.push(rec);
+    return {
+      start: () => {},
+      subscribe: (l: () => void) => {
+        fakes.listeners.add(l);
+        return () => void fakes.listeners.delete(l);
+      },
+      stop: () => {
+        rec.stopped = true;
+      },
+      close: () => {
+        rec.closed = true;
+        rec.stopped = true;
+      },
+      // The in-flight flush lands when released: a write unless the client was closed.
+      idle: async () => {
+        await flight;
+        if (!rec.closed) rec.lateWrites.push(`balu:queue:${rec.workspaceId}`);
+      },
+    };
+  },
+}));
+
+import { closeSync, initSync, listStoredWorkspaceIds, teardownSync } from "../src/lib/clients.js";
 import { useApp } from "../src/store/app.js";
+
+beforeEach(() => {
+  closeSync();
+  fakes.made.length = 0;
+  fakes.listeners.clear();
+  useApp.getState().dismissToast();
+});
+
+describe("closeSync reaches stopped clients", () => {
+  it("a client stopped by a workspace switch is closed by a later logout", async () => {
+    initSync("w1", "u1");
+    initSync("w2", "u1"); // w1 stopped, its flush still running
+    const [w1, w2] = fakes.made;
+    expect(w1!.stopped).toBe(true);
+    expect(w1!.closed).toBe(false);
+    closeSync();
+    expect(w1!.closed).toBe(true);
+    expect(w2!.closed).toBe(true);
+    w1!.release();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(w1!.lateWrites).toEqual([]);
+  });
+
+  it("a client stopped by a session expiry is closed when another user signs in", () => {
+    initSync("w1", "u1");
+    teardownSync(); // expireSession
+    const [w1] = fakes.made;
+    expect(w1!.closed).toBe(false);
+    closeSync(); // adoptLocalDataFor(u2, closeSync)
+    expect(w1!.closed).toBe(true);
+  });
+
+  it("forgets a stopped client once its work has settled", async () => {
+    initSync("w1", "u1");
+    teardownSync();
+    const [w1] = fakes.made;
+    w1!.release();
+    await new Promise((r) => setTimeout(r, 0));
+    closeSync();
+    expect(w1!.closed).toBe(false); // settled and dropped: nothing left to close
+  });
+
+  it("switching back to a workspace closes its stopped client, so two never share its keys", () => {
+    initSync("w1", "u1");
+    initSync("w2", "u1"); // w1 stopped, still winding down
+    initSync("w1", "u1");
+    const [oldW1, w2, newW1] = fakes.made;
+    expect(oldW1!.closed).toBe(true);
+    expect(w2!.closed).toBe(false); // another workspace: left to wind down
+    expect(newW1!.closed).toBe(false);
+  });
+
+  it("re-initialising the current workspace closes the client it replaces", () => {
+    initSync("w1", "u1");
+    initSync("w1", "u1");
+    const [first, second] = fakes.made;
+    expect(first!.closed).toBe(true);
+    expect(second!.closed).toBe(false);
+  });
+});
 
 describe("clients toast wiring", () => {
   let valid: boolean;
   beforeEach(() => {
-    teardownSync();
-    h.listeners.clear();
-    useApp.getState().dismissToast();
     valid = true;
   });
   const show = () => useApp.getState().showToast("A", { action: { label: "Go", run: () => {}, isValid: () => valid } });
@@ -35,7 +126,7 @@ describe("clients toast wiring", () => {
     show();
     expect(useApp.getState().toast).toBe("A");
     valid = false;
-    h.listeners.forEach((l) => l());
+    fakes.listeners.forEach((l) => l());
     expect(useApp.getState().toast).toBeNull();
   });
 
@@ -45,7 +136,17 @@ describe("clients toast wiring", () => {
     valid = false;
     teardownSync();
     expect(useApp.getState().toast).toBeNull();
-    expect(h.listeners.size).toBe(0);
+    expect(fakes.listeners.size).toBe(0);
+  });
+
+  it("closeSync re-validates and unsubscribes", () => {
+    initSync("w1", "u1");
+    show();
+    expect(useApp.getState().toast).toBe("A");
+    valid = false;
+    closeSync();
+    expect(useApp.getState().toast).toBeNull();
+    expect(fakes.listeners.size).toBe(0);
   });
 
   it("initSync replaces the previous subscription and re-validates", () => {
@@ -54,7 +155,29 @@ describe("clients toast wiring", () => {
     expect(useApp.getState().toast).toBe("A");
     valid = false;
     initSync("w2", "u1");
-    expect(h.listeners.size).toBe(1);
+    expect(fakes.listeners.size).toBe(1);
     expect(useApp.getState().toast).toBeNull();
+  });
+});
+
+describe("listStoredWorkspaceIds", () => {
+  it("finds a workspace that only has a loss notice left (purge killed after the queue)", () => {
+    const m = new Map<string, string>([
+      ["balu:lossNotice:w9", "{}"],
+      ["balu:queue:w1", "[]"],
+      ["balu:theme", "dark"],
+    ]);
+    vi.stubGlobal("localStorage", {
+      get length() {
+        return m.size;
+      },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      getItem: (k: string) => m.get(k) ?? null,
+    });
+    try {
+      expect(listStoredWorkspaceIds().sort()).toEqual(["w1", "w9"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

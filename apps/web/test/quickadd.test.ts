@@ -1,7 +1,7 @@
 import type { Project } from "@balu/domain";
 import { parseQuickAdd } from "@balu/nl-parser";
 import { describe, expect, it } from "vitest";
-import { archivedViewProjectId, composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
+import { afterQuickAdd, archivedViewProjectId, composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
 
 function project(over: Partial<Project>): Project {
   return {
@@ -122,5 +122,19 @@ describe("archivedViewProjectId", () => {
   });
   it("follows a temp id alias", () => {
     expect(archivedViewProjectId(view("tmp-a"), [archived], { "tmp-a": "P1" })).toBe("P1");
+  });
+});
+
+describe("afterQuickAdd", () => {
+  const redirected = { context: { kind: "none" }, redirected: true } as any;
+
+  it("keeps the typed text and says nothing when the edit was dropped", () => {
+    expect(afterQuickAdd({ dropped: true }, redirected, {})).toEqual({ clearInput: false, notifyInbox: false });
+    expect(afterQuickAdd(undefined, redirected, {})).toEqual({ clearInput: false, notifyInbox: false });
+  });
+
+  it("clears the input once saved, and notifies only for a redirect", () => {
+    expect(afterQuickAdd({}, redirected, {})).toEqual({ clearInput: true, notifyInbox: true });
+    expect(afterQuickAdd({}, { ...redirected, redirected: false }, {})).toEqual({ clearInput: true, notifyInbox: false });
   });
 });

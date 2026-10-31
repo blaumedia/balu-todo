@@ -8,6 +8,7 @@ import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { AppState, Platform } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { BootNotice } from '../components/BootNotice';
 import { ProjectActionsSheet } from '../features/ProjectActionsSheet';
 import { QuickAddSheet } from '../features/QuickAddSheet';
 import { ScheduleSheet } from '../features/ScheduleSheet';
@@ -40,9 +41,10 @@ export default function RootLayout() {
     void bootApp().finally(() => {
       SplashScreen.hideAsync().catch(() => {});
     });
-    // Foreground sync (contract §6.7): pull whenever the app becomes active.
+    // Foreground (contract §6.7): sync now and restart the retry backoff from its
+    // shortest delay - it may have grown to 30 s while the app was in the background.
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void getSync()?.sync();
+      if (state === 'active') void getSync()?.wake();
     });
     return () => sub.remove();
   }, []);
@@ -76,6 +78,7 @@ function Chrome() {
       <TaskDetailSheet />
       <ScheduleSheet />
       <ProjectActionsSheet />
+      <BootNotice />
     </>
   );
 }

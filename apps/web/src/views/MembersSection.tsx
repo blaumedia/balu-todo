@@ -3,8 +3,9 @@ import { assignableRoles, canChangeMemberRole, canRemoveMember } from "@balu/dom
 import type { Invite, InviteRole, Member, Role } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { ApiError } from "@balu/api-client";
-import { api, getSync } from "../lib/clients.js";
+import { api, clearExpectedAccessLoss, expectAccessLoss, getSync } from "../lib/clients.js";
 import { copyText } from "../lib/clipboard.js";
+import { moveOffLostWorkspace } from "../lib/boot.js";
 import { canManageMembers, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
@@ -99,6 +100,30 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
     }
   }
 
+  async function leaveWorkspace(id: string, selfId: string) {
+    // Push what is still queued while we are a member; afterwards the server refuses it.
+    const sync = getSync();
+    await sync?.flush().catch(() => {});
+    // flush() never rejects; a failed one leaves the queue non-empty, and removing
+    // the membership now would make the server refuse (and us discard) those changes.
+    const pending = sync?.getSnapshot().pending ?? 0;
+    if (pending > 0) {
+      showToast(t("members.leaveUnsynced").replace("{n}", String(pending)), { tone: "error", durationMs: 6000 });
+      return;
+    }
+    // The client's own 403 after leaving is not news to the user.
+    expectAccessLoss(id);
+    try {
+      await api.removeMember(id, selfId);
+    } catch (e) {
+      clearExpectedAccessLoss(id);
+      handleApiError(e);
+      return;
+    }
+    // Leaving used to leave the app in the workspace, 403-polling it.
+    await moveOffLostWorkspace(id);
+  }
+
   async function removeMember(m: Member) {
     if (!wsId) return;
     const isSelf = m.id === user?.id;
@@ -106,6 +131,10 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
       isSelf ? t("members.leaveConfirm") : t("members.removeConfirm").replace("{name}", m.name),
     );
     if (!ok) return;
+    if (isSelf) {
+      await leaveWorkspace(wsId, m.id);
+      return;
+    }
     try {
       await api.removeMember(wsId, m.id);
       await getSync()?.sync();
