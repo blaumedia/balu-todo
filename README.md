@@ -103,6 +103,13 @@ whole deployment; the schema migrates itself on startup. Configuration via env:
 full list with comments is [`.env.example`](.env.example), and every one of them reaches
 the container through `env_file`. Upgrading is `docker compose pull && docker compose up -d`.
 
+**Rolling back** to an older image is safe only if the newer release's migrations are
+undone first, otherwise the older image cannot boot ("Can't locate revision"). With the
+NEW image still running, execute `docker compose exec app python -m balu.migrate downgrade
+<revision>`, where `<revision>` is the revision the release notes name (for the release
+that added `f6a7b8c9d0e1`: `e5f6a7b8c9d0`), then pull the older image. Do not use
+`BALU_AUTO_MIGRATE=0` for this: it leaves the newer revision stamped in the database.
+
 `BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** - compose refuses to
 start without them, and the server refuses to boot on a weak (<32 char) or
 placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to

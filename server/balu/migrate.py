@@ -1,10 +1,13 @@
 """Programmatic Alembic runner (used on startup and as a CLI escape hatch).
 
-Usage: ``python -m balu.migrate`` runs ``alembic upgrade head``.
+Usage: ``python -m balu.migrate`` runs ``alembic upgrade head``;
+``python -m balu.migrate downgrade <revision>`` runs ``alembic downgrade`` (the
+rollback step before switching to an older image, see the README).
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from alembic.config import Config
@@ -31,5 +34,20 @@ def run_migrations(configure_logger: bool = False) -> None:
     command.upgrade(_alembic_config(configure_logger), "head")
 
 
+def run_downgrade(revision: str, configure_logger: bool = False) -> None:
+    command.downgrade(_alembic_config(configure_logger), revision)
+
+
+def main(argv: list[str]) -> int:
+    if not argv:
+        run_migrations(configure_logger=True)
+        return 0
+    if len(argv) == 2 and argv[0] == "downgrade":
+        run_downgrade(argv[1], configure_logger=True)
+        return 0
+    print("usage: python -m balu.migrate [downgrade <revision>]", file=sys.stderr)
+    return 2
+
+
 if __name__ == "__main__":
-    run_migrations(configure_logger=True)
+    sys.exit(main(sys.argv[1:]))
