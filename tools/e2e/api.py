@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""API helpers for e2e runs against a balu stack (see README.md).
+
+Prints statuses and counts only: never a password, token, invite token or body.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime
+import json
+import sys
+
+import balu_e2e as e
+
+PROJECT_NAME = "E2E Project"
+
+
+def ws_id() -> str:
+    return e.load("ws.id")
+
+
+def tasks_map() -> dict:
+    try:
+        return json.loads(e.load("tasks.json"))
+    except SystemExit:
+        return {}
+
+
+def task_id(title: str) -> str:
+    tid = tasks_map().get(title)
+    if not tid:
+        raise SystemExit(f"unknown task title: {title}")
+    return tid
+
+
+def today() -> str:
+    return datetime.date.today().isoformat()
+
+
+def task_add(title: str, project_temp: str | None = None) -> dict:
+    args = {"title": title, "start_date": today()}
+    if project_temp:
+        args["project_id"] = project_temp
+    tmp = e.new_temp_id()
+    return {"type": "task_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": args}
+
+
+def cmd_health(_a) -> int:
+    s = e.health()
+    print("healthz", s)
+    return 0 if s == 200 else 1
+
+
+def cmd_setup(a) -> int:
+    print("owner register", e.register("owner", "E2E Owner"))
+    print("member register", e.register("member", "E2E Member"))
+    s, me = e.authed("owner", "GET", "/me")
+    owned = [m for m in me.get("memberships", []) if m.get("role") == "owner"]
+    if s != 200 or not owned:
+        raise SystemExit(f"owner has no workspace (GET /me -> {s})")
+    ws = owned[0]["workspace"]["id"]
+    e.save("ws.id", ws)
+    s, mme = e.authed("member", "GET", "/me")
+    if any(m["workspace"]["id"] == ws for m in mme.get("memberships", [])):
+        print("member already in workspace")
+    else:
+        s, inv = e.authed("owner", "POST", f"/workspaces/{ws}/invites", {"role": a.member_role})
+        print("invite", s)
+        s2, _ = e.authed("member", "POST", "/invites/accept", {"token": inv["invite"]["token"]})
+        print("accept", s2)
+    s, snap = e.sync("owner", ws, [])
+    existing = [
+        p for p in snap.get("projects", [])
+        if p.get("name") == PROJECT_NAME and not p.get("is_deleted")
+    ]
+    if existing:
+        e.save("project.id", existing[0]["id"])
+        print("project exists")
+        return 0
+    proj = e.new_temp_id()
+    commands = [
+        {
+            "type": "project_add",
+            "uuid": e.new_uuid(),
+            "temp_id": proj,
+            "args": {"name": PROJECT_NAME},
+        }
+    ]
+    titles = []
+    task_tmps = []
+    for i in range(a.tasks):
+        c = task_add(f"E2E Task {chr(65 + i)}", proj)
+        commands.append(c)
+        titles.append(c["args"]["title"])
+        task_tmps.append(c["temp_id"])
+    s, b = e.sync("owner", ws, commands)
+    mapping = b.get("temp_id_mapping", {})
+    if proj in mapping:
+        e.save("project.id", mapping[proj])
+    ids = {t: mapping[m] for t, m in zip(titles, task_tmps, strict=True) if m in mapping}
+    e.save("tasks.json", json.dumps(ids))
+    print("seed", s, e.statuses(b))
+    print("tasks", len(tasks_map()))
+    return 0
+
+
+def cmd_role(a) -> int:
+    path = f"/workspaces/{ws_id()}/members/{e.load('member.uid')}"
+    s, _ = e.authed("owner", "PATCH", path, {"role": a.role})
+    print("set role", a.role, "->", s)
+    return 0
+
+
+def cmd_bulk(a) -> int:
+    commands = [task_add(f"E2E Bulk {i + 1:02d}") for i in range(a.n)]
+    s, b = e.sync("owner", ws_id(), commands)
+    mapping = b.get("temp_id_mapping", {})
+    known = tasks_map()
+    for c in commands:
+        if c["temp_id"] in mapping:
+            known[c["args"]["title"]] = mapping[c["temp_id"]]
+    e.save("tasks.json", json.dumps(known))
+    print("bulk", s, "tasks", len(known))
+    return 0
+
+
+def cmd_edit_task(a) -> int:
+    value: object = a.value
+    if a.field == "priority":
+        value = int(a.value)
+    elif a.field == "evening":
+        value = a.value.lower() in ("1", "true", "t", "yes")
+    args = {"id": task_id(a.title), a.field: value}
+    cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("task_update", a.title, a.field, "->", s, e.statuses(b))
+    return 0
+
+
+def cmd_delete_task(a) -> int:
+    cmd = {"type": "task_delete", "uuid": e.new_uuid(), "args": {"id": task_id(a.title)}}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("task_delete", a.title, "->", s, e.statuses(b))
+    return 0
+
+
+def cmd_project_delete(_a) -> int:
+    cmd = {"type": "project_delete", "uuid": e.new_uuid(), "args": {"id": e.load("project.id")}}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("project_delete ->", s, e.statuses(b))
+    return 0
+
+
+def cmd_remove_member(_a) -> int:
+    s, _ = e.authed("owner", "DELETE", f"/workspaces/{ws_id()}/members/{e.load('member.uid')}")
+    print("remove member ->", s)
+    return 0
+
+
+def cmd_ws2(_a) -> int:
+    s, w = e.authed("owner", "POST", "/workspaces", {"name": "E2E Second"})
+    print("create workspace", s)
+    if s not in (200, 201):
+        return 1
+    ws2 = w["id"]
+    e.save("ws2.id", ws2)
+    proj = e.new_temp_id()
+    task = task_add("W2 Task", proj)
+    commands = [
+        {
+            "type": "project_add",
+            "uuid": e.new_uuid(),
+            "temp_id": proj,
+            "args": {"name": "W2 Project"},
+        },
+        task,
+    ]
+    s, b = e.sync("owner", ws2, commands)
+    print("seed", s, e.statuses(b))
+    return 0
+
+
+def cmd_sync_probe(a) -> int:
+    s, b = e.sync(a.role, ws_id(), [])
+    live = [t for t in b.get("tasks", []) if not t.get("is_deleted")]
+    print(a.role, "sync", s, "tasks", len(live), "projects", len(b.get("projects", [])))
+    return 0
+
+
+def cmd_me(a) -> int:
+    s, b = e.authed(a.role, "GET", "/me")
+    ms = b.get("memberships", [])
+    print("memberships", len(ms), "roles", sorted(m.get("role", "?") for m in ms))
+    return 0 if s == 200 else 1
+
+
+def cmd_invite(a) -> int:
+    s, b = e.authed("owner", "POST", f"/workspaces/{ws_id()}/invites", {"role": a.role})
+    if s in (200, 201):
+        e.save(f"invite-{a.role}.token", b["invite"]["token"])
+    print("invite", s)
+    return 0 if s in (200, 201) else 1
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("health").set_defaults(fn=cmd_health)
+    s = sub.add_parser("setup")
+    s.add_argument("--member-role", choices=["viewer", "member", "admin"], default="viewer")
+    s.add_argument("--tasks", type=int, default=5)
+    s.set_defaults(fn=cmd_setup)
+    s = sub.add_parser("role")
+    s.add_argument("role")
+    s.set_defaults(fn=cmd_role)
+    s = sub.add_parser("bulk")
+    s.add_argument("n", type=int)
+    s.set_defaults(fn=cmd_bulk)
+    s = sub.add_parser("edit-task")
+    s.add_argument("title")
+    s.add_argument("field")
+    s.add_argument("value")
+    s.set_defaults(fn=cmd_edit_task)
+    s = sub.add_parser("delete-task")
+    s.add_argument("title")
+    s.set_defaults(fn=cmd_delete_task)
+    sub.add_parser("project-delete").set_defaults(fn=cmd_project_delete)
+    sub.add_parser("remove-member").set_defaults(fn=cmd_remove_member)
+    sub.add_parser("ws2").set_defaults(fn=cmd_ws2)
+    s = sub.add_parser("sync-probe")
+    s.add_argument("--role", default="member")
+    s.set_defaults(fn=cmd_sync_probe)
+    s = sub.add_parser("me")
+    s.add_argument("--role", default="owner")
+    s.set_defaults(fn=cmd_me)
+    s = sub.add_parser("invite")
+    s.add_argument("role")
+    s.set_defaults(fn=cmd_invite)
+    a = p.parse_args()
+    return a.fn(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
