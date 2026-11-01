@@ -145,6 +145,7 @@ import {
   logout,
   moveOffLostWorkspace,
   navigateToOnboarding,
+  resetBootStateForTests,
 } from '../src/lib/boot';
 import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale, watchLocaleRetries } from '../src/lib/localeChoice';
 import { useApp } from '../src/store/app';
@@ -156,6 +157,7 @@ const me = (...ids: string[]) => ({ user, memberships: ids.map(mem) });
 const open = () => useApp.getState().workspace?.id;
 
 beforeEach(() => {
+  resetBootStateForTests();
   fake.open = 'lost';
   fake.known = [];
   fake.discarded.clear();
@@ -761,15 +763,61 @@ describe('landAfterDelete', () => {
     expect(fake.inited).toEqual([]);
   });
 
-  it('asks /me once after a 401', async () => {
+  it('asks /me once after a 401 and ends the session through expireSession (review 280267c8)', async () => {
     useApp.setState({ boot: 'ready' } as any);
     let calls = 0;
     fake.getMe = async () => {
       calls += 1;
-      throw new ApiError('invalid_token', 'x', 401);
+      throw new ApiError('invalid_token', 'x', 401); // tokens still present: authed stays true
     };
     expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('left');
     expect(calls).toBe(1);
+    expect(fake.inited).toEqual([]);
+    expect(fake.logouts).toBe(1); // expireSession ran exactly once
+    expect(fake.remindersStopped).toBe(1);
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(useApp.getState().loginNotice).toBe('sessionExpired');
+  });
+
+  it('a 401 whose refresh was refused (tokens gone) leaves the expiry to the handler', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    fake.getMe = async () => {
+      fake.authed = false;
+      throw new ApiError('invalid_token', 'x', 401);
+    };
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('left');
+    expect(fake.logouts).toBe(0);
+  });
+
+  it('a logout that is still running cannot be overtaken by a late /me (review 280267c8)', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me('a');
+    };
+    const out = landAfterDelete('https://x', fakeApi as any, 'lost');
+    const lo = logout(); // blocked in teardownSyncSettled: tokens and store still look live
+    release();
+    expect(await out).toBe('left');
+    await lo;
+    expect(fake.inited).toEqual([]);
+    expect(open()).not.toBe('a');
+  });
+
+  it('a logout still running drops the /me of establishSession too', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me('a');
+    };
+    const p = establishSession('https://x', fakeApi as any);
+    const lo = logout();
+    release();
+    expect(await p).toBe(false);
+    await lo;
     expect(fake.inited).toEqual([]);
   });
 
@@ -818,6 +866,74 @@ describe('landAfterDelete', () => {
     expect(useApp.getState().boot).toBe('noWorkspace');
     await vi.advanceTimersByTimeAsync(1_300); // first backoff tick only
     expect(calls).toBe(3);
+    useApp.getState().setBoot('onboarding');
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+});
+
+describe('holdForWorkspace single-flight by epoch (review 280267c8)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('a loop left over from before a logout does not block a new hold', async () => {
+    vi.useFakeTimers();
+    useApp.setState({ boot: 'ready' } as any);
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me();
+    };
+    await landAfterDelete('https://x', fakeApi as any, 'lost'); // loop L1 sleeping
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    const lo = logout();
+    await vi.advanceTimersByTimeAsync(10);
+    await lo;
+    // signed in again, the workspace is lost again, while L1 still sleeps
+    useApp.setState({ boot: 'noWorkspace', workspace: ws('lost'), user, memberships: [mem('lost')] } as any);
+    fake.alerts = [];
+    await moveOffLostWorkspace('lost');
+    expect(useApp.getState().boot).toBe('noWorkspace'); // the notice was shown
+    const before = calls;
+    await vi.advanceTimersByTimeAsync(1_300);
+    expect(calls).toBe(before + 1); // exactly one live loop: L1 is gone, L2 polls
+    useApp.getState().setBoot('onboarding');
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+
+  it("a 'reconnecting' notice that ended the loop gets a new one", async () => {
+    vi.useFakeTimers();
+    useApp.setState({ boot: 'ready' } as any);
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me();
+    };
+    await landAfterDelete('https://x', fakeApi as any, 'lost');
+    useApp.setState({ boot: 'reconnecting' } as any); // landOutside's notice replaced it
+    await moveOffLostWorkspace('lost'); // empty /me -> hold again
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    const before = calls;
+    await vi.advanceTimersByTimeAsync(1_300);
+    expect(calls).toBe(before + 1); // polling continues, once
+    useApp.getState().setBoot('onboarding');
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+
+  it('a throwing notice does not wedge later holds', async () => {
+    vi.useFakeTimers();
+    useApp.setState({ boot: 'ready' } as any);
+    fake.getMe = async () => me();
+    const st = useApp.getState();
+    const orig = st.closeQuickAdd;
+    useApp.setState({
+      closeQuickAdd: () => {
+        throw new Error('boom');
+      },
+    } as any);
+    await landAfterDelete('https://x', fakeApi as any, 'lost');
+    useApp.setState({ closeQuickAdd: orig } as any);
+    useApp.setState({ boot: 'ready' } as any);
+    await landAfterDelete('https://x', fakeApi as any, 'lost');
+    expect(useApp.getState().boot).toBe('noWorkspace');
     useApp.getState().setBoot('onboarding');
     await vi.advanceTimersByTimeAsync(60_000);
   });

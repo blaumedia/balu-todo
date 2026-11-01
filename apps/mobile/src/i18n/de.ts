@@ -147,6 +147,7 @@ export const de: Record<TranslationKey, string> = {
   'workspace.deletePrompt':
     'Das löscht den Arbeitsbereich mit allen Projekten, Aufgaben und Kommentaren unwiderruflich. Gib den Namen des Arbeitsbereichs zur Bestätigung ein.',
   'workspace.deleteError': 'Der Arbeitsbereich konnte nicht gelöscht werden.',
+  'workspace.deletedNoLanding': 'Der Arbeitsbereich wurde gelöscht, aber es konnte kein anderer geöffnet werden. Bitte prüfe die Verbindung und starte die App neu.',
 
   'mcp.subtitle':
     'Claude Code (oder einen anderen MCP-Client) mit diesem Server verbinden und Aufgaben verwalten lassen.',

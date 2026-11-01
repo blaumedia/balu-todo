@@ -43,6 +43,18 @@ export class NoWorkspaceError extends Error {
   }
 }
 
+/**
+ * Session epoch. Bumped synchronously at the very start of logout() and
+ * expireSession() and right before every setSession in this module (a new
+ * session). Every async recovery (the /me in establishSession, landAfterDelete,
+ * landOutside, the holdForWorkspace loop) captures it when it starts and drops
+ * its result once it differs, so a logout that is still running (it awaits the
+ * sync teardown while the tokens and the store still look live) can never be
+ * overtaken by a late /me, and a loop of an older session never blocks or
+ * outlives into a newer one.
+ */
+let sessionEpoch = 0;
+
 /** Fetch /me, pick the boot workspace, wire up the sync client. */
 export async function establishSession(
   serverUrl: string,
@@ -59,7 +71,10 @@ export async function establishSession(
    */
   stillWanted: () => boolean = () => true,
 ): Promise<boolean> {
+  const epoch = sessionEpoch;
+  const wanted = (): boolean => epoch === sessionEpoch && stillWanted();
   const me = await api.getMe();
+  if (!wanted()) return false;
   // Another account's data is on this device (its session expired and was kept
   // for it): wipe it before anything reads it. The new tokens are already stored.
   if (isForeignLocalData(await sqliteKV.getItem(SETTINGS.session), me.user.id)) {
@@ -67,6 +82,7 @@ export async function establishSession(
     // Closed and settled, not just stopped: a flush still running would write the
     // old user's queue and replica back after the purge (SQLite writes are async).
     await teardownSyncSettled();
+    if (!wanted()) return false;
     await purgeUserData({ keepAuth: true });
   }
   // Same rule as the web app (I8): explicit → last used → first. Taking
@@ -92,7 +108,8 @@ export async function establishSession(
   // setSession and initSync: the store never shows a workspace the sync client
   // has not been switched to, and a logout cannot slip in between.
   const localeDecision = await decideLocale(me.user);
-  if (!stillWanted()) return false;
+  if (!wanted()) return false;
+  sessionEpoch++;
   useApp.getState().setSession({ ...me.user, locale: localeDecision.locale }, me.memberships, membership.workspace);
   applyLocaleDecision(localeDecision);
   initSync(serverUrl, membership.workspace.id, me.user.id);
@@ -247,6 +264,7 @@ export function fallBackToKnownWorkspace(
   if (st.workspace?.id !== goneId) return 'moved';
   const survivors = st.memberships.filter((m) => m.workspace.id !== goneId);
   if (!survivors[0]) return 'none';
+  sessionEpoch++;
   st.setSession(st.user, survivors, survivors[0].workspace);
   initSync(serverUrl, survivors[0].workspace.id, st.user.id);
   return 'opened';
@@ -254,26 +272,30 @@ export function fallBackToKnownWorkspace(
 
 /**
  * Land somewhere after the open workspace `goneId` was deleted by this user: two
- * tries at /me, then the locally known fallback. Shares landOutside's guards: a
- * /me answer is dropped unless `goneId` is still open and the tokens are alive
- * (a logout, expiry or a concurrent recovery during the request must not be
- * undone), a 401 ends the attempt without a second request, and an empty /me goes
- * to holdForWorkspace (single-flight, so a concurrent landOutside shares the loop).
+ * tries at /me, then the locally known fallback. A /me answer is dropped unless
+ * `goneId` is still open, the tokens are alive and the session epoch is the one
+ * this call started in (a logout, expiry or a concurrent recovery during the
+ * request must not be undone; landOutside guards on the open workspace and the
+ * epoch only). A 401 ends the session through expireSession and the attempt
+ * without a second request, and an empty /me goes to holdForWorkspace (one loop
+ * per epoch: a concurrent landOutside joins it).
  * It is not folded into landOutside because that one keeps asking with a backoff
  * while the server is unreachable, and the settings screen awaits this call.
  * 'held': /me lists no workspace, so the caller must not fall back to a stale
- * survivor. 'left': the session is no longer 'ready' (a 401, a logout or a
- * notice already explains it). 'failed': nowhere to go.
+ * survivor. 'left': the session is no longer 'ready' (a 401 ended it, or a logout
+ * or a notice already explains it). 'failed': the workspace is deleted but /me
+ * and the known workspaces gave nowhere to land.
  */
 export async function landAfterDelete(
   serverUrl: string,
   api: ApiClient,
   goneId: string,
 ): Promise<'landed' | 'held' | 'left' | 'failed'> {
-  const wanted = (): boolean => isOpen(goneId) && !!getApi()?.isAuthenticated();
+  const epoch = sessionEpoch;
+  const wanted = (): boolean => epoch === sessionEpoch && isOpen(goneId) && !!getApi()?.isAuthenticated();
   // Only reached when !wanted(): 'left' or 'moved', nothing is mutated.
   const settled = (): 'landed' | 'left' =>
-    fallBackToKnownWorkspace(serverUrl, goneId) === 'moved' ? 'landed' : 'left';
+    epoch === sessionEpoch && fallBackToKnownWorkspace(serverUrl, goneId) === 'moved' ? 'landed' : 'left';
   for (let attempt = 0; attempt < 2; attempt++) {
     if (!wanted()) return settled();
     try {
@@ -281,11 +303,17 @@ export async function landAfterDelete(
     } catch (e) {
       if (e instanceof NoWorkspaceError) {
         if (!wanted()) return settled();
-        holdForWorkspace(serverUrl, api);
+        void holdForWorkspace(serverUrl, api);
         return 'held';
       }
-      // Refused or logged out: a second /me would carry no token.
-      if (e instanceof ApiError && e.status === 401) return 'left';
+      // Refused or logged out: a second /me would carry no token. A 401 that left
+      // the tokens in place (refresh worked, the retry still answered 401) has not
+      // ended the session yet: do it here, as bootApp does. A refused refresh
+      // already fired the expiry handler (tokens gone, so not authenticated).
+      if (e instanceof ApiError && e.status === 401) {
+        if (e.code !== 'signed_out' && epoch === sessionEpoch && getApi()?.isAuthenticated()) await expireSession();
+        return 'left';
+      }
     }
   }
   if (!wanted()) return settled();
@@ -294,22 +322,39 @@ export async function landAfterDelete(
   return r === 'left' ? 'left' : 'failed';
 }
 
-let holding = false;
+interface Hold {
+  epoch: number;
+  promise: Promise<void>;
+}
+
+let hold: Hold | null = null;
+
+/** Test-only: forget every recovery of the previous test and end its loops. */
+export function resetBootStateForTests(): void {
+  sessionEpoch++;
+  hold = null;
+}
 
 /**
  * /me answered with no workspace: show the notice and keep asking with a backoff
  * until it lists one, the user logs out, or the session is refused. Runs on its
- * own so the caller (and the splash screen) does not wait for it. Single-flight:
- * a second trigger while the loop runs (a delete's landing and the old sync
- * client's access-loss recovery) joins it instead of starting another.
+ * own so the caller (and the splash screen) does not wait for it: callers that
+ * must not block `void` the returned promise, which settles when the loop ends.
+ * One loop per session epoch: a second trigger in the same epoch while the
+ * notice is still up (a delete's landing and the old sync client's access-loss
+ * recovery) leaves the running loop alone and gets its promise. If another
+ * notice replaced it meanwhile ('reconnecting' ends the old loop), or the epoch
+ * moved on (logout, a new session), a new loop starts and supersedes the old one.
  */
-function holdForWorkspace(serverUrl: string, api: ApiClient): void {
-  if (holding) return;
-  holding = true;
-  showBootNotice('noWorkspace');
-  void (async () => {
+function holdForWorkspace(serverUrl: string, api: ApiClient): Promise<void> {
+  const epoch = sessionEpoch;
+  if (hold && hold.epoch === epoch && useApp.getState().boot === 'noWorkspace') return hold.promise;
+  const me: Hold = { epoch, promise: Promise.resolve() };
+  hold = me;
+  me.promise = (async () => {
     try {
-      const waiting = (): boolean => useApp.getState().boot === 'noWorkspace';
+      showBootNotice('noWorkspace');
+      const waiting = (): boolean => useApp.getState().boot === 'noWorkspace' && sessionEpoch === epoch && hold === me;
       for (let attempt = 0; waiting(); attempt++) {
         await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt)));
         if (!waiting()) return;
@@ -320,7 +365,7 @@ function holdForWorkspace(serverUrl: string, api: ApiClient): void {
           return;
         } catch (e) {
           if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
-            await expireSession();
+            if (waiting()) await expireSession();
             return;
           }
           if (e instanceof ApiError && e.code === 'signed_out') return;
@@ -328,34 +373,40 @@ function holdForWorkspace(serverUrl: string, api: ApiClient): void {
         }
       }
     } finally {
-      holding = false;
+      if (hold === me) hold = null;
     }
-  })();
+  })().catch(() => {
+    /* showBootNotice failed: nothing to wait for, and no caller awaits this */
+  });
+  return me.promise;
 }
 
 async function landOutside(lostId: string): Promise<void> {
   const { serverUrl } = useApp.getState();
   const api = getApi();
+  const epoch = sessionEpoch;
+  const wanted = (): boolean => epoch === sessionEpoch && isOpen(lostId);
   let ok = false;
   if (serverUrl && api) {
     // No preferred id: the remembered last-used id is the lost one and /me no
     // longer lists it, so pickMembership lands in the first survivor.
-    for (let attempt = 0; !ok && isOpen(lostId); attempt++) {
+    for (let attempt = 0; !ok && wanted(); attempt++) {
       try {
-        ok = await establishSession(serverUrl, api, null, false, () => isOpen(lostId));
+        ok = await establishSession(serverUrl, api, null, false, wanted);
       } catch (e) {
         if (e instanceof NoWorkspaceError) {
           // /me answered and lists nothing: not a blip. Explain and keep asking.
-          holdForWorkspace(serverUrl, api);
+          if (wanted()) void holdForWorkspace(serverUrl, api);
           return;
         }
         ok = false;
       }
-      if (ok || !isOpen(lostId)) break;
+      if (ok || !wanted()) break;
       if (attempt < 1) continue; // one immediate second try, as before
       const { user, memberships } = useApp.getState();
       const survivors = memberships.filter((m) => m.workspace.id !== lostId);
       if (user && survivors[0]) {
+        sessionEpoch++;
         useApp.getState().setSession(user, survivors, survivors[0].workspace);
         initSync(serverUrl, survivors[0].workspace.id, user.id);
         ok = true;
@@ -370,7 +421,7 @@ async function landOutside(lostId: string): Promise<void> {
       await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt - 1)));
     }
     // The user switched workspace (or left) while /me was in flight: keep their choice.
-    if (!ok && !isOpen(lostId)) return;
+    if (!ok && !wanted()) return;
   }
   if (!ok) {
     teardownSync();
@@ -461,7 +512,7 @@ export async function bootApp(): Promise<void> {
       // Signed in, but /me lists no workspace and the server could not set one up:
       // say so, keep asking with a backoff and offer the logout, instead of showing
       // the login step with no explanation.
-      holdForWorkspace(serverUrl, api);
+      void holdForWorkspace(serverUrl, api);
       return;
     }
     // A refused session is not "offline": booting the cached session would keep
@@ -480,6 +531,7 @@ export async function bootApp(): Promise<void> {
     if (sessionRaw) {
       try {
         const cached = JSON.parse(sessionRaw) as { user: User; workspace: Workspace };
+        sessionEpoch++;
         store.setSession(cached.user, [], cached.workspace);
         // Covers sessions cached before setLocale kept the cache in step: those carry
         // the language of the last /me, not the user's latest choice.
@@ -501,6 +553,7 @@ export async function bootApp(): Promise<void> {
  * user signs in again; establishSession wipes them if someone else does.
  */
 export async function expireSession(): Promise<void> {
+  sessionEpoch++; // synchronously: recoveries in flight must not outlive the session
   stopReminderScheduler();
   teardownSync();
   await getApi()?.logout().catch(() => {}); // no network call once the refresh token is gone
@@ -522,6 +575,9 @@ setSessionExpiredHandler(() => {
  * a bare replace can not leave Today underneath for the Android back button.
  */
 export async function logout(): Promise<void> {
+  // Before the first await: the teardown below runs while the tokens and the store
+  // still look live, and a /me answering meanwhile must not start a new session.
+  sessionEpoch++;
   let revoked: Promise<void> = Promise.resolve();
   try {
     // Close first and wait for storage writes already started, so nothing re-persists after the purge.

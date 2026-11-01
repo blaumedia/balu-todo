@@ -184,9 +184,10 @@ export default function SettingsScreen() {
       // (see landAfterDelete).
       const landed = await landAfterDelete(serverUrl, api, doomedId);
       void purgeWorkspaceStorage(doomedId);
-      // Only 'failed' is an error: 'held', 'left' (expired, logged out, notice up) and
-      // 'landed' mean the delete worked and something else already tells the user.
-      if (landed === 'failed') Alert.alert(t('workspace.deleteError'));
+      // The delete worked in every case. 'held', 'left' (expired, logged out, notice up)
+      // and 'landed' are explained by something else; 'failed' (nowhere to land yet) gets
+      // its own message, not the delete-error one: a retry would only meet a 404.
+      if (landed === 'failed') Alert.alert(t('workspace.deletedNoLanding'));
       cancelDelete();
       // Same hygiene as a switch: everything under this screen still belongs to
       // the workspace that no longer exists.

@@ -143,6 +143,7 @@ export const en = {
   'workspace.deletePrompt':
     'This permanently deletes the workspace with all its projects, tasks and comments. Type the workspace name to confirm.',
   'workspace.deleteError': 'Could not delete the workspace.',
+  'workspace.deletedNoLanding': 'The workspace was deleted, but no other one could be opened. Check your connection and restart the app.',
 
   'mcp.subtitle': 'Connect Claude Code (or any MCP client) to this server and let it manage your tasks.',
   'mcp.endpoint': 'MCP endpoint',
