@@ -162,8 +162,8 @@ export type Channel = NtfyChannel | EmailChannel | TelegramChannel;
 // ── Remote MCP server (contract §10) ──────────────────────────────────
 
 /**
- * What a client needs to connect an MCP client to this server. Absent entirely
- * (the endpoint 404s) when the server runs without `BALU_MCP_ENABLED`.
+ * What a client needs to connect an MCP client to this server. `getMcpSettings()`
+ * yields null instead when the server runs without `BALU_MCP_ENABLED` (contract §10).
  */
 export interface McpSettings {
   enabled: boolean;

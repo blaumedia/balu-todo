@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient, type AsyncKV } from "../src/index.js";
+import { ApiError, createApiClient, isMcpUnavailable, type AsyncKV } from "../src/index.js";
 
 function memoryKV(): AsyncKV {
   const m = new Map<string, string>();
@@ -687,6 +687,32 @@ describe("notification channels (contract §8)", () => {
   });
 });
 
+describe("remote MCP (contract §10)", () => {
+  it("getMcpSettings probes and returns the settings when enabled", async () => {
+    const settings = { enabled: true, endpoint: "http://x/api/v1/mcp", key: null, claude_code_command: null };
+    const { c, calls } = await authedClient((path) =>
+      path.endsWith("/me/mcp?probe=true") ? json(settings) : json({}, 404),
+    );
+    expect(await c.getMcpSettings()).toEqual(settings);
+    expect(calls.at(-1)).toMatchObject({ method: "GET", path: expect.stringContaining("/me/mcp?probe=true") });
+  });
+
+  it("getMcpSettings maps {enabled:false} to null", async () => {
+    const { c } = await authedClient(() => json({ enabled: false }));
+    expect(await c.getMcpSettings()).toBeNull();
+  });
+
+  it("getMcpSettings maps an old server's 404 to null", async () => {
+    const { c } = await authedClient(() => json({ detail: { code: "not_found", message: "Not found" } }, 404));
+    expect(await c.getMcpSettings()).toBeNull();
+  });
+
+  it("getMcpSettings rethrows other errors", async () => {
+    const { c } = await authedClient(() => json({ detail: { code: "internal", message: "boom" } }, 500));
+    await expect(c.getMcpSettings()).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
 describe("refresh across tabs sharing one storage", () => {
   // Node ships its own navigator.locks; plain http on a LAN address has none.
   beforeEach(() => vi.stubGlobal("navigator", {}));
@@ -1023,5 +1049,15 @@ describe("tokenSubject", () => {
     expect(tokenSubject("a1")).toBeNull();
     expect(tokenSubject("h.!!!.s")).toBeNull();
     expect(tokenSubject(null)).toBeNull();
+  });
+});
+
+describe("isMcpUnavailable", () => {
+  it("is true only for an ApiError with status 404", () => {
+    expect(isMcpUnavailable(new ApiError("not_found", "Not found", 404))).toBe(true);
+    expect(isMcpUnavailable(new ApiError("rate_limited", "Slow down", 429))).toBe(false);
+    expect(isMcpUnavailable(new ApiError("server_error", "Boom", 500))).toBe(false);
+    expect(isMcpUnavailable(new TypeError("network"))).toBe(false);
+    expect(isMcpUnavailable({ status: 404 })).toBe(false);
   });
 });

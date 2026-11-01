@@ -1,3 +1,4 @@
+import { isMcpUnavailable } from '@balu/api-client';
 import type { Locale, McpSettings, Theme } from '@balu/domain';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -62,8 +63,8 @@ export default function SettingsScreen() {
 
   const [name, setName] = useState(user?.name ?? '');
   const [permissionDenied, setPermissionDenied] = useState(false);
-  // Null until the server answers. A 404 means this instance runs without
-  // BALU_MCP_ENABLED (or predates the feature) - either way the section stays hidden.
+  // Null until the server answers, and null when it has MCP off or predates it
+  // (`getMcpSettings` maps both to null) - the section stays hidden.
   const [mcp, setMcp] = useState<McpSettings | null>(null);
   const [mcpRevealed, setMcpRevealed] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -100,7 +101,11 @@ export default function SettingsScreen() {
         setMcp(next);
         setMcpRevealed(false);
       })
-      .catch(() => Alert.alert(t('auth.errorGeneric')));
+      .catch((e) => {
+        // MCP was switched off while Settings was open: hide the section, no error.
+        if (isMcpUnavailable(e)) setMcp(null);
+        else Alert.alert(t('auth.errorGeneric'));
+      });
   };
 
   const generateMcpKey = () => {
