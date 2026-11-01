@@ -5,12 +5,14 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { pendingAfter, revealScrollDelta, settleAction, touchingAfter } from '../lib/keyboardSpacer';
+import { pendingAfter, revealScrollDeltaWithTarget, settleAction, touchingAfter } from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
 
 // dp of content below a focused input (submit / Cancel / Delete buttons) that
 // should end up above the keyboard together with the input.
 const REVEAL_RESERVE = 140;
+// dp of clearance kept between a reveal target's bottom edge and the keyboard.
+const TARGET_MARGIN = 12;
 
 interface RevealScrollable {
   scrollTo?(opts: { y?: number; animated?: boolean }): void;
@@ -39,7 +41,9 @@ function contentNode(scrollable: RevealScrollable): unknown {
 // the IME has opened, or a
 // tap moves focus to another input while it is open, it scrolls the focused
 // input (plus REVEAL_RESERVE) above the IME, only if it is covered and only if
-// it is inside this scroll view.
+// it is inside this scroll view. Attach `targetRef` to a view (e.g. a short
+// form) whose bottom must also end up above the IME while typing in any of its
+// inputs; the focused input stays visible even if both cannot fit.
 export function useKeyboardReveal() {
   // An object ref (not a callback ref): draggable-flatlist only auto-scrolls
   // while dragging if `"current" in ref` (review 76485a61 N1).
@@ -51,6 +55,8 @@ export function useKeyboardReveal() {
   const touching = useRef(false);
   const pending = useRef(false);
   const lastRevealed = useRef<unknown>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const targetRef = useRef<any>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const android = Platform.OS === 'android';
 
@@ -95,13 +101,28 @@ export function useKeyboardReveal() {
               root.measureInWindow((_rx, rootY, _rw, rootH) => {
                 input.measureInWindow((_x, y, _w, h) => {
                   lastRevealed.current = input;
-                  const delta = revealScrollDelta(y, h, REVEAL_RESERVE, rootY + rootH, kh);
-                  if (delta <= 0) return;
-                  const next = offset.current + delta;
-                  if (scrollable.scrollTo)
-                    scrollable.scrollTo({ y: next, animated: true });
-                  else
-                    scrollable.scrollToOffset?.({ offset: next, animated: true });
+                  const apply = (targetBottom: number | undefined) => {
+                    const delta = revealScrollDeltaWithTarget(
+                      y,
+                      h,
+                      REVEAL_RESERVE,
+                      rootY + rootH,
+                      kh,
+                      targetBottom,
+                    );
+                    if (delta <= 0) return;
+                    const next = offset.current + delta;
+                    if (scrollable.scrollTo)
+                      scrollable.scrollTo({ y: next, animated: true });
+                    else
+                      scrollable.scrollToOffset?.({ offset: next, animated: true });
+                  };
+                  const target = targetRef.current;
+                  if (target?.measureInWindow)
+                    target.measureInWindow((_tx: number, ty: number, _tw: number, th: number) =>
+                      apply(ty + th + TARGET_MARGIN),
+                    );
+                  else apply(undefined);
                 });
               });
             },
@@ -157,6 +178,7 @@ export function useKeyboardReveal() {
 
   return {
     ref,
+    targetRef,
     // JS scroll events only where the hook uses them.
     onScroll: android ? onScroll : undefined,
     scrollEventThrottle: android ? 16 : undefined,

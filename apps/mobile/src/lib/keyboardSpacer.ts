@@ -45,6 +45,29 @@ export function revealScrollDelta(
   return Math.max(inputWindowY + inputHeight + reserve - (windowBottom - keyboardHeight), 0);
 }
 
+// Like revealScrollDelta, but also brings a "reveal target" (the bottom edge of a
+// short form, e.g. its submit button) above the keyboard, so the button stays
+// visible while typing in any field. `targetBottom` is the target's bottom edge
+// from measureInWindow (same coordinate system as `inputWindowY`); `topLimit` is
+// the window y the focused input must not scroll above. The focused input wins:
+// the target only pulls the content as far as the input can move up without
+// leaving the top, and never less than the plain input reveal.
+export function revealScrollDeltaWithTarget(
+  inputWindowY: number,
+  inputHeight: number,
+  reserve: number,
+  windowBottom: number,
+  keyboardHeight: number,
+  targetBottom: number | undefined,
+  topLimit = 0,
+): number {
+  const inputDelta = revealScrollDelta(inputWindowY, inputHeight, reserve, windowBottom, keyboardHeight);
+  if (targetBottom === undefined) return inputDelta;
+  const targetDelta = Math.max(targetBottom - (windowBottom - keyboardHeight), 0);
+  const room = Math.max(inputWindowY - topLimit, 0);
+  return Math.max(inputDelta, Math.min(targetDelta, room));
+}
+
 export type TouchEvent = 'start' | 'end' | 'cancel';
 
 // Whether a finger is down after `event`. A cancel (RN sends it instead of an

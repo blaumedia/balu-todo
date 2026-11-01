@@ -49,9 +49,9 @@ export default function Onboarding() {
         </View>
 
         {serverUrl ? (
-          <AuthStep serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
+          <AuthStep revealTarget={keyboardReveal.targetRef} serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
         ) : (
-          <ServerStep initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
+          <ServerStep revealTarget={keyboardReveal.targetRef} initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
         )}
         <AndroidKeyboardSpacer bottomInset={insets.bottom} onKeyboardSettled={keyboardReveal.onKeyboardSettled} />
       </ScrollView>
@@ -59,7 +59,7 @@ export default function Onboarding() {
   );
 }
 
-function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfirm: (url: string) => void }) {
+function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: string; onConfirm: (url: string) => void; revealTarget: React.Ref<View> }) {
   const theme = useTheme();
   const { t } = useT();
   const [value, setValue] = useState(initialValue);
@@ -109,7 +109,7 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   };
 
   return (
-    <View style={styles.form}>
+    <View ref={revealTarget} collapsable={false} style={styles.form}>
       <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>{t('onboarding.serverTitle')}</Text>
       <Text style={[styles.hint, { color: theme.textSecondary }]}>{t('onboarding.serverHint')}</Text>
       <Field
@@ -164,7 +164,7 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   );
 }
 
-function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeServer: () => void }) {
+function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: string; onChangeServer: () => void; revealTarget: React.Ref<View> }) {
   const theme = useTheme();
   const { t } = useT();
   const loginNotice = useApp((s) => s.loginNotice);
@@ -222,7 +222,7 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
   };
 
   return (
-    <View style={styles.form}>
+    <View ref={revealTarget} collapsable={false} style={styles.form}>
       <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>
         {mode === 'login' ? t('auth.loginTitle') : t('auth.registerTitle')}
       </Text>

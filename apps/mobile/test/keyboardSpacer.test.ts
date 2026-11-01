@@ -3,6 +3,7 @@ import {
   keyboardSpacerHeight,
   pendingAfter,
   revealScrollDelta,
+  revealScrollDeltaWithTarget,
   settleAction,
   settledKeyboardHeight,
   touchingAfter,
@@ -87,5 +88,35 @@ describe('pendingAfter', () => {
   it('keeps a deferred reveal through a start and consumes it on the end', () => {
     expect(pendingAfter('start', true)).toBe(true);
     expect(pendingAfter('end', true)).toBe(false);
+  });
+});
+
+describe('revealScrollDeltaWithTarget', () => {
+  // window 2000 high, keyboard 600 high: keyboard top at 1400
+  it('equals the input reveal without a target', () => {
+    expect(revealScrollDeltaWithTarget(300, 40, 100, 2000, 600, undefined)).toBe(
+      revealScrollDelta(300, 40, 100, 2000, 600),
+    );
+  });
+
+  it('scrolls a covered submit button above the keyboard although the input is visible', () => {
+    // input at 400 is visible with its reserve, the button bottom at 1500 is not
+    expect(revealScrollDeltaWithTarget(400, 40, 100, 2000, 600, 1500)).toBe(100);
+  });
+
+  it('does not move when the target is already above the keyboard', () => {
+    expect(revealScrollDeltaWithTarget(400, 40, 100, 2000, 600, 1300)).toBe(0);
+  });
+
+  it('keeps the focused input visible when both cannot fit', () => {
+    // target needs 900 but the input (y 500) may only travel 500 before the top
+    expect(revealScrollDeltaWithTarget(500, 40, 100, 2000, 600, 2300)).toBe(500);
+  });
+
+  it('never scrolls less than the plain input reveal', () => {
+    // input covered needs 340; the target alone would need only 100
+    expect(revealScrollDeltaWithTarget(1500, 40, 100, 2000, 600, 1500)).toBe(
+      revealScrollDelta(1500, 40, 100, 2000, 600),
+    );
   });
 });
