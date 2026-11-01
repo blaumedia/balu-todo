@@ -11,6 +11,7 @@ import ReanimatedSwipeable, {
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { completeTask, uncompleteTask } from '../lib/actions';
 import { relativeDate } from '../lib/format';
+import { rowLabels } from '../lib/rowMeta';
 import { hapticComplete } from '../lib/haptics';
 import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
@@ -139,11 +140,11 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const project = task.project_id ? projects.get(task.project_id) : undefined;
   const primaryDate = task.start_date ?? task.deadline;
   const dateInfo = primaryDate ? relativeDate(primaryDate, today, locale, t) : null;
-  const showDate = dateInfo && dateInfo.tone !== 'today';
+  // Like the web row, a due-today date stays visible (accent tone) in every view.
   const dateColor =
     dateInfo?.tone === 'overdue' ? theme.danger : dateInfo?.tone === 'today' ? theme.accent : theme.textSecondary;
   const isDeadlineOnly = task.start_date == null && task.deadline != null;
-  const taskLabels = task.label_ids.map((id) => labels.get(id)).filter(Boolean) as Label[];
+  const { visible: shownLabels, overflow: hiddenLabels } = rowLabels(task.label_ids, labels);
   const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
   const hasComments = commentCount > 0;
 
@@ -172,16 +173,16 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
         >
           {task.title}
         </Text>
-        {(showDate ||
+        {(dateInfo ||
           (!hideProject && project) ||
           task.priority > 0 ||
           task.recurrence ||
-          taskLabels.length > 0 ||
+          shownLabels.length > 0 ||
           assignee ||
           hasComments) && (
           <View style={styles.meta}>
-            {showDate && (
-              <View style={styles.metaItem}>
+            {dateInfo && (
+              <View style={[styles.metaItem, styles.noShrink]}>
                 {isDeadlineOnly && <Icon name="flag" size={12} color={dateColor} strokeWidth={2} />}
                 <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo!.text}</Text>
               </View>
@@ -190,16 +191,19 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
             {!hideProject && project && (
               <View style={styles.metaItem}>
                 <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
-                <Text style={[styles.metaText, { color: theme.textSecondary }]} numberOfLines={1}>
+                <Text style={[styles.metaText, styles.shrink, { color: theme.textSecondary }]} numberOfLines={1}>
                   {project.name}
                 </Text>
               </View>
             )}
-            {taskLabels.slice(0, 2).map((l) => (
-              <Text key={l.id} style={[styles.metaText, { color: projectHex(l.color) }]}>
+            {shownLabels.map((l) => (
+              <Text key={l.id} style={[styles.metaText, styles.shrink, { color: projectHex(l.color) }]} numberOfLines={1}>
                 @{l.name}
               </Text>
             ))}
+            {hiddenLabels > 0 ? (
+              <Text style={[styles.metaText, styles.noShrink, { color: theme.textTertiary }]}>+{hiddenLabels}</Text>
+            ) : null}
             {task.priority === 1 || task.priority === 2 ? (
               <Icon
                 name="flag"
@@ -288,7 +292,11 @@ const styles = StyleSheet.create({
   title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: font.body * 1.25 },
   strike: { textDecorationLine: 'line-through' },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, flexWrap: 'nowrap' },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
+  // Chips that may be long (project, labels) shrink with an ellipsis; the date,
+  // icons, count, comments and avatar never do. minWidth 0 lets a Text go below its content width.
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160, flexShrink: 1, minWidth: 0 },
+  shrink: { flexShrink: 1, minWidth: 0 },
+  noShrink: { flexShrink: 0 },
   metaText: { fontSize: font.caption, fontVariant: ['tabular-nums'] },
   dot: { width: 8, height: 8, borderRadius: 4 },
   avatar: {
