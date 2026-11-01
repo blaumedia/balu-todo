@@ -76,6 +76,26 @@ describe("useUrlSync - reader history wiring", () => {
     expect(useApp.getState().selectedTaskId).toBeNull();
   });
 
+  it("a back() that never pops does not swallow the user's next Back", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    // Our own back() is lost (no prior entry, unmount in between, browser ignores it),
+    // so no popstate consumes the expectation.
+    back.mockImplementation(() => {});
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    await act(tick);
+    // A later real user Back lands somewhere else than the expected landing URL.
+    act(() => {
+      globalThis.history.replaceState(null, "", "/upcoming");
+      globalThis.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    // It is user navigation: the store follows it instead of rewriting the URL back.
+    expect(useApp.getState().view).toEqual(upcoming);
+    expect(globalThis.location.pathname).toBe("/upcoming");
+  });
+
   it("closing a deep-linked reader replaces, never back()", () => {
     mount("/task/t1", null, "t1");
     replace.mockClear();
