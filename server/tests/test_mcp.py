@@ -905,3 +905,22 @@ def test_a_client_disconnect_mid_body_is_a_handled_400(
     assert resp.content == b""
     records = [r for r in caplog.records if r.name == "balu.mcp"]
     assert [r.getMessage() for r in records] == ["mcp request aborted by client"]
+
+
+# --- Cache-Control: the settings bodies can carry a full-access key ----------
+def test_settings_responses_are_never_cacheable(client, user, mcp_on):
+    headers = user["headers"]
+    for url in ("/api/v1/me/mcp", "/api/v1/me/mcp?probe=true"):
+        assert client.get(url, headers=headers).headers["cache-control"] == "no-store"
+    generated = client.post("/api/v1/me/mcp/key", headers=headers)
+    assert generated.headers["cache-control"] == "no-store"
+    # Now with a key in the body.
+    resp = client.get("/api/v1/me/mcp", headers=headers)
+    assert resp.json()["key"] is not None
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_disabled_probe_response_is_never_cacheable(client, user):
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.json() == {"enabled": False}
+    assert resp.headers["cache-control"] == "no-store"

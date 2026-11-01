@@ -616,7 +616,9 @@ deliberate: settings shows the key on every visit. It is **never minted implicit
 reading settings is not a request for a non-expiring full-access credential, and both
 UIs read on mount only to decide whether to render the section. `POST /me/mcp/key` is
 the single explicit action: it mints the first key and re-rolls any later one, and the
-previous key stops authenticating immediately.
+previous key stops authenticating immediately. Because those bodies can carry the key,
+`GET /me/mcp` (every `200`, including `{"enabled": false}`) and `POST /me/mcp/key` send
+`Cache-Control: no-store`; the 404s carry no secret and are left as they were.
 
 | Endpoint | Auth | Notes |
 |---|---|---|

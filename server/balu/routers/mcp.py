@@ -131,9 +131,14 @@ def _settings_payload(request: Request, own_path: str, key: str | None) -> McpSe
 @router.get(_SETTINGS_PATH, response_model=McpSettings | McpDisabled)
 def get_mcp_settings(
     request: Request,
+    response: Response,
     enabled: bool = Depends(_settings_gate),
     user: User = Depends(get_current_user),
 ) -> McpSettings | McpDisabled:
+    # The body can carry a full-access key, and browsers disk-cache plain 200 GETs.
+    # Set on the disabled 200 too, so nothing stale outlives a toggle. The 404s carry
+    # no secret and no validators, so they are left alone.
+    response.headers["Cache-Control"] = "no-store"
     if not enabled:
         return McpDisabled()
     # Read-only on purpose: both settings screens call this on mount just to
@@ -145,12 +150,14 @@ def get_mcp_settings(
 @router.post(_KEY_PATH, response_model=McpSettings, dependencies=[Depends(require_mcp_enabled)])
 def create_mcp_key(
     request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> McpSettings:
     """Mint a key, or replace the existing one. Explicit user action, both ways."""
     if not limiter.allow(f"mcp:key:{client_ip(request)}", MCP_KEY_PER_IP):
         raise rate_limited(retry_after=int(MCP_KEY_PER_IP.window))
+    response.headers["Cache-Control"] = "no-store"
     return _settings_payload(request, _KEY_PATH, generate_mcp_key(db, user))
 
 
