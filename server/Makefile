@@ -1,7 +1,8 @@
 # Per-checkout project so two worktrees never share (or tear down) one test DB;
 # override TEST_DB_PORT when another checkout's test DB already holds 5433.
 TEST_DB_PORT ?= 5433
-TEST_PROJECT ?= balu-test-$(notdir $(abspath ..))
+# Override TEST_PROJECT if two checkouts share a directory name.
+TEST_PROJECT ?= balu-test-$(shell basename "$$(cd .. && pwd)" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')
 COMPOSE := BALU_TEST_DB_PORT=$(TEST_DB_PORT) docker compose -p $(TEST_PROJECT) -f tests/docker-compose.test.yml
 TEST_DATABASE_URL ?= postgresql+psycopg://balu:balu@localhost:$(TEST_DB_PORT)/balu_test
 
