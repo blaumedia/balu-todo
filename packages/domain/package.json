@@ -10,9 +10,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
     "test": "vitest run"
   },
   "devDependencies": {
+    "eslint": "9.39.5",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
   }
