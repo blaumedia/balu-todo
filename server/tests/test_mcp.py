@@ -932,7 +932,8 @@ def test_update_task_refuses_placement_on_a_subtask(client, user, mcp_on):
     ws = user["workspace_id"]
     first = sync(client, user, "*", [
         cmd("project_add", temp_id="p1", name="Haushalt"),
-        cmd("task_add", temp_id="par", title="Parent"),
+        cmd("project_add", temp_id="p2", name="Garten"),
+        cmd("task_add", temp_id="par", title="Parent", project_id="p1"),
     ])
     m = first["temp_id_mapping"]
     second = sync(client, user, first["sync_token"], [
@@ -940,9 +941,15 @@ def test_update_task_refuses_placement_on_a_subtask(client, user, mcp_on):
     ])
     sub = second["temp_id_mapping"]["s1"]
     res = call(client, key, "update_task", {
-        "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
+        "workspace_id": ws, "task_id": sub, "project_id": m["p2"],
     })
     assert res["isError"] is True
     assert "parent" in payload(res)
     ok = call(client, key, "update_task", {"workspace_id": ws, "task_id": sub, "notes": "n"})
     assert ok["isError"] is False
+    # echoing the subtask's own (inherited) container alongside an edit succeeds
+    echo = call(client, key, "update_task", {
+        "workspace_id": ws, "task_id": sub, "notes": "m",
+        "project_id": m["p1"], "section_id": None,
+    })
+    assert echo["isError"] is False

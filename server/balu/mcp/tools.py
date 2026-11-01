@@ -492,8 +492,15 @@ def t_update_task(ctx: ToolContext, args: dict) -> dict:
     # transactions, so a reference the second one rejects must not get past the
     # first (see `_apply`).
     field_args = _task_field_args(ctx, ws_id, args)
-    if task.parent_task_id is not None and ("project_id" in args or "section_id" in args):
-        raise ToolError("subtasks follow their parent's project; move the parent")
+    if task.parent_task_id is not None:
+        # Echoing the subtask's own container is harmless (an LLM copying the task
+        # view back); only a differing value is a move attempt.
+        for key, current in (("project_id", task.project_id), ("section_id", task.section_id)):
+            if key in args:
+                sent = _uuid_arg(args, key, required=False)
+                if sent != current:
+                    raise ToolError("subtasks follow their parent's project; move the parent")
+        args = {k: v for k, v in args.items() if k not in ("project_id", "section_id")}
     # project/section live on `task_move`, not `task_update` - moving also has to
     # drop a section that no longer belongs to the new project, which that handler
     # already does.
