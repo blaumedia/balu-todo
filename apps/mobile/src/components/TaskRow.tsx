@@ -180,7 +180,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   ) : null;
   const showProject = !hideProject && project != null;
   const projectLabelsEl =
-    showProject || shownLabels.length > 0 || hiddenLabels > 0 ? (
+    showProject || shownLabels.length > 0 ? (
       <View style={styles.shrinkGroup}>
         {showProject && project && (
           <View style={[styles.metaItem, styles.projectChip]}>
@@ -199,16 +199,25 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
             @{l.name}
           </Text>
         ))}
-        {hiddenLabels > 0 ? (
-          <Text
-            accessibilityLabel={moreLabelsText(hiddenLabels, t)}
-            style={[styles.metaText, styles.noShrink, styles.groupGap, { color: theme.textTertiary }]}
-          >
-            +{hiddenLabels}
-          </Text>
-        ) : null}
       </View>
     ) : null;
+  // "+N" sits outside the clipping group (and never shrinks), so the count of
+  // hidden labels stays visible even when the project and labels are cut off.
+  const moreEl =
+    hiddenLabels > 0 ? (
+      <Text
+        accessibilityLabel={moreLabelsText(hiddenLabels, t)}
+        style={[styles.metaText, styles.noShrink, styles.groupGap, { color: theme.textTertiary }]}
+      >
+        +{hiddenLabels}
+      </Text>
+    ) : null;
+  const chipsEl = projectLabelsEl ? (
+    <View style={styles.chipsRow}>
+      {projectLabelsEl}
+      {moreEl}
+    </View>
+  ) : null;
   const priorityEl =
     task.priority === 1 || task.priority === 2 ? (
       <View style={styles.noShrink}>
@@ -235,7 +244,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const hasFixed = dateEl != null || recurEl != null || priorityEl != null || commentsEl != null || avatarEl != null;
   // From what is actually rendered: priority 3 shows only as the checkbox ring,
   // so it must not produce an empty meta line or switch the row to top alignment.
-  const hasMeta = projectLabelsEl != null || hasFixed;
+  const hasMeta = chipsEl != null || hasFixed;
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
@@ -263,7 +272,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
           <View style={styles.meta}>
             {dateEl}
             {recurEl}
-            {projectLabelsEl}
+            {chipsEl}
             {priorityEl}
             {commentsEl}
             {avatarEl}
@@ -271,7 +280,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
         )}
         {hasMeta && stacked && (
           <View style={styles.metaStack}>
-            {projectLabelsEl && <View style={styles.metaLine}>{projectLabelsEl}</View>}
+            {chipsEl && <View style={styles.metaLine}>{chipsEl}</View>}
             {hasFixed && (
               <View style={styles.metaFixed}>
                 {dateEl}
@@ -365,6 +374,7 @@ const styles = StyleSheet.create({
   // Project and labels: a plain nowrap group Yoga shrinks correctly. The project
   // has the larger shrink factor and a 48dp floor; the group may shrink below its
   // content (minWidth 0) and clips what still overflows.
+  chipsRow: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0 },
   shrinkGroup: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0, overflow: 'hidden' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
   projectChip: { flexShrink: 100, minWidth: 48 },
