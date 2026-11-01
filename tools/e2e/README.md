@@ -164,9 +164,10 @@ page URL after the redirect, which contains the token: treat that output as sens
   registration, so switch the account to Deutsch in Settings first.
 - **Playwright for web checks** is not a repo dependency. Use one from the npx cache
   (`ls ~/.npm/_npx/*/node_modules/playwright`) or install it outside the repo
-  (`npm i playwright && npx playwright install chromium` in a temp directory, and run the
-  script from there); keep the script in `/tmp` and read
-  the password in-process from the state dir, never print it.
+  (`npm i playwright && npx playwright install chromium` in a temp directory outside the
+  repo); put the script in that directory too (node resolves `playwright` next to the script
+  file, not the working directory), run it there, and read the password in-process from the
+  state dir, never print it.
 - Web notices a lost connection from the browser `offline` event right away; a throttled
   network that stays "up" is only noticed at the next failed request.
 

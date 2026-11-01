@@ -104,12 +104,14 @@ def main() -> int:
     if cmd == "scroll":
         if args[0] not in ("up", "down"):
             raise SystemExit("scroll direction must be up or down")
-        # The root node's bounds follow the current orientation and any size override.
+        # The active window's root (the app's full-screen DecorView) follows the
+        # orientation and any size override; for a dialog its right/bottom edges
+        # still keep the swipe on screen.
         root = dump().find("node")
-        b = nums(root.get("bounds") if root is not None else None)
-        if len(b) != 4:
+        bounds = nums(root.get("bounds") if root is not None else None)
+        if len(bounds) != 4:
             raise SystemExit("cannot read the screen size from the UI dump")
-        w, h = b[2], b[3]
+        w, h = bounds[2], bounds[3]
         a, b = int(0.7 * h), int(0.3 * h)  # "down" moves the content up (finger swipes up)
         if args[0] == "up":
             a, b = b, a
