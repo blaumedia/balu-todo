@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isMcpUnavailable } from "@balu/api-client";
 import type { McpSettings } from "@balu/domain";
 import { api } from "../lib/clients.js";
 import { copyText } from "../lib/clipboard.js";
@@ -44,7 +45,7 @@ export function McpSection({
   onSettings,
 }: {
   settings: McpSettings;
-  onSettings: (next: McpSettings) => void;
+  onSettings: (next: McpSettings | null) => void;
 }) {
   const { t } = useT();
   const showToast = useApp((s) => s.showToast);
@@ -64,8 +65,10 @@ export function McpSection({
       onSettings(await api.generateMcpKey());
       setRevealed(false);
       showToast(t(key === null ? "mcp.generated" : "mcp.regenerated"));
-    } catch {
-      showToast(t("auth.errorGeneric"), { tone: "error" });
+    } catch (e) {
+      // MCP was switched off while Settings was open: drop the section, no error.
+      if (isMcpUnavailable(e)) onSettings(null);
+      else showToast(t("auth.errorGeneric"), { tone: "error" });
     } finally {
       setBusy(false);
     }

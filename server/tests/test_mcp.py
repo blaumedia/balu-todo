@@ -87,6 +87,62 @@ def test_disabled_hides_every_endpoint(client, user):
     assert client.post("/api/v1/me/mcp/key", headers=user["headers"]).status_code == 404
     assert client.get("/api/v1/mcp").status_code == 404
     assert client.post("/api/v1/mcp", json=ping).status_code == 404
+    # the probe applies to the settings read only
+    assert client.post("/api/v1/me/mcp/key?probe=true", headers=user["headers"]).status_code == 404
+    assert client.post("/api/v1/mcp?probe=true", json=ping).status_code == 404
+
+
+@pytest.mark.parametrize("value", ["true", "1", "TRUE", "True", " true "])
+def test_disabled_settings_probe_answers_enabled_false(client, user, value):
+    resp = client.get(f"/api/v1/me/mcp?probe={value}", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+def test_disabled_probe_never_reveals_a_stored_key(client, user, mcp_on):
+    key = mcp_key(client, user)
+    get_settings().mcp_enabled = False
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+    get_settings().mcp_enabled = True
+    assert mcp_settings(client, user)["key"] == key
+
+
+def test_disabled_probe_still_requires_a_session(client):
+    assert client.get("/api/v1/me/mcp?probe=true").status_code == 401
+    # the gate runs before auth, as before
+    assert client.get("/api/v1/me/mcp").status_code == 404
+
+
+def test_probe_without_a_session_answers_the_same_whether_mcp_is_on_or_off(client, mcp_on):
+    # The probe must not reveal the MCP state to an unauthenticated caller.
+    assert client.get("/api/v1/me/mcp?probe=true").status_code == 401
+    get_settings().mcp_enabled = False
+    assert client.get("/api/v1/me/mcp?probe=true").status_code == 401
+
+
+@pytest.mark.parametrize("value", ["maybe", "", "no", "0", "false"])
+def test_a_non_true_probe_value_is_ignored(client, user, value):
+    # MCP off: anything but true/1 is no probe, so the old 404 (never a 422)
+    resp = client.get(f"/api/v1/me/mcp?probe={value}", headers=user["headers"])
+    assert resp.status_code == 404, resp.text
+
+
+def test_a_bad_probe_value_is_ignored_while_enabled(client, user, mcp_on):
+    resp = client.get("/api/v1/me/mcp?probe=maybe", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+
+
+def test_probe_is_ignored_when_enabled(client, user, mcp_on):
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["enabled"] is True
+    assert body["key"] is None
+    assert body["endpoint"].endswith("/api/v1/mcp")
+    assert "probe" not in body["endpoint"]
+    assert body == mcp_settings(client, user)
 
 
 def test_disabled_hides_the_endpoint_even_with_a_valid_key(client, user, mcp_on):
@@ -850,3 +906,22 @@ def test_a_client_disconnect_mid_body_is_a_handled_400(
     assert resp.content == b""
     records = [r for r in caplog.records if r.name == "balu.mcp"]
     assert [r.getMessage() for r in records] == ["mcp request aborted by client"]
+
+
+# --- Cache-Control: the settings bodies can carry a full-access key ----------
+def test_settings_responses_are_never_cacheable(client, user, mcp_on):
+    headers = user["headers"]
+    for url in ("/api/v1/me/mcp", "/api/v1/me/mcp?probe=true"):
+        assert client.get(url, headers=headers).headers["cache-control"] == "no-store"
+    generated = client.post("/api/v1/me/mcp/key", headers=headers)
+    assert generated.headers["cache-control"] == "no-store"
+    # Now with a key in the body.
+    resp = client.get("/api/v1/me/mcp", headers=headers)
+    assert resp.json()["key"] is not None
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_disabled_probe_response_is_never_cacheable(client, user):
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.json() == {"enabled": False}
+    assert resp.headers["cache-control"] == "no-store"

@@ -90,6 +90,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * True when a failed MCP call means the server no longer offers MCP at all (a 404),
+ * as opposed to any other failure. The settings UIs hide the section on it.
+ */
+export function isMcpUnavailable(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
 /** Internal: the lease was lost between taking it and using it; take it again. */
 class LeaseLost extends Error {}
 
@@ -195,8 +203,15 @@ export interface ApiClient {
   getAttachmentBlob(workspaceId: string, attachmentId: string): Promise<Blob>;
 
   // ── Remote MCP server (contract §10) ─────────────────────────
-  /** Throws `not_found` when the server runs without `BALU_MCP_ENABLED`. */
-  getMcpSettings(): Promise<McpSettings>;
+  /**
+   * Null when this server has MCP switched off or predates it - the caller hides
+   * the section. Probes with `?probe=true` so a current server answers 200
+   * `{enabled:false}` instead of a 404 (which browsers log as a console error);
+   * an older server ignores the parameter and 404s, which also maps to null.
+   * Any other HTTP failure or a timeout throws `ApiError`; a network failure
+   * rejects as the underlying `TypeError`.
+   */
+  getMcpSettings(): Promise<McpSettings | null>;
   /** Mint a key, or replace the existing one. Never implicit - user action only. */
   generateMcpKey(): Promise<McpSettings>;
 }
@@ -662,7 +677,15 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
       return res.blob();
     },
 
-    getMcpSettings: () => authed<McpSettings>("/me/mcp", { method: "GET" }),
+    async getMcpSettings() {
+      try {
+        const res = await authed<McpSettings | { enabled: false }>("/me/mcp?probe=true", { method: "GET" });
+        return res.enabled ? (res as McpSettings) : null;
+      } catch (e) {
+        if (isMcpUnavailable(e)) return null;
+        throw e;
+      }
+    },
     generateMcpKey: () => authed<McpSettings>("/me/mcp/key", { method: "POST" }),
   };
 }
