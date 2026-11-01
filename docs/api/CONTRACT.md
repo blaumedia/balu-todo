@@ -604,8 +604,9 @@ this section 404s, with one exception **(v1.5.2)**: `GET /me/mcp?probe=true` ans
 that send `probe=true` hide the MCP section on `enabled: false` **or** on a 404, because
 an older server ignores the parameter and still 404s. Without `probe` the endpoint keeps
 404ing while off, because released clients (mobile <= 1.3.2, web before 1.5.2) render
-any 200 body as the section. Only `probe=true` (or `1`) counts; any other value is
-ignored, and `probe` is ignored while MCP is on. Auth still applies: an unauthenticated
+any 200 body as the section. Only `probe=true` or `probe=1` counts (case-insensitive,
+surrounding spaces ignored); any other value is ignored, and `probe` is ignored while
+MCP is on. Auth still applies: an unauthenticated
 `probe=true` call is `401`. None of these routes appear in `openapi.json`, enabled or
 not: `/mcp` is JSON-RPC rather than REST, and the document should not vary with runtime
 configuration.

@@ -92,8 +92,9 @@ def test_disabled_hides_every_endpoint(client, user):
     assert client.post("/api/v1/mcp?probe=true", json=ping).status_code == 404
 
 
-def test_disabled_settings_probe_answers_enabled_false(client, user):
-    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+@pytest.mark.parametrize("value", ["true", "1", "TRUE", "True", " true "])
+def test_disabled_settings_probe_answers_enabled_false(client, user, value):
+    resp = client.get(f"/api/v1/me/mcp?probe={value}", headers=user["headers"])
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"enabled": False}
 
