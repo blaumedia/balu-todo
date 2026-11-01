@@ -233,7 +233,11 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
         t.section_id = parentTask.section_id;
       } else {
         for (const st of replica.tasks.values()) {
-          if (st.parent_task_id === t.id && !st.is_deleted) {
+          if (
+            st.parent_task_id === t.id &&
+            !st.is_deleted &&
+            (st.project_id !== t.project_id || st.section_id !== t.section_id)
+          ) {
             st.project_id = t.project_id;
             st.section_id = t.section_id;
             st.updated_at = now;

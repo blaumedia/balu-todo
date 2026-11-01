@@ -51,6 +51,13 @@ describe("subtask container follows its parent", () => {
     expect([s.project_id, s.section_id]).toEqual(["pb", null]);
   });
 
+  it("leaves the updated_at of subtasks whose container did not change alone", () => {
+    const r = setup();
+    r.tasks.get("s1")!.updated_at = "old";
+    run(r, "task_move", { id: "par", sort_order: 5000 });
+    expect(r.tasks.get("s1")!.updated_at).toBe("old");
+  });
+
   it("re-parenting a subtask takes the new parent's project and section", () => {
     const r = setup();
     run(r, "task_move", { id: "s1", parent_task_id: "par2" });
