@@ -2,7 +2,7 @@
 # override TEST_DB_PORT when another checkout's test DB already holds 5433.
 TEST_DB_PORT ?= $(or $(BALU_TEST_DB_PORT),5433)
 # Override TEST_PROJECT if two checkouts share a directory name.
-TEST_PROJECT ?= balu-test-$(shell basename "$$(cd .. && pwd)" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')
+TEST_PROJECT ?= balu-test-$(shell basename "$$(cd .. && pwd)" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9_\n-' '-')
 COMPOSE := BALU_TEST_DB_PORT=$(TEST_DB_PORT) docker compose -p $(TEST_PROJECT) -f tests/docker-compose.test.yml
 TEST_DATABASE_URL ?= postgresql+psycopg://balu:balu@localhost:$(TEST_DB_PORT)/balu_test
 
@@ -15,8 +15,8 @@ dev:
 	uv run uvicorn balu.main:app --reload --host 0.0.0.0 --port 8000
 
 test-db-up:
-	@if [ -n "$$(docker ps -aq -f name='^balu-test-db$$')" ]; then \
-		echo "legacy test DB container balu-test-db holds the port: docker rm -f balu-test-db" >&2; exit 1; fi
+	@if [ -n "$$(docker ps -q -f name='^balu-test-db$$' -f publish=$(TEST_DB_PORT))" ]; then \
+		echo "a running legacy container balu-test-db publishes port $(TEST_DB_PORT): stop it if no older checkout is using it, or pick another TEST_DB_PORT" >&2; exit 1; fi
 	$(COMPOSE) up -d
 	@echo "waiting for postgres..."
 	@for i in $$(seq 1 30); do \
