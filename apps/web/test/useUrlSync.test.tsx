@@ -96,6 +96,43 @@ describe("useUrlSync - reader history wiring", () => {
     expect(globalThis.location.pathname).toBe("/upcoming");
   });
 
+  it("a reader reopened before our pop lands keeps the entry below it", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" })); // reopened before the popstate
+    await act(tick);
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    await act(tick);
+    expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
+    expect(useApp.getState().view).toEqual(today);
+  });
+
+  it("unmount drops a pending pop expectation", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    back.mockImplementation(() => {});
+    act(() => useApp.setState({ fullscreenTaskId: null })); // back() lost, expectation pending
+    cleanup();
+    back.mockRestore();
+    // Remount on a plain, already aligned URL (no reader marker), so the mount
+    // effect writes nothing and no back() of our own is in flight.
+    globalThis.history.replaceState(null, "", "/upcoming");
+    useApp.setState({ view: upcoming, selectedTaskId: null, fullscreenTaskId: null });
+    renderHook(() => useUrlSync());
+    // A user navigation that happens to land on the old expected URL is still user navigation.
+    act(() => {
+      globalThis.history.replaceState(null, "", "/today?task=t1");
+      globalThis.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(useApp.getState().view).toEqual(today);
+    expect(useApp.getState().selectedTaskId).toBe("t1");
+  });
+
   it("closing a deep-linked reader replaces, never back()", () => {
     mount("/task/t1", null, "t1");
     replace.mockClear();

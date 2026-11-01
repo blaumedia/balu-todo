@@ -75,10 +75,16 @@ export function useUrlSync(): void {
         // Our own back() from a reader close: state already holds the intended
         // target (and focusedIndex/focusDeadline), so never overwrite it with
         // the older entry's route. If newer state landed meanwhile, realign
-        // the address bar to it (keeping the marker when that is a reader URL).
+        // the address bar to it. A reader reopened before this popstate gets
+        // its own entry on top of the one we landed on (like opening it from
+        // there), so `under` names an entry that really is below it; replacing
+        // would destroy that entry and make the next close pop one too far.
         const cur = useApp.getState();
         const want = buildAppUrl(cur.view, cur.selectedTaskId, cur.fullscreenTaskId);
-        if (here !== want) globalThis.history.replaceState(cur.fullscreenTaskId ? readerState(here) : null, "", want);
+        if (here !== want) {
+          if (cur.fullscreenTaskId) globalThis.history.pushState(readerState(here), "", want);
+          else globalThis.history.replaceState(null, "", want);
+        }
         return;
       }
       const st = useApp.getState();
