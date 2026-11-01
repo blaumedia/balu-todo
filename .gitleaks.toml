@@ -10,8 +10,8 @@ description = "Fixed, non-secret signing keys used only by the server test suite
 # pattern in any file.
 condition = "AND"
 paths = [
-  '''^server/tests/conftest\.py$''',
-  '''^server/tests/test_config\.py$''',
+  '''(^|/)server/tests/conftest\.py$''',
+  '''(^|/)server/tests/test_config\.py$''',
 ]
 regexes = [
   '''key-at-least-32-bytes-long''',
