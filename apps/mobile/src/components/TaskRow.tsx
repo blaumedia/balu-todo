@@ -10,8 +10,7 @@ import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { completeTask, uncompleteTask } from '../lib/actions';
-import { relativeDate } from '../lib/format';
-import { moreLabelsText, rowLabels } from '../lib/rowMeta';
+import { moreLabelsText, rowDate, rowLabels } from '../lib/rowMeta';
 import { hapticComplete } from '../lib/haptics';
 import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
@@ -140,13 +139,12 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
 
   // ── metadata chips ──
   const project = task.project_id ? projects.get(task.project_id) : undefined;
-  const primaryDate = task.start_date ?? task.deadline;
-  const rawDate = primaryDate ? relativeDate(primaryDate, today, locale, t) : null;
-  // Like the web row: hidden only in the Today list, where every row is due today.
-  const dateInfo = hideTodayDate && rawDate?.tone === 'today' ? null : rawDate;
+  // Like the web row: the today chip is hidden only in the Today list.
+  const date = rowDate(task, today, locale, t, hideTodayDate ?? false);
+  const dateInfo = date?.info ?? null;
   const dateColor =
     dateInfo?.tone === 'overdue' ? theme.danger : dateInfo?.tone === 'today' ? theme.accent : theme.textSecondary;
-  const isDeadlineOnly = task.start_date == null && task.deadline != null;
+  const isDeadlineOnly = date?.isDeadlineOnly ?? false;
   const { visible: shownLabels, overflow: hiddenLabels } = rowLabels(task.label_ids, labels);
   const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
   const hasComments = commentCount > 0;

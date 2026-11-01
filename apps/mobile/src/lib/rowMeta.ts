@@ -1,5 +1,6 @@
-import type { Label } from '@balu/domain';
+import type { IsoDate, Label, Locale, Task } from '@balu/domain';
 import type { TranslationKey } from '../i18n';
+import { relativeDate } from './format';
 
 /** Labels shown as chips on a row; the rest collapse into a "+N" chip. */
 const MAX_ROW_LABELS = 2;
@@ -21,4 +22,24 @@ export function rowLabels(
 /** Screen-reader text for the "+N" chip, with the singular/plural form of the locale. */
 export function moreLabelsText(n: number, t: (k: TranslationKey) => string): string {
   return t(n === 1 ? 'row.moreLabelsOne' : 'row.moreLabelsOther').replace('{n}', String(n));
+}
+
+/**
+ * The date chip of a row: start date, else deadline. The accent "today" chip is
+ * dropped only when hideToday is set (the Today list, where every row is due
+ * today); overdue and future dates always show. isDeadlineOnly marks a task
+ * with a deadline but no start date, so the chip can carry the deadline icon.
+ */
+export function rowDate(
+  task: Pick<Task, 'start_date' | 'deadline'>,
+  today: IsoDate,
+  locale: Locale,
+  t: (k: TranslationKey) => string,
+  hideToday: boolean,
+): { info: ReturnType<typeof relativeDate>; isDeadlineOnly: boolean } | null {
+  const primary = task.start_date ?? task.deadline;
+  if (!primary) return null;
+  const info = relativeDate(primary, today, locale, t);
+  if (hideToday && info.tone === 'today') return null;
+  return { info, isDeadlineOnly: task.start_date == null };
 }
