@@ -674,7 +674,7 @@ describe('fallBackToKnownWorkspace', () => {
 
   it('does not revive a session that a 401 expired meanwhile', () => {
     useApp.setState({ boot: 'onboarding' } as any); // user and memberships still set
-    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('expired');
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('left');
     expect(useApp.getState().boot).toBe('onboarding');
     expect(fake.inited).toEqual([]);
   });
@@ -683,7 +683,7 @@ describe('fallBackToKnownWorkspace', () => {
     // expireSession resets the store only after awaiting the logout request.
     useApp.setState({ boot: 'ready' } as any);
     fake.authed = false;
-    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('expired');
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('left');
     expect(fake.inited).toEqual([]);
   });
 
@@ -702,19 +702,27 @@ describe('fallBackToKnownWorkspace', () => {
 });
 
 describe('landAfterDelete', () => {
+  afterEach(() => vi.useRealTimers());
+
   it('lands through /me', async () => {
     useApp.setState({ boot: 'ready' } as any);
     expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('landed');
     expect(open()).toBe('a');
   });
 
-  it('holds for a workspace instead of opening a stale survivor when /me lists none', async () => {
+  it('holds for a workspace instead of opening a stale survivor when /me lists none, and lands once one appears', async () => {
+    vi.useFakeTimers();
     useApp.setState({ boot: 'ready' } as any);
-    fake.getMe = async () => me();
+    let calls = 0;
+    fake.getMe = async () => (++calls <= 2 ? me() : me('a'));
     expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('held');
+    expect(calls).toBe(1);
     expect(useApp.getState().boot).toBe('noWorkspace');
     expect(fake.inited).toEqual([]);
-    useApp.getState().setBoot('onboarding'); // stops the background wait
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(3);
+    expect(useApp.getState().boot).toBe('ready');
+    expect(fake.inited).toEqual(['a']);
   });
 
   it('falls back to a known workspace when /me is unreachable', async () => {
@@ -726,13 +734,13 @@ describe('landAfterDelete', () => {
     expect(fake.inited).toEqual(['a']);
   });
 
-  it('reports an expired session without a failure verdict', async () => {
+  it('reports a left session without a failure verdict', async () => {
     useApp.setState({ boot: 'ready' } as any);
     fake.authed = false;
     fake.getMe = async () => {
       throw new Error('offline');
     };
-    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('expired');
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('left');
   });
 
   it('reports failed when nothing is known', async () => {
@@ -741,6 +749,77 @@ describe('landAfterDelete', () => {
       throw new Error('offline');
     };
     expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('failed');
+  });
+
+  it('reports landed, not failed, when a concurrent recovery already moved the session', async () => {
+    useApp.setState({ boot: 'ready', workspace: ws('b') } as any);
+    fake.getMe = async () => {
+      throw new Error('offline');
+    };
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('landed');
+    expect(open()).toBe('b');
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('asks /me once after a 401', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      throw new ApiError('invalid_token', 'x', 401);
+    };
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('left');
+    expect(calls).toBe(1);
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('drops a /me answer that arrives after a logout', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me('a');
+    };
+    const out = landAfterDelete('https://x', fakeApi as any, 'lost');
+    useApp.getState().reset(); // what logout does
+    fake.authed = false;
+    release();
+    expect(await out).toBe('left');
+    expect(fake.inited).toEqual([]);
+    expect(useApp.getState().workspace?.id).not.toBe('a');
+  });
+
+  it('drops a /me answer that arrives after the tokens expired', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me('a');
+    };
+    const out = landAfterDelete('https://x', fakeApi as any, 'lost');
+    fake.authed = false; // store still looks live, tokens are gone
+    release();
+    expect(await out).toBe('left');
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('shares one waiting loop with a concurrent access-loss recovery', async () => {
+    vi.useFakeTimers();
+    useApp.setState({ boot: 'ready' } as any);
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me();
+    };
+    await Promise.all([landAfterDelete('https://x', fakeApi as any, 'lost'), moveOffLostWorkspace('lost')]);
+    expect(calls).toBe(2); // one /me each to find out, then a single loop
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    await vi.advanceTimersByTimeAsync(1_300); // first backoff tick only
+    expect(calls).toBe(3);
+    useApp.getState().setBoot('onboarding');
+    await vi.advanceTimersByTimeAsync(60_000);
   });
 });
 

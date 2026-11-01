@@ -233,15 +233,17 @@ export function navigateToOnboarding(): void {
  * expired session, while expireSession only resets the store after awaiting the
  * logout request, so boot and user can still look live in that window and
  * setSession would revive 'ready' (and start a sync client) with no tokens.
- * Returns why nothing was opened, or 'opened'; 'moved' means the session is no
- * longer on `goneId` (a concurrent access-loss recovery already landed it).
+ * Returns why nothing was opened, or 'opened'. 'left' means the session is no
+ * longer 'ready' (expired, logged out, or a notice such as 'reconnecting' is up);
+ * 'moved' means it is no longer on `goneId` (a concurrent access-loss recovery
+ * already landed it). Mutates nothing unless it returns 'opened'.
  */
 export function fallBackToKnownWorkspace(
   serverUrl: string,
   goneId: string,
-): 'opened' | 'moved' | 'expired' | 'none' {
+): 'opened' | 'moved' | 'left' | 'none' {
   const st = useApp.getState();
-  if (st.boot !== 'ready' || !st.user || !getApi()?.isAuthenticated()) return 'expired';
+  if (st.boot !== 'ready' || !st.user || !getApi()?.isAuthenticated()) return 'left';
   if (st.workspace?.id !== goneId) return 'moved';
   const survivors = st.memberships.filter((m) => m.workspace.id !== goneId);
   if (!survivors[0]) return 'none';
@@ -251,57 +253,82 @@ export function fallBackToKnownWorkspace(
 }
 
 /**
- * Land somewhere after the open workspace `goneId` was deleted: two tries at
- * /me, then the locally known fallback. 'held' means /me lists no workspace
- * (the notice is up and holdForWorkspace keeps asking, as landOutside does), so
- * the caller must not fall back to a stale survivor. 'expired' means a 401 ended
- * the session (the login screen explains it); 'failed' means nowhere to go.
+ * Land somewhere after the open workspace `goneId` was deleted by this user: two
+ * tries at /me, then the locally known fallback. Shares landOutside's guards: a
+ * /me answer is dropped unless `goneId` is still open and the tokens are alive
+ * (a logout, expiry or a concurrent recovery during the request must not be
+ * undone), a 401 ends the attempt without a second request, and an empty /me goes
+ * to holdForWorkspace (single-flight, so a concurrent landOutside shares the loop).
+ * It is not folded into landOutside because that one keeps asking with a backoff
+ * while the server is unreachable, and the settings screen awaits this call.
+ * 'held': /me lists no workspace, so the caller must not fall back to a stale
+ * survivor. 'left': the session is no longer 'ready' (a 401, a logout or a
+ * notice already explains it). 'failed': nowhere to go.
  */
 export async function landAfterDelete(
   serverUrl: string,
   api: ApiClient,
   goneId: string,
-): Promise<'landed' | 'held' | 'expired' | 'failed'> {
+): Promise<'landed' | 'held' | 'left' | 'failed'> {
+  const wanted = (): boolean => isOpen(goneId) && !!getApi()?.isAuthenticated();
+  // Only reached when !wanted(): 'left' or 'moved', nothing is mutated.
+  const settled = (): 'landed' | 'left' =>
+    fallBackToKnownWorkspace(serverUrl, goneId) === 'moved' ? 'landed' : 'left';
   for (let attempt = 0; attempt < 2; attempt++) {
+    if (!wanted()) return settled();
     try {
-      if (await establishSession(serverUrl, api)) return 'landed';
+      if (await establishSession(serverUrl, api, null, false, wanted)) return 'landed';
     } catch (e) {
       if (e instanceof NoWorkspaceError) {
+        if (!wanted()) return settled();
         holdForWorkspace(serverUrl, api);
         return 'held';
       }
+      // Refused or logged out: a second /me would carry no token.
+      if (e instanceof ApiError && e.status === 401) return 'left';
     }
   }
+  if (!wanted()) return settled();
   const r = fallBackToKnownWorkspace(serverUrl, goneId);
   if (r === 'opened' || r === 'moved') return 'landed';
-  return r === 'expired' ? 'expired' : 'failed';
+  return r === 'left' ? 'left' : 'failed';
 }
+
+let holding = false;
 
 /**
  * /me answered with no workspace: show the notice and keep asking with a backoff
  * until it lists one, the user logs out, or the session is refused. Runs on its
- * own so the caller (and the splash screen) does not wait for it.
+ * own so the caller (and the splash screen) does not wait for it. Single-flight:
+ * a second trigger while the loop runs (a delete's landing and the old sync
+ * client's access-loss recovery) joins it instead of starting another.
  */
 function holdForWorkspace(serverUrl: string, api: ApiClient): void {
+  if (holding) return;
+  holding = true;
   showBootNotice('noWorkspace');
   void (async () => {
-    const waiting = (): boolean => useApp.getState().boot === 'noWorkspace';
-    for (let attempt = 0; waiting(); attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt)));
-      if (!waiting()) return;
-      try {
-        if (!(await establishSession(serverUrl, api, null, false, waiting))) {
-          if (waiting()) useApp.getState().setBoot('onboarding'); // the root layout's effect leaves the screen
-        }
-        return;
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
-          await expireSession();
+    try {
+      const waiting = (): boolean => useApp.getState().boot === 'noWorkspace';
+      for (let attempt = 0; waiting(); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt)));
+        if (!waiting()) return;
+        try {
+          if (!(await establishSession(serverUrl, api, null, false, waiting))) {
+            if (waiting()) useApp.getState().setBoot('onboarding'); // the root layout's effect leaves the screen
+          }
           return;
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
+            await expireSession();
+            return;
+          }
+          if (e instanceof ApiError && e.code === 'signed_out') return;
+          // Still no workspace, or the server is unreachable: keep asking.
         }
-        if (e instanceof ApiError && e.code === 'signed_out') return;
-        // Still no workspace, or the server is unreachable: keep asking.
       }
+    } finally {
+      holding = false;
     }
   })();
 }

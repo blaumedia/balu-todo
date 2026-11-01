@@ -180,17 +180,12 @@ export default function SettingsScreen() {
         Alert.alert(t('workspace.deleteError'));
         return;
       }
-      // Past this point the workspace is gone and the session points at
-      // something that no longer exists, so landing somewhere else is not
-      // optional. No preferred id: the remembered last-used id is the doomed
-      // one, so pickMembership falls through to the first remaining workspace -
-      // or to the fresh default the server minted when this was the last.
-      // Last resort when the server stays unreachable: switch locally to a
-      // workspace we already know about, so the app is never left syncing
-      // against the deleted one until the next cold start.
+      // The workspace is gone, so landing in a surviving one is not optional
+      // (see landAfterDelete).
       const landed = await landAfterDelete(serverUrl, api, doomedId);
       void purgeWorkspaceStorage(doomedId);
-      // 'expired': the login screen carries the notice, and the delete worked.
+      // Only 'failed' is an error: 'held', 'left' (expired, logged out, notice up) and
+      // 'landed' mean the delete worked and something else already tells the user.
       if (landed === 'failed') Alert.alert(t('workspace.deleteError'));
       cancelDelete();
       // Same hygiene as a switch: everything under this screen still belongs to
