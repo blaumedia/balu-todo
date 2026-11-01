@@ -73,10 +73,11 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `edit-task TITLE FIELD VALUE` | `task_update` as owner |
 | `delete-task TITLE` | `task_delete` as owner |
 | `attach TITLE FILE` | uploads FILE to the task as owner (multipart, CONTRACT 3.7.1); exit 1 on non-2xx |
-| `label NAME` | creates a label as owner (id remembered for `label-task`) |
-| `label-task TITLE LABEL` | adds the label to the task, keeping its other labels |
+| `label NAME` | creates a label as owner (id remembered for `label-task`); idempotent: an existing live label of that name (case-insensitive) is reused |
+| `label-task TITLE LABEL` | adds the label to the task, keeping its other labels; fails if the task is not in the snapshot |
 | `comment TITLE TEXT` | `comment_add` as owner |
-| `subtask PARENT_TITLE TITLE [--due YYYY-MM-DD]` | adds a subtask (start date today unless `--due`); title becomes addressable |
+| `subtask PARENT_TITLE TITLE [--start YYYY-MM-DD] [--deadline YYYY-MM-DD]` | adds a subtask (start date today unless `--start`; with only `--deadline` the subtask is deadline-only); title becomes addressable |
+| `project-rename NAME` | renames the e2e project (`project_update`); `setup` keeps finding it by its stored `project.id` |
 | `project-delete` | deletes the seeded project |
 | `remove-member` | removes the member from the workspace |
 | `ws2` | creates a second workspace with a project and a task |

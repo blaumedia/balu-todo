@@ -94,9 +94,15 @@ def cmd_setup(a) -> int:
         if s2 not in (200, 201):
             raise SystemExit(f"accept: HTTP {s2}")
     s, snap = e.sync("owner", ws, [])
-    existing = [
-        p for p in snap.get("projects", [])
-        if p.get("name") == PROJECT_NAME and not p.get("is_deleted")
+    live = [p for p in snap.get("projects", []) if not p.get("is_deleted")]
+    # a stored project.id that is still alive wins, so a renamed project is not duplicated
+    stored = None
+    try:
+        stored = e.load("project.id")
+    except SystemExit:
+        pass
+    existing = [p for p in live if p.get("id") == stored] or [
+        p for p in live if p.get("name") == PROJECT_NAME
     ]
     if existing:
         e.save("project.id", existing[0]["id"])
@@ -222,6 +228,16 @@ def labels_map() -> dict:
 
 def cmd_label(a) -> int:
     """Create a label NAME as the owner (CONTRACT 4: label_add); remembered for label-task."""
+    # idempotent: a live label of that name (case-insensitive) is reused, so a rerun
+    # or a wiped labels.json does not hit name_taken
+    s, snap = e.sync("owner", ws_id(), [])
+    for lab in snap.get("labels", []):
+        if not lab.get("is_deleted") and str(lab.get("name", "")).lower() == a.name.lower():
+            known = labels_map()
+            known[a.name] = lab["id"]
+            e.save("labels.json", json.dumps(known))
+            print("label exists", a.name, "->", s)
+            return ok(s)
     tmp = e.new_temp_id()
     cmd = {"type": "label_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": {"name": a.name}}
     s, b = e.sync("owner", ws_id(), [cmd])
@@ -240,9 +256,13 @@ def cmd_label_task(a) -> int:
     if not lid:
         raise SystemExit(f"unknown label: {a.label}")
     tid = task_id(a.title)
-    _, snap = e.sync("owner", ws_id(), [])
-    cur = [t for t in snap.get("tasks", []) if t.get("id") == tid]
-    have = list(cur[0].get("label_ids", [])) if cur else []
+    s0, snap = e.sync("owner", ws_id(), [])
+    if s0 != 200:
+        raise SystemExit(f"label-task: snapshot HTTP {s0}")
+    cur = [t for t in snap.get("tasks", []) if t.get("id") == tid and not t.get("is_deleted")]
+    if not cur:
+        raise SystemExit(f"label-task: task not found in snapshot: {a.title}")
+    have = list(cur[0].get("label_ids", []))
     if lid not in have:
         have.append(lid)
     args = {"id": tid, "label_ids": have}
@@ -267,7 +287,11 @@ def cmd_comment(a) -> int:
 def cmd_subtask(a) -> int:
     parent = task_id(a.parent)
     tmp = e.new_temp_id()
-    args = {"title": a.title, "parent_task_id": parent, "start_date": a.due or today()}
+    args = {"title": a.title, "parent_task_id": parent, }
+    if a.start or not a.deadline:
+        args["start_date"] = a.start or today()
+    if a.deadline:
+        args["deadline"] = a.deadline
     cmd = {"type": "task_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": args}
     s, b = e.sync("owner", ws_id(), [cmd])
     mapping = b.get("temp_id_mapping", {})
@@ -276,6 +300,14 @@ def cmd_subtask(a) -> int:
         known[a.title] = mapping[tmp]
         e.save("tasks.json", json.dumps(known))
     print("subtask", a.title, "of", a.parent, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_project_rename(a) -> int:
+    args = {"id": e.load("project.id"), "name": a.name}
+    cmd = {"type": "project_update", "uuid": e.new_uuid(), "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("project_update ->", s, e.statuses(b))
     return synced(s, b)
 
 
@@ -377,8 +409,12 @@ def main() -> int:
     s = sub.add_parser("subtask")
     s.add_argument("parent")
     s.add_argument("title")
-    s.add_argument("--due", default=None, metavar="YYYY-MM-DD")
+    s.add_argument("--start", default=None, metavar="YYYY-MM-DD")
+    s.add_argument("--deadline", default=None, metavar="YYYY-MM-DD")
     s.set_defaults(fn=cmd_subtask)
+    s = sub.add_parser("project-rename")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_project_rename)
     sub.add_parser("project-delete").set_defaults(fn=cmd_project_delete)
     sub.add_parser("remove-member").set_defaults(fn=cmd_remove_member)
     sub.add_parser("ws2").set_defaults(fn=cmd_ws2)
