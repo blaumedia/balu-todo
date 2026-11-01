@@ -228,6 +228,10 @@ def purge_quarantine(
             else:
                 files += 1
                 size += nbytes
+        if os.path.lexists(entry.path) and not any(os.path.lexists(p) for p, _ in found):
+            # os.walk skips unreadable directories silently, so a batch can
+            # survive with none of its counted files left: still not purged.
+            left += 1
     return files, size, left
 
 

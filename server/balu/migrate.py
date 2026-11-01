@@ -4,10 +4,10 @@ Usage: ``python -m balu.migrate`` runs ``alembic upgrade head``;
 ``python -m balu.migrate downgrade <revision> [--yes]`` runs ``alembic downgrade``
 (the rollback step before switching to an older image, see the README). It prints
 the current and the target revision and refuses, without ``--yes``, any target
-this image's head or previous head (``base``, ``-2``, a mistyped id, ...): those
-walks can drop tables such as ``attachments``. A relative target (``-1``) is
-resolved against the database's current revision first, so ``-1`` passes only
-while the database is at this image's head.
+other than this image's head or its previous head (``base``, ``-2``, a mistyped
+or abbreviated id, ...): those walks can drop tables such as ``attachments``. A
+relative target (``-1``) is resolved against the database's current revision
+first, so ``-1`` passes only while the database is at this image's head.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.util.exc import CommandError
 
 from alembic import command
 
@@ -82,12 +83,16 @@ def _resolve_target(target: str, current: str | None) -> str:
         return target
     script = ScriptDirectory.from_config(_alembic_config())
     rev: str | None = current
-    for _ in range(int(match.group(1))):
-        revision = script.get_revision(rev) if rev is not None else None
-        down = revision.down_revision if revision is not None else None
-        if not isinstance(down, str):
-            return "base"
-        rev = down
+    try:
+        for _ in range(int(match.group(1))):
+            revision = script.get_revision(rev) if rev is not None else None
+            down = revision.down_revision if revision is not None else None
+            if not isinstance(down, str):
+                return "base"
+            rev = down
+    except CommandError:
+        # The database is stamped with a revision this image does not know.
+        return target
     return rev or "base"
 
 

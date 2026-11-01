@@ -6,8 +6,9 @@ match are untouched. Nesting deeper than one level (grandchildren, created by
 older servers) is first flattened: such a live row becomes a direct subtask of
 its top-level ancestor and is appended after that ancestor's subtasks (sort_order
 = the ancestor's highest live subtask sort_order + 1000 * n, the contract's
-"max + 1000" rule), in depth-first order of the old sort_orders so that the rows
-of one former parent stay together. Only live rows are walked: a live row under
+"max + 1000" rule), in depth-first order (per level: old sort_order, then id) so
+that the rows of one former parent stay together, even when former siblings
+share a sort_order. Only live rows are walked: a live row under
 a deleted ancestor was hidden before and stays untouched, it is not
 resurrected. Rows in a parent cycle are unreachable from a top-level task and
 stay unchanged. Sync tokens stay valid across an upgrade, so clients would never
@@ -54,14 +55,20 @@ def upgrade() -> None:
     # is depth-first and keeps each former parent's rows together.
     op.execute(
         """
-        WITH RECURSIVE chain(id, root_id, path) AS (
-            SELECT id, id, ARRAY[]::integer[] FROM tasks
-            WHERE parent_task_id IS NULL AND is_deleted = false
+        WITH RECURSIVE ranked AS (
+            SELECT id, parent_task_id,
+                   (ROW_NUMBER() OVER (PARTITION BY parent_task_id
+                                       ORDER BY sort_order, id))::integer AS rk
+            FROM tasks
+            WHERE is_deleted = false
+        ),
+        chain(id, root_id, path) AS (
+            SELECT id, id, ARRAY[]::integer[] FROM ranked
+            WHERE parent_task_id IS NULL
             UNION ALL
-            SELECT t.id, c.root_id, c.path || t.sort_order
-            FROM tasks AS t
+            SELECT t.id, c.root_id, c.path || t.rk
+            FROM ranked AS t
             JOIN chain AS c ON t.parent_task_id = c.id
-            WHERE t.is_deleted = false
         ),
         target AS (
             SELECT s.id, s.workspace_id, r.id AS root_id,

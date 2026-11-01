@@ -212,6 +212,20 @@ def test_purge_counts_only_removed_files_and_fails_when_some_remain(
     assert (old / "f").exists()
 
 
+def test_purge_fails_when_an_unreadable_batch_survives(data_dir, capsys, monkeypatch):
+    # os.walk skips a directory it cannot read, so no file is counted; the batch
+    # still survives the rmtree and must not be reported as purged
+    q = data_dir / "attachments" / ".orphans"
+    old = q / (datetime.now(UTC) - timedelta(days=40)).strftime(blobs._STAMP_FORMAT) / "ws"
+    old.mkdir(parents=True)
+    (old / "f").write_bytes(b"abc")
+    monkeypatch.setattr(blobs.os, "walk", lambda *a, **k: iter(()))
+    monkeypatch.setattr(blobs.shutil, "rmtree", lambda *a, **k: None)
+    assert blobs.main(["sweep", "--purge-quarantine", "--older-than-days", "30"]) == 1
+    assert "could not be removed" in capsys.readouterr().err
+    assert (old / "f").exists()
+
+
 def test_a_symlinked_quarantine_is_refused_for_apply_and_purge(
     client, user, data_dir, capsys, tmp_path_factory
 ):

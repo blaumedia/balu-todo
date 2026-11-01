@@ -870,17 +870,18 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
                      {"par": m["g1"], "g": m["g2"]})
         conn.execute(text("UPDATE tasks SET sort_order = 10 WHERE id = :g"), {"g": m["g1"]})
         conn.execute(text("UPDATE tasks SET sort_order = 20 WHERE id = :g"), {"g": m["g2"]})
-        # two more former parents (s1, s4) with grandchildren whose old sibling-relative
-        # sort_orders interleave: 10 e1, 15 f1, 20 e2, 25 f2
+        # two more former parents (s1, s4) that share a sort_order, with grandchildren
+        # whose old sibling-relative sort_orders collide: 10 e1, 10 f1, 20 e2, 20 f2
         for parent, child, order in (
-            ("s1", "e1", 10), ("s4", "f1", 15), ("s1", "e2", 20), ("s4", "f2", 25),
+            ("s1", "e1", 10), ("s4", "f1", 10), ("s1", "e2", 20), ("s4", "f2", 20),
         ):
             conn.execute(
                 text("UPDATE tasks SET parent_task_id = :par, sort_order = :o WHERE id = :c"),
                 {"par": m[parent], "o": order, "c": m[child]},
             )
-        # the former parents' own order decides the order of their groups: s2, s1, s4
-        for key, order in (("s2", 1), ("s1", 2), ("s4", 3)):
+        # the former parents' own order decides the order of their groups: s2 first,
+        # then s1 and s4 (tied on sort_order, so by id)
+        for key, order in (("s2", 1), ("s1", 2), ("s4", 2)):
             conn.execute(
                 text("UPDATE tasks SET sort_order = :o WHERE id = :t"), {"o": order, "t": m[key]}
             )
@@ -963,8 +964,11 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     # appended after the root's own subtasks, in their old relative order
     assert rows[m["g1"]].sort_order == max_sort + 1000
     assert rows[m["g2"]].sort_order == max_sort + 2000
-    # depth-first: each former parent's group stays together (no e/f interleaving)
-    assert [rows[m[k]].sort_order for k in ("e1", "e2", "f1", "f2")] == [
+    # depth-first: each former parent's group stays together (no e/f interleaving),
+    # even with tied sort_orders on both levels
+    first, second = sorted((("e1", "e2"), ("f1", "f2")),
+                           key=lambda g: m["s1"] if g[0] == "e1" else m["s4"])
+    assert [rows[m[k]].sort_order for k in (*first, *second)] == [
         max_sort + 3000, max_sort + 4000, max_sort + 5000, max_sort + 6000,
     ]
     assert str(rows[m["s3"]].project_id) == m["pb"]  # deleted: untouched

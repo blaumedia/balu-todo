@@ -132,6 +132,16 @@ def test_migrate_cli_refuses_minus_one_when_the_database_is_already_one_step_bac
     assert migrate.main(["downgrade", "-1", "--yes"]) == 0
 
 
+def test_migrate_cli_refuses_a_relative_target_on_an_unknown_stamp(
+    downgrade_calls, monkeypatch, capsys
+):
+    # a database stamped by a newer image: no traceback, the normal refusal
+    monkeypatch.setattr(migrate, "current_revision", lambda: "zzzz")
+    assert migrate.main(["downgrade", "-1"]) == 2
+    assert downgrade_calls == []
+    assert "--yes" in capsys.readouterr().err
+
+
 def test_migrate_cli_rejects_malformed_downgrade_arguments(downgrade_calls):
     assert migrate.main(["downgrade"]) == 2
     assert migrate.main(["downgrade", "a", "b"]) == 2
