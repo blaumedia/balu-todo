@@ -230,6 +230,8 @@ def cmd_label(a) -> int:
     # idempotent: a live label of that name (case-insensitive) is reused, so a rerun
     # or a wiped labels.json does not hit name_taken
     s, snap = e.sync("owner", ws_id(), [])
+    if s != 200:
+        raise SystemExit(f"label: snapshot HTTP {s}")
     for lab in snap.get("labels", []):
         if not lab.get("is_deleted") and str(lab.get("name", "")).lower() == a.name.lower():
             known = labels_map()
@@ -286,7 +288,7 @@ def cmd_comment(a) -> int:
 def cmd_subtask(a) -> int:
     parent = task_id(a.parent)
     tmp = e.new_temp_id()
-    args = {"title": a.title, "parent_task_id": parent, }
+    args = {"title": a.title, "parent_task_id": parent}
     if a.start or not a.deadline:
         args["start_date"] = a.start or today()
     if a.deadline:
