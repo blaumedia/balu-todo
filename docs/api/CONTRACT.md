@@ -419,7 +419,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) - see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
 | `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed after the commit, best-effort) |
-| `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` - bulk, single container expected. Items whose task is deleted, unknown or in another workspace are skipped (the rest is applied); a malformed item is `invalid_args`; if no item resolves the command is `ok` and does nothing (§5.5) |
+| `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` - bulk, single container expected. Items whose task is deleted, unknown or in another workspace are skipped (the rest is applied); a malformed item is `invalid_args`; if no item resolves the command is `ok` and applies nothing (the workspace version still advances) (§5.5) |
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
 | `label_delete` | `id` - removed from all tasks |
