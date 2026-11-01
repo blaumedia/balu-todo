@@ -26,7 +26,7 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 
 ## 2. Stack
 
-`stack.sh up|down|purge|ps|logs|psql|task|tokens`
+`stack.sh up|down|purge|ps|logs|psql|task|tokens|mcp [on|off]`
 
 - Health is `GET /healthz`, not `/api/v1/health`.
 - The image is built, not live-mounted. Run `up` again after code changes.
@@ -36,6 +36,11 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
   refuses a non-empty `BALU_E2E_STATE` without it.
 - The app container does **not** read the checkout's root `.env`: `stack.sh` adds an override
   (`env_file: !reset []`, compose >= 2.24) so real SMTP/Telegram/`BALU_DEV` values stay out.
+- **MCP toggle:** `stack.sh mcp on|off` (no argument prints the state) sets
+  `BALU_MCP_ENABLED=true` for the app service through the compose override in the state dir
+  (the base `docker-compose.yml` forwards no variables and the root `.env` is dropped, so
+  this is the only way in). It recreates just the app container, without a rebuild; the flag
+  persists across `up`. Check with `GET /api/v1/me/mcp?probe=true` (`{"enabled": true|false}`).
 - A non-2xx response makes the `api.py` subcommands exit 1.
 - `task TITLE` prints one task row, `tokens` prints refresh-token counts per account.
 
@@ -96,6 +101,8 @@ page URL after the redirect, which contains the token: treat that output as sens
   Then set `AvdId=<Clone>` and `avd.ini.displayname=<Clone>` in `<Clone>.avd/config.ini`.
   Start it with `emulator -avd <Clone> -port <free even port 5554-5682> -no-snapshot-save &`
   and `export ANDROID_SERIAL=emulator-<port>`.
+- **The shared `Medium_Phone` AVD may carry a stale logged-in app.** After cloning, run
+  `adb -s <own serial> shell pm clear com.blaumedia.balutodo` before testing.
 - **Never touch other emulators:** no `adb kill-server`, no `adb emu kill` without your
   own `-s`, no install or uninstall on a serial you did not start.
 - Server URL in the app: `http://10.0.2.2:<port>`.

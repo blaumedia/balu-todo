@@ -1,6 +1,6 @@
 #!/bin/sh
 # Dedicated e2e compose stack (own project, own volumes, own port). Usage:
-#   stack.sh up|down|purge|ps|logs|psql [args]|task TITLE|tokens
+#   stack.sh up|down|purge|ps|logs|psql [args]|task TITLE|tokens|mcp [on|off]
 # Secrets for the stack are generated into $STATE/stack.env (mode 600) and never printed.
 set -eu
 
@@ -29,7 +29,13 @@ ensure_env() {
   mkdir -p "$STATE"
   chmod 700 "$STATE"
   : > "$MARKER"
+  # BALU_MCP_ENABLED reaches the app only through this override (the base compose
+  # file forwards no variables and the root .env is dropped), driven by the
+  # $STATE/mcp flag that `stack.sh mcp on|off` writes.
   (umask 077; printf 'services:\n  app:\n    env_file: !reset []\n' > "$OVERRIDE")
+  if [ -f "$STATE/mcp" ]; then
+    (umask 077; printf '    environment:\n      BALU_MCP_ENABLED: "true"\n' >> "$OVERRIDE")
+  fi
   if [ ! -f "$ENVF" ]; then
     (umask 077; printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" > "$ENVF")
   fi
@@ -96,8 +102,23 @@ case "$cmd" in
     echo "select u.email, count(*) total, count(*) filter (where not r.revoked) active from refresh_tokens r join users u on u.id = r.user_id where u.email like :'pat' group by u.email order by 1;" \
       | dc exec -T db psql -U balu -d balu -At -v pat="e2e-${BALU_E2E_RUN:-$(date +%Y%m%d)}-%"
     ;;
+  mcp)
+    # Toggle the MCP server of the e2e stack: rewrites the override and recreates
+    # only the app container (no rebuild). With no argument, prints the state.
+    case "${1:-}" in
+      on) (umask 077; : > "$STATE/mcp") ;;
+      off) rm -f "$STATE/mcp" ;;
+      "") [ -f "$STATE/mcp" ] && echo "mcp on" || echo "mcp off"; exit 0 ;;
+      *) echo "usage: stack.sh mcp [on|off]" >&2; exit 2 ;;
+    esac
+    ensure_env
+    if [ -n "$(dc ps -q app)" ]; then
+      dc up -d --no-build --force-recreate app
+    fi
+    echo "mcp ${1}"
+    ;;
   *)
-    echo "usage: stack.sh up|down|purge|ps|logs|psql|task TITLE|tokens" >&2
+    echo "usage: stack.sh up|down|purge|ps|logs|psql|task TITLE|tokens|mcp [on|off]" >&2
     exit 2
     ;;
 esac
