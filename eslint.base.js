@@ -12,9 +12,16 @@ export default [
     rules: {
       // `const { omitted, ...rest } = x` is how this codebase drops a key, and
       // `_today` keeps the shared (task, today) signature of the smart-list predicates.
+      // apps/mobile deliberately uses eslint-config-expo's own policy (args: "none"),
+      // which is looser on unused args than the "^_" convention here.
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { ignoreRestSiblings: true, argsIgnorePattern: "^_" },
+        {
+          ignoreRestSiblings: true,
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
       ],
     },
   },
