@@ -1,14 +1,17 @@
 import { useEffect } from "react";
 import { useApp } from "../store/app.js";
 import { buildAppUrl, parseAppUrl } from "./url.js";
-import { decideHistoryOp, READER_STATE } from "./historyOp.js";
+import { decideHistoryOp, readerState, readerUnder } from "./historyOp.js";
 
 /**
  * One-shot escape hatch: the next state->URL write uses replaceState even if
  * the path changed. Used by self-healing fallbacks (unknown project id) so
- * they never add a history entry the user did not ask for.
+ * they never add a history entry the user did not ask for. It does not apply
+ * to reader transitions, which follow their own push/pop/replace rules.
  */
 let replaceNext = false;
+/** Set just before our own history.back() so its popstate is not treated as user navigation. */
+let expectReaderPop = false;
 export function markReplaceNext(): void {
   replaceNext = true;
 }
@@ -23,9 +26,11 @@ export function useUrlSync(): void {
   const selectedTaskId = useApp((s) => s.selectedTaskId);
   const fullscreenTaskId = useApp((s) => s.fullscreenTaskId);
 
-  // State -> URL. Push only when the view path changes; task select/deselect
-  // and canonicalisation ("/" -> "/today", garbage -> "/today") replace, so
-  // Back walks views, not row clicks.
+  // State -> URL. Opening the reader pushes one marked entry; closing it pops
+  // that entry (only when it leads back to the URL now wanted) or replaces.
+  // Otherwise push only when the view path changes; task select/deselect and
+  // canonicalisation ("/" -> "/today", garbage -> "/today") replace, so Back
+  // walks views, not row clicks.
   useEffect(() => {
     const loc = globalThis.location;
     const hist = globalThis.history;
@@ -43,11 +48,13 @@ export function useUrlSync(): void {
       fullscreenTaskId,
       replaceNext,
     });
-    // "back" pops the reader entry we pushed; the popstate handler below then
-    // re-derives state from the entry underneath (same view, so no echo).
-    if (op === "back") hist.back();
-    else if (op === "push") hist.pushState(fullscreenTaskId ? READER_STATE : null, "", next);
-    else if (op === "replace-reader") hist.replaceState(READER_STATE, "", next);
+    // "back" pops the reader entry we pushed; the popstate handler below
+    // recognises it via expectReaderPop and leaves the state alone.
+    if (op === "back") {
+      expectReaderPop = true;
+      hist.back();
+    } else if (op === "push") hist.pushState(fullscreenTaskId ? readerState(loc.pathname + loc.search) : null, "", next);
+    else if (op === "replace-reader") hist.replaceState(readerState(readerUnder(hist.state) ?? ""), "", next);
     else if (op === "replace") hist.replaceState(null, "", next);
     replaceNext = false;
   }, [view, selectedTaskId, fullscreenTaskId]);
@@ -56,6 +63,18 @@ export function useUrlSync(): void {
   // what the effect above would build, so it writes nothing: no echo loop.
   useEffect(() => {
     function onPop(): void {
+      if (expectReaderPop) {
+        // Our own back() from a reader close: state already holds the intended
+        // target (and focusedIndex/focusDeadline), so never overwrite it with
+        // the older entry's route. If newer state landed meanwhile, realign
+        // the address bar to it.
+        expectReaderPop = false;
+        const cur = useApp.getState();
+        const loc = globalThis.location;
+        const want = buildAppUrl(cur.view, cur.selectedTaskId, cur.fullscreenTaskId);
+        if (loc && loc.pathname + loc.search !== want) globalThis.history.replaceState(null, "", want);
+        return;
+      }
       const st = useApp.getState();
       // An open overlay owns its input (the same rule Shell's keyboard map
       // follows): Back must not silently retarget QuickAdd's project context or

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { decideHistoryOp, READER_STATE, type HistoryInput } from "../src/lib/historyOp.js";
+import { decideHistoryOp, readerState, type HistoryInput } from "../src/lib/historyOp.js";
+const READER_STATE = readerState("/today?task=t1");
 import { parseAppUrl, type ViewSel } from "../src/lib/url.js";
 
 const today: ViewSel = { kind: "list", list: "today" };
@@ -32,8 +33,16 @@ describe("decideHistoryOp - full-screen reader", () => {
     expect(decideHistoryOp(at("/task/t1", null, { selectedTaskId: "t1" }))).toBe("replace");
   });
 
-  it("a close that also changes the selection or view never pops", () => {
+  it("a close whose target is not the underlying URL never pops", () => {
     expect(decideHistoryOp(at("/task/t1", READER_STATE, { view: upcoming, selectedTaskId: null }))).toBe("replace");
+  });
+
+  it("a view change that keeps the selection replaces (palette jump to the same task)", () => {
+    expect(decideHistoryOp(at("/task/t1", READER_STATE, { view: upcoming, selectedTaskId: "t1" }))).toBe("replace");
+  });
+
+  it("an old-format marker without `under` never pops", () => {
+    expect(decideHistoryOp(at("/task/t1", { baluReader: true }, { selectedTaskId: "t1" }))).toBe("replace");
   });
 
   it("after Back/Forward the URL already matches: nothing is written", () => {
