@@ -170,6 +170,8 @@ def cmd_edit_task(a) -> int:
         value = int(a.value)
     elif a.field == "evening":
         value = a.value.lower() in ("1", "true", "t", "yes")
+    elif a.field == "assigned_to" and a.value in ("owner", "member"):
+        value = e.load(f"{a.value}.uid")
     args = {"id": task_id(a.title), a.field: value}
     cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
     s, b = e.sync("owner", ws_id(), [cmd])
@@ -235,7 +237,7 @@ def cmd_label(a) -> int:
     for lab in snap.get("labels", []):
         if not lab.get("is_deleted") and str(lab.get("name", "")).lower() == a.name.lower():
             known = labels_map()
-            known[a.name] = lab["id"]
+            known[a.name.lower()] = lab["id"]
             e.save("labels.json", json.dumps(known))
             print("label exists", a.name, "->", s)
             return ok(s)
@@ -245,7 +247,7 @@ def cmd_label(a) -> int:
     mapping = b.get("temp_id_mapping", {})
     if tmp in mapping:
         known = labels_map()
-        known[a.name] = mapping[tmp]
+        known[a.name.lower()] = mapping[tmp]
         e.save("labels.json", json.dumps(known))
     print("label_add", a.name, "->", s, e.statuses(b))
     return synced(s, b)
@@ -253,13 +255,17 @@ def cmd_label(a) -> int:
 
 def cmd_label_task(a) -> int:
     """Add label LABEL (created with `label`) to a task, keeping its other labels."""
-    lid = labels_map().get(a.label)
+    # labels.json is keyed by lower-case name, like the case-insensitive dedupe in `label`
+    lid = labels_map().get(a.label.lower())
     if not lid:
         raise SystemExit(f"unknown label: {a.label}")
     tid = task_id(a.title)
     s0, snap = e.sync("owner", ws_id(), [])
     if s0 != 200:
         raise SystemExit(f"label-task: snapshot HTTP {s0}")
+    # a stack or DB reset leaves a dead id in labels.json: say so instead of a server error
+    if not any(x.get("id") == lid and not x.get("is_deleted") for x in snap.get("labels", [])):
+        raise SystemExit(f"label-task: stale label id for {a.label}, rerun label")
     cur = [t for t in snap.get("tasks", []) if t.get("id") == tid and not t.get("is_deleted")]
     if not cur:
         raise SystemExit(f"label-task: task not found in snapshot: {a.title}")
@@ -287,6 +293,25 @@ def cmd_comment(a) -> int:
 
 def cmd_subtask(a) -> int:
     parent = task_id(a.parent)
+    # tasks.json is keyed by title: a colliding title would silently retarget later
+    # edit-task/delete-task/comment calls, so refuse it (a live subtask of the same
+    # parent is reused, which makes a rerun a no-op)
+    existing = tasks_map().get(a.title)
+    if existing:
+        s0, snap = e.sync("owner", ws_id(), [])
+        if s0 != 200:
+            raise SystemExit(f"subtask: snapshot HTTP {s0}")
+        same = [
+            t
+            for t in snap.get("tasks", [])
+            if t.get("id") == existing
+            and not t.get("is_deleted")
+            and t.get("parent_task_id") == parent
+        ]
+        if same:
+            print("subtask exists", a.title, "of", a.parent)
+            return 0
+        raise SystemExit(f"subtask: title already used by another task: {a.title}")
     tmp = e.new_temp_id()
     args = {"title": a.title, "parent_task_id": parent}
     if a.start or not a.deadline:
