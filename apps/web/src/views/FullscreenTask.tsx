@@ -61,6 +61,7 @@ export function FullscreenTask() {
   // reader. Escape is handled by Shell's window-level key map either way.
   useEffect(() => {
     if (fullscreenTaskId && task) scrollRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on task?.id on purpose: focus once per opened task, not on every edit that replaces the task object
   }, [fullscreenTaskId, task?.id]);
 
   if (!task) return null;
