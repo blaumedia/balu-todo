@@ -200,7 +200,7 @@ other client. Tools: `list_workspaces`, `list_projects`, `list_tasks`, `get_task
 
 ## Development
 
-- Backend: `cd server && make dev` needs a Postgres at `DATABASE_URL` (default `postgresql+psycopg://balu:balu@localhost:5432/balu`) and either a real `SECRET_KEY` or `BALU_DEV=1`. The quickest throwaway database is the test one: `make test-db-up`, then `DATABASE_URL=postgresql+psycopg://balu:balu@localhost:5433/balu_test BALU_DEV=1 make dev` (tmpfs: gone after `make test-db-down`, and shared with `make test`).
+- Backend: `cd server && make dev` needs a Postgres at `DATABASE_URL` (default `postgresql+psycopg://balu:balu@localhost:5432/balu`) and either a real `SECRET_KEY` or `BALU_DEV=1`. The quickest throwaway database is the test one: `make test-db-up`, then `DATABASE_URL=postgresql+psycopg://balu:balu@localhost:5433/balu_test BALU_DEV=1 make dev` (port = your `TEST_DB_PORT`; tmpfs: gone after `make test-db-down`, and shared with `make test`).
 - Web: `pnpm install && pnpm --filter @balu/web dev` (proxies `/api` → `:8000`)
 - Mobile: `pnpm --filter @balu/mobile start` - see `apps/mobile/README.md`
 - Lint: `pnpm lint` (ESLint 9 in every JS/TS package; CI runs it).

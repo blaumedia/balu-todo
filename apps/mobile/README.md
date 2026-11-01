@@ -152,7 +152,7 @@ Notes & limits:
 ```bash
 pnpm --filter @balu/mobile typecheck        # tsc --noEmit - clean
 pnpm --filter @balu/mobile lint             # eslint (expo config) - clean
-pnpm --filter @balu/mobile test             # vitest - reminder + search logic
+pnpm --filter @balu/mobile test             # vitest - pure logic
 npx expo export --platform ios              # full Metro bundle
 npx expo-doctor                             # project health
 ```

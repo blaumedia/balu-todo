@@ -34,6 +34,7 @@ env:
   GHCR_IMAGE: ghcr.io/blaumedia/balu-todo
   PLATFORMS: linux/amd64,linux/arm64
 
+# Keep the backend and clients gate jobs in sync with the copies in ci.yml.
 jobs:
   # Test gate: the same checks ci.yml runs on main, repeated here because a tag
   # can be pushed from a commit whose CI run failed or never finished. The image
