@@ -1,0 +1,14 @@
+# gitleaks config for this repo: the default rules plus allowlists for known,
+# reviewed false positives. Keep each entry narrow (path + regex) and say why.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixed, non-secret signing keys used only by the server test suite"
+paths = [
+  '''^server/tests/conftest\.py$''',
+  '''^server/tests/test_config\.py$''',
+]
+regexes = [
+  '''key-at-least-32-bytes-long''',
+]
