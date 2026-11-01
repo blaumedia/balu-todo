@@ -56,7 +56,7 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
   this is the only way in). It recreates just the app container, without a rebuild; the flag
   persists across `up`. Check with an authenticated `GET /api/v1/me/mcp?probe=true`
   (session bearer token, e.g. from `api.py`; a plain curl gets 401): the body is
-  `{"enabled": false}` while off, and carries `endpoint` and `key` as well while on.
+  `{"enabled": false}` while off, and carries `endpoint`, `key` and `claude_code_command` as well while on.
 - A non-2xx response makes the `api.py` subcommands exit 1.
 - `task TITLE` prints one task row, `tokens` prints refresh-token counts per account.
 
@@ -103,22 +103,25 @@ page URL after the redirect, which contains the token: treat that output as sens
 
 ## 6. Android emulator runbook
 
-- **Clone an AVD, never reuse one another agent runs.** The base `BaluE2EMobile` AVD is
-  assumed to exist; create it with e.g.
-  `avdmanager create avd -n BaluE2EMobile -k "system-images;android-34;google_apis;arm64-v8a"`.
+- **Tools:** `adb` and `emulator` come from `$ANDROID_HOME/platform-tools` and
+  `$ANDROID_HOME/emulator`. `android/ui.py`, `login.py` and `cold.sh` use
+  `$ANDROID_HOME/platform-tools/adb` when `ANDROID_HOME` is set, else `adb` from `PATH`.
+- **Clone an AVD, never reuse one another agent runs.** The base AVD is `Medium_Phone`.
+  Its ini file name is not necessarily the AVD name (here `Medium_Phone_API_35.ini`): find it
+  with `ls ~/.android/avd/*.ini` and read `path=` in it to get the `.avd` directory.
   `cp -cR` is macOS/APFS only (use `cp -R` elsewhere):
 
   ```sh
   cd ~/.android/avd
-  cp -cR BaluE2EMobile.avd <Clone>.avd
-  sed 's#BaluE2EMobile.avd#<Clone>.avd#' BaluE2EMobile.ini > <Clone>.ini
+  cp -cR <Base>.avd <Clone>.avd          # <Base>.avd is the path= directory of the base ini
+  sed 's#<Base>.avd#<Clone>.avd#' <BaseIni>.ini > <Clone>.ini
   rm -f <Clone>.avd/*.lock
   ```
 
   Then set `AvdId=<Clone>` and `avd.ini.displayname=<Clone>` in `<Clone>.avd/config.ini`.
   Start it with `emulator -avd <Clone> -port <free even port 5554-5682> -no-snapshot-save &`
   and `export ANDROID_SERIAL=emulator-<port>`.
-- **The shared `Medium_Phone` AVD may carry a stale logged-in app.** After cloning, run
+- **The base `Medium_Phone` AVD may carry a stale logged-in app.** After cloning, run
   `adb -s <own serial> shell pm clear "${BALU_ANDROID_PACKAGE:-com.blaumedia.balutodo}"`
   before testing.
 - **Never touch other emulators:** no `adb kill-server`, no `adb emu kill` without your
@@ -126,6 +129,9 @@ page URL after the redirect, which contains the token: treat that output as sens
 - Server URL in the app: `http://10.0.2.2:<port>`.
 - **Release build for offline or cold-start tests**, because the dev client needs Metro
   to load the bundle: `cd apps/mobile && npx expo run:android --variant release --device <Clone>`.
+  `expo prebuild` (run by this command) rewrites `apps/mobile/package.json` and creates
+  `apps/mobile/android`: afterwards run `git checkout apps/mobile/package.json` and
+  `rm -rf apps/mobile/android`.
   `npx expo run:android --help` lists `--variant <name>` (default debug) and
   `-d, --device [device]`, plus `--no-bundler`, `--binary <path>` and `--app-id`.
 - **Dev-client deep link:**
@@ -138,10 +144,13 @@ page URL after the redirect, which contains the token: treat that output as sens
 - Android date and time pickers follow the **system** locale, not the app locale.
 - uiautomator dumps never contain password-field text (`ui.py` filters `password="true"`
   nodes). Do not bypass `ui.py` for dumps.
-- `android/dot.py` needs Pillow (`uv run --python 3.11 --with pillow python ...`) and the current header layout.
+- The header sync indicator is a dot with no text, but its status is its content-desc:
+  `android/ui.py desc 'Synced|Syncing|Offline|Sync failed|Synchron'` (EN/DE labels).
+- Web notices a lost connection from the browser `offline` event right away; a throttled
+  network that stays "up" is only noticed at the next failed request.
 
 Scripts: `android/ui.py` (list, tap, has, dump, swipe, state, type), `android/login.py ROLE`,
-`android/cold.sh`, `android/dot.py [--watch SECONDS]`.
+`android/cold.sh`. `ui.py` also has `desc REGEX`.
 
 ## 7. What was deliberately not committed
 

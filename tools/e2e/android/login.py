@@ -40,7 +40,8 @@ def main() -> int:
     time.sleep(1)
     type_text(e.email(role))
     time.sleep(1)
-    tap(r"^(Password|Passwort)$")
+    # TAB moves focus to the password field; ui.py hides password nodes, so it cannot be tapped
+    ui.adb("shell", "input", "keyevent", "61")
     time.sleep(1)
     type_text(pw)
     time.sleep(1)

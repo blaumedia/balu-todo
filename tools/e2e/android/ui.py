@@ -6,6 +6,10 @@ ANDROID_SERIAL is required: these scripts never pick a device. Password fields
 
   ui.py list | tap REGEX [--desc] | has REGEX [--desc] | dump FILE
   ui.py swipe DESC_REGEX left|right | state | type TEXT
+  ui.py desc REGEX   print the content-desc of every node whose content-desc matches
+                     (e.g. the sync status: desc 'Synced|Syncing|Offline|Sync failed|Synchron')
+
+adb comes from $ANDROID_HOME/platform-tools when ANDROID_HOME is set, else from PATH.
 """
 from __future__ import annotations
 
@@ -28,17 +32,19 @@ if not _SERIAL:
     )
 SER: str = _SERIAL
 REMOTE = "/sdcard/balu-e2e-ui.xml"
+_HOME = os.environ.get("ANDROID_HOME")
+ADB = os.path.join(_HOME, "platform-tools", "adb") if _HOME else "adb"
 
 
 def adb(*a: str, check: bool = True) -> str:
     try:
-        r = subprocess.run(["adb", "-s", SER, *a], capture_output=True, text=True, check=check)
+        r = subprocess.run([ADB, "-s", SER, *a], capture_output=True, text=True, check=check)
     except subprocess.CalledProcessError as err:
         raise SystemExit(
             f"adb failed for {SER} ({' '.join(a[:2])}): exit {err.returncode}"
         ) from None
     except FileNotFoundError:
-        raise SystemExit("adb not found on PATH") from None
+        raise SystemExit(f"adb not found ({ADB})") from None
     return r.stdout
 
 
@@ -82,7 +88,7 @@ def main() -> int:
     cmd = argv[0]
     desc = "--desc" in argv
     args = [x for x in argv[1:] if x != "--desc"]
-    need = {"list": 0, "state": 0, "type": 1, "tap": 1, "has": 1, "dump": 1, "swipe": 2}
+    need = {"list": 0, "state": 0, "type": 1, "tap": 1, "has": 1, "dump": 1, "swipe": 2, "desc": 1}
     if cmd not in need:
         raise SystemExit(__doc__)
     if len(args) < need[cmd] or (cmd != "type" and len(args) > need[cmd]):
@@ -119,6 +125,13 @@ def main() -> int:
         for n in hits:
             print(n.get("bounds"), "en=", n.get("enabled"), "text=", (n.get("text") or "")[:60],
                   "desc=", (n.get("content-desc") or "")[:80])
+    elif cmd == "desc":
+        hits = find(root, args[0], desc=True)
+        if not hits:
+            print("NOT FOUND", args[0])
+            return 2
+        for n in hits:
+            print(n.get("content-desc"))
     elif cmd == "dump":
         for n in root.iter("node"):
             if n.get("password") == "true":
