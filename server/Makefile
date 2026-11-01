@@ -36,7 +36,7 @@ lint:
 	uv run ruff check . ../tools/e2e
 
 fmt:
-	uv run ruff check --fix .
+	uv run ruff check --fix . ../tools/e2e
 	uv run ruff format .
 
 migrate:
