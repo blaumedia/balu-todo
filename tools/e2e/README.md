@@ -70,7 +70,7 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `setup [--member-role R] [--tasks N]` | registers owner and member, invites, seeds a project and N tasks |
 | `role ROLE` | changes the member's role |
 | `bulk N` | adds N tasks |
-| `edit-task TITLE FIELD VALUE` | `task_update` as owner (`priority` is an int; `assigned_to` also accepts `owner` or `member` for the seeded account; `recurrence` takes an RRULE such as `FREQ=DAILY`) |
+| `edit-task TITLE FIELD VALUE` | `task_update` as owner (`priority` is an int; `assigned_to` also accepts `owner` or `member` for the seeded account, and `none` (or empty) to unassign; `recurrence` takes an RRULE such as `FREQ=DAILY`) |
 | `delete-task TITLE` | `task_delete` as owner |
 | `attach TITLE FILE` | uploads FILE to the task as owner (multipart, CONTRACT 3.7.1); exit 1 on non-2xx |
 | `label NAME` | creates a label as owner (id remembered for `label-task`); idempotent: an existing live label of that name (case-insensitive) is reused |

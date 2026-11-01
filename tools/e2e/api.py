@@ -170,8 +170,11 @@ def cmd_edit_task(a) -> int:
         value = int(a.value)
     elif a.field == "evening":
         value = a.value.lower() in ("1", "true", "t", "yes")
-    elif a.field == "assigned_to" and a.value in ("owner", "member"):
-        value = e.load(f"{a.value}.uid")
+    elif a.field == "assigned_to":
+        if a.value in ("owner", "member"):
+            value = e.load(f"{a.value}.uid")
+        elif a.value.lower() in ("", "none", "null"):
+            value = None  # unassign
     args = {"id": task_id(a.title), a.field: value}
     cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
     s, b = e.sync("owner", ws_id(), [cmd])
@@ -183,7 +186,13 @@ def cmd_delete_task(a) -> int:
     cmd = {"type": "task_delete", "uuid": e.new_uuid(), "args": {"id": task_id(a.title)}}
     s, b = e.sync("owner", ws_id(), [cmd])
     print("task_delete", a.title, "->", s, e.statuses(b))
-    return synced(s, b)
+    rc = synced(s, b)
+    if rc == 0:
+        # drop the title so a later subtask/bulk of the same title is not read as a collision
+        known = tasks_map()
+        if known.pop(a.title, None) is not None:
+            e.save("tasks.json", json.dumps(known))
+    return rc
 
 
 def cmd_attach(a) -> int:
@@ -256,7 +265,10 @@ def cmd_label(a) -> int:
 def cmd_label_task(a) -> int:
     """Add label LABEL (created with `label`) to a task, keeping its other labels."""
     # labels.json is keyed by lower-case name, like the case-insensitive dedupe in `label`
-    lid = labels_map().get(a.label.lower())
+    known = labels_map()
+    lid = known.get(a.label.lower()) or next(
+        (v for k, v in known.items() if k.lower() == a.label.lower()), None
+    )  # a labels.json written before keys were lower-cased
     if not lid:
         raise SystemExit(f"unknown label: {a.label}")
     tid = task_id(a.title)
@@ -295,23 +307,23 @@ def cmd_subtask(a) -> int:
     parent = task_id(a.parent)
     # tasks.json is keyed by title: a colliding title would silently retarget later
     # edit-task/delete-task/comment calls, so refuse it (a live subtask of the same
-    # parent is reused, which makes a rerun a no-op)
+    # parent is reused, which makes a rerun a no-op). A stored id that is dead or
+    # gone from the snapshot is stale: create anew and overwrite the entry.
     existing = tasks_map().get(a.title)
     if existing:
         s0, snap = e.sync("owner", ws_id(), [])
         if s0 != 200:
             raise SystemExit(f"subtask: snapshot HTTP {s0}")
-        same = [
+        live = [
             t
             for t in snap.get("tasks", [])
-            if t.get("id") == existing
-            and not t.get("is_deleted")
-            and t.get("parent_task_id") == parent
+            if t.get("id") == existing and not t.get("is_deleted")
         ]
-        if same:
+        if live and live[0].get("parent_task_id") == parent:
             print("subtask exists", a.title, "of", a.parent)
             return 0
-        raise SystemExit(f"subtask: title already used by another task: {a.title}")
+        if live:
+            raise SystemExit(f"subtask: title already used by another task: {a.title}")
     tmp = e.new_temp_id()
     args = {"title": a.title, "parent_task_id": parent}
     if a.start or not a.deadline:
