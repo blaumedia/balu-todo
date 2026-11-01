@@ -104,10 +104,26 @@ describe("useUrlSync - reader history wiring", () => {
     act(() => useApp.setState({ fullscreenTaskId: null }));
     act(() => useApp.setState({ fullscreenTaskId: "t1" })); // reopened before the popstate
     await act(tick);
+    // the reopened reader has its own marked entry on top of the landed one
+    expect(globalThis.history.state).toEqual({ baluReader: true, under: "/today?task=t1" });
     act(() => useApp.setState({ fullscreenTaskId: null }));
     await act(tick);
     expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
     expect(useApp.getState().view).toEqual(today);
+  });
+
+  it("browser Back from a reader reopened before our pop closes it", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    await act(tick);
+    act(() => globalThis.history.back());
+    await act(tick);
+    expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
+    expect(useApp.getState().fullscreenTaskId).toBeNull();
   });
 
   it("unmount drops a pending pop expectation", async () => {

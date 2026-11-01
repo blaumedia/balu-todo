@@ -55,9 +55,10 @@ describe('rowDate', () => {
   it('marks a deadline-only task and returns null without any date', () => {
     expect(d(null, '2026-05-20', false)?.isDeadlineOnly).toBe(true);
     expect(d('2026-05-20', '2026-06-01', false)?.isDeadlineOnly).toBe(false);
-    // the start date wins over the deadline
+    expect(d(null, null, false)).toBeNull();
+  });
+  it('prefers the start date over the deadline', () => {
     expect(d(today, '2026-05-20', false)?.info.tone).toBe('today');
     expect(d(today, '2026-05-20', true)).toBeNull();
-    expect(d(null, null, false)).toBeNull();
   });
 });
