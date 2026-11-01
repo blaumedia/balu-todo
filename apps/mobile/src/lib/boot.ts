@@ -272,10 +272,13 @@ function showBootNotice(state: 'reconnecting' | 'noWorkspace'): void {
  * root layout's redirect effect (leaveForOnboarding): every path that ends in boot
  * 'onboarding' just sets the state, and that effect (past the gate) or the index
  * gate (cold start) does the navigating, so exactly one navigation happens.
+ * `canDismiss` is read by the caller from the live navigation state (canDismissState):
+ * `router.canDismiss()` reads a router store that can lag behind it and answered
+ * false with a screen pushed, which left a hidden `(tabs)` below onboarding.
  */
-export function navigateToOnboarding(): void {
+export function navigateToOnboarding(canDismiss: boolean): void {
   try {
-    if (router.canDismiss()) router.dismissAll();
+    if (canDismiss) router.dismissAll();
     router.replace('/onboarding');
   } catch {
     /* router not ready */
@@ -522,6 +525,9 @@ function resetToWorkspaceRoot(): void {
   st.closeSchedule();
   st.closeProjectActions();
   try {
+    // router.canDismiss() is safe here: this runs after network calls on a live
+    // session, long after the store started following the navigation (onReady);
+    // only the cold-start gate and onboarding redirect need the live state.
     if (router.canDismiss()) router.dismissAll();
   } catch {
     /* router not ready */

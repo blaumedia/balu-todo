@@ -62,10 +62,37 @@ export function leaveForOnboarding(boot: Boot, segments: readonly string[], navi
  * remount the tabs); replace only when nothing is below. For onboarding a plain
  * replace would give `[(tabs), onboarding]` (Back reveals a tab with no session),
  * so dismiss first and let the replace swap the one root screen left.
+ *
+ * `canDismiss` comes from the gate screen's own navigation state, not from
+ * `router.canDismiss()`: that reads the router store, which has not seen the
+ * first stack state yet when the gate's effect runs on a cold start (it answers
+ * false), so the replace alone left a hidden `(tabs)` below the destination and
+ * the first Back press appeared to do nothing (e2e dce0f6d0 F1).
  */
-export function leaveGate(href: Href): void {
-  const canDismiss = router.canDismiss();
+export function leaveGate(href: Href, canDismiss: boolean): void {
   if (canDismiss) router.dismissAll();
   if (href === '/today' && canDismiss) return;
   router.replace(href);
+}
+
+/** Minimal shape of a navigation state, enough to walk down to the focused stack. */
+export interface NavStateLike {
+  type?: string;
+  index?: number;
+  routes?: readonly { name?: string; state?: NavStateLike }[];
+}
+
+/**
+ * Whether the focused stack has a screen to pop, read from a live navigation state
+ * (`navigationRef.getRootState()`). Same walk as `router.canDismiss()`, which reads a
+ * router store that lags behind the real state (e2e dce0f6d0 F1).
+ */
+export function canDismissState(state: NavStateLike | undefined): boolean {
+  let s = state;
+  while (s) {
+    if (s.type === 'stack' && (s.routes?.length ?? 0) > 1) return true;
+    if (s.index === undefined) return false;
+    s = s.routes?.[s.index]?.state;
+  }
+  return false;
 }

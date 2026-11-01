@@ -149,6 +149,8 @@ export default function SettingsScreen() {
       // server. Reset the context and collapse the stack back to the tabs, which
       // set the context themselves on focus.
       setContext({ kind: 'list', list: 'today' });
+      // router.canDismiss() reads expo-router's store, which only lags at cold start
+      // (before the container's onReady); a user action here runs long after it.
       if (router.canDismiss()) router.dismissAll();
     } catch {
       Alert.alert(t('workspace.switchError'));
@@ -193,6 +195,7 @@ export default function SettingsScreen() {
       // Same hygiene as a switch: everything under this screen still belongs to
       // the workspace that no longer exists.
       setContext({ kind: 'list', list: 'today' });
+      // Store is current here (see the switch above).
       if (router.canDismiss()) router.dismissAll();
     } finally {
       deletingRef.current = false;

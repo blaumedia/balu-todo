@@ -1,6 +1,6 @@
 import '../lib/polyfills'; // must run first — installs crypto.randomUUID for the sync client
 import { useLastNotificationResponse } from 'expo-notifications';
-import { Stack, useSegments } from 'expo-router';
+import { Stack, useNavigationContainerRef, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -15,7 +15,7 @@ import { ScheduleSheet } from '../features/ScheduleSheet';
 import { TaskDetailSheet } from '../features/TaskDetailSheet';
 import { bootApp, navigateToOnboarding } from '../lib/boot';
 import { getSync, subscribeSyncClient } from '../lib/clients';
-import { leaveForOnboarding } from '../lib/goBack';
+import { canDismissState, leaveForOnboarding } from '../lib/goBack';
 import { watchLocaleRetries } from '../lib/localeChoice';
 import { configureNotifications, openTaskFromNotification, taskIdFromResponse } from '../lib/notifications';
 import { useApp } from '../store/app';
@@ -84,12 +84,13 @@ function Chrome() {
   const theme = useTheme();
   const boot = useApp((s) => s.boot);
   const segments = useSegments();
+  const navigationRef = useNavigationContainerRef();
   // The single owner of leaving for onboarding once past the index gate (logout,
   // change server, expiry, a lost workspace, a cold deep link): those paths only set
   // boot 'onboarding'. The index gate owns the same step for segments [].
   useEffect(() => {
-    leaveForOnboarding(boot, segments, navigateToOnboarding);
-  }, [boot, segments]);
+    leaveForOnboarding(boot, segments, () => navigateToOnboarding(canDismissState(navigationRef.getRootState())));
+  }, [boot, segments, navigationRef]);
   return (
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />

@@ -9,7 +9,7 @@ const router = vi.hoisted(() => ({
 }));
 vi.mock('expo-router', () => ({ router }));
 
-import { gateTarget, goBackOr, leaveForOnboarding, leaveGate, needsOnboardingRedirect } from '../src/lib/goBack';
+import { canDismissState, gateTarget, goBackOr, leaveForOnboarding, leaveGate, needsOnboardingRedirect } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -50,8 +50,7 @@ describe('goBackOr', () => {
 
 describe('leaveGate', () => {
   it('clears the anchor stack before replacing, so one root screen is left', () => {
-    router.canDismiss.mockReturnValue(true);
-    leaveGate('/onboarding');
+    leaveGate('/onboarding', true);
     expect(router.dismissAll).toHaveBeenCalledTimes(1);
     expect(router.replace).toHaveBeenCalledWith('/onboarding');
     expect(router.dismissAll.mock.invocationCallOrder[0]).toBeLessThan(
@@ -60,17 +59,53 @@ describe('leaveGate', () => {
   });
 
   it('dismisses alone for the app: the anchor already is (tabs)/Today', () => {
-    router.canDismiss.mockReturnValue(true);
-    leaveGate('/today');
+    leaveGate('/today', true);
     expect(router.dismissAll).toHaveBeenCalledTimes(1);
     expect(router.replace).not.toHaveBeenCalled();
   });
 
   it('only replaces when there is nothing to dismiss', () => {
-    router.canDismiss.mockReturnValue(false);
-    leaveGate('/today');
+    leaveGate('/today', false);
     expect(router.dismissAll).not.toHaveBeenCalled();
     expect(router.replace).toHaveBeenCalledWith('/today');
+  });
+
+  it('trusts the given answer, not the router store (which lags on a cold start)', () => {
+    router.canDismiss.mockReturnValue(false);
+    leaveGate('/onboarding', true);
+    expect(router.dismissAll).toHaveBeenCalledTimes(1);
+    expect(router.canDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe('canDismissState', () => {
+  const stack = (...names: string[]) => ({ type: 'stack', index: names.length - 1, routes: names.map((name) => ({ name })) });
+
+  it('is true when the focused stack holds more than one screen', () => {
+    const root = { type: 'stack', index: 0, routes: [{ state: stack('(tabs)', 'index') }] };
+    expect(canDismissState(root)).toBe(true);
+  });
+
+  it('is false for a single root screen, or no state yet', () => {
+    expect(canDismissState({ type: 'stack', index: 0, routes: [{ state: stack('onboarding') }] })).toBe(false);
+    expect(canDismissState(undefined)).toBe(false);
+  });
+
+  it('finds a deeper stack: one root screen whose focused tab holds a two-screen stack', () => {
+    const root = { type: 'stack', index: 0, routes: [{ state: { type: 'tab', index: 0, routes: [{ state: stack('a', 'b') }] } }] };
+    expect(canDismissState(root)).toBe(true);
+  });
+
+  it('is false after a logout dismissed down to the tabs (root [(tabs)] with single-screen tab stacks)', () => {
+    const tabs = { type: 'tab', index: 0, routes: [{ name: 'today' }, { name: 'browse' }] };
+    const app = { type: 'stack', index: 0, routes: [{ name: '(tabs)', state: tabs }] };
+    const root = { type: 'stack', index: 0, routes: [{ state: app }] };
+    expect(canDismissState(root)).toBe(false);
+  });
+
+  it('walks to the focused route only', () => {
+    const tabs = { type: 'tab', index: 1, routes: [{ state: stack('a', 'b') }, { state: stack('c') }] };
+    expect(canDismissState({ type: 'stack', index: 0, routes: [{ state: tabs }] })).toBe(false);
   });
 });
 

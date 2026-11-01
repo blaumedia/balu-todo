@@ -664,21 +664,24 @@ describe('logout', () => {
 
 describe('navigateToOnboarding', () => {
   it('takes the pushed screens down first, then replaces with onboarding', () => {
-    fake.canDismiss = true;
-    navigateToOnboarding();
+    navigateToOnboarding(true);
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('trusts the given answer, not the router store (which can lag)', () => {
+    fake.canDismiss = false;
+    navigateToOnboarding(true);
     expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
   });
 
   it('only replaces when there is nothing to dismiss', () => {
-    fake.canDismiss = false;
-    navigateToOnboarding();
+    navigateToOnboarding(false);
     expect(fake.nav).toEqual(['replace:/onboarding']);
   });
 
   it('does not throw when the router is not ready', () => {
-    fake.canDismiss = true;
     fake.routerThrows = true;
-    expect(() => navigateToOnboarding()).not.toThrow();
+    expect(() => navigateToOnboarding(true)).not.toThrow();
   });
 });
 
