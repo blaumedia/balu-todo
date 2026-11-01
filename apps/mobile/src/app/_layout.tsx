@@ -15,10 +15,10 @@ import { ScheduleSheet } from '../features/ScheduleSheet';
 import { TaskDetailSheet } from '../features/TaskDetailSheet';
 import { bootApp, navigateToOnboarding } from '../lib/boot';
 import { getSync, subscribeSyncClient } from '../lib/clients';
-import { needsOnboardingRedirect } from '../lib/goBack';
-import { retryLocaleOnReconnect, retryPendingLocale } from '../lib/localeChoice';
-import { useApp } from '../store/app';
+import { leaveForOnboarding } from '../lib/goBack';
+import { watchLocaleRetries } from '../lib/localeChoice';
 import { configureNotifications, openTaskFromNotification, taskIdFromResponse } from '../lib/notifications';
+import { useApp } from '../store/app';
 import { ThemeProvider, useScheme, useTheme } from '../theme/ThemeProvider';
 
 /**
@@ -55,21 +55,16 @@ export default function RootLayout() {
     // Foreground (contract §6.7): sync now and restart the retry backoff from its
     // shortest delay - it may have grown to 30 s while the app was in the background.
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        void getSync()?.wake();
-        void retryPendingLocale();
-      }
+      if (state === 'active') void getSync()?.wake();
     });
-    // A pending language choice is sent again once sync is back online.
-    let unwatch: (() => void) | null = null;
-    const unsubscribe = subscribeSyncClient((client) => {
-      unwatch?.();
-      unwatch = client ? retryLocaleOnReconnect(client) : null;
+    // A pending language choice is sent again on foreground and once sync is back online.
+    const unwatchLocale = watchLocaleRetries({
+      onAppStateChange: (cb) => AppState.addEventListener('change', cb),
+      subscribeSyncClient,
     });
     return () => {
       sub.remove();
-      unsubscribe();
-      unwatch?.();
+      unwatchLocale();
     };
   }, []);
 
@@ -92,7 +87,7 @@ function Chrome() {
   // Logged out with a pushed screen in front (cold deep link, or /me answering 401):
   // the index gate is not in that stack, so nothing else would leave it.
   useEffect(() => {
-    if (needsOnboardingRedirect(boot, segments)) navigateToOnboarding();
+    leaveForOnboarding(boot, segments, navigateToOnboarding);
   }, [boot, segments]);
   return (
     <>

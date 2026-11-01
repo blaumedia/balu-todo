@@ -210,13 +210,12 @@ function showBootNotice(state: 'reconnecting' | 'noWorkspace'): void {
   st.setBoot(state);
 }
 
-/** Past the cold-start gate: a screen of the app may be showing, so the router must be moved. */
-function pastColdStartGate(): boolean {
-  const boot = useApp.getState().boot;
-  return boot === 'ready' || boot === 'reconnecting' || boot === 'noWorkspace';
-}
-
-/** Take every pushed screen down and land on the login step (what the index gate does on a cold start). */
+/**
+ * Take every pushed screen down and land on the login step. The only caller is the
+ * root layout's redirect effect (leaveForOnboarding): every path that ends in boot
+ * 'onboarding' just sets the state, and that effect (past the gate) or the index
+ * gate (cold start) does the navigating, so exactly one navigation happens.
+ */
 export function navigateToOnboarding(): void {
   try {
     if (router.canDismiss()) router.dismissAll();
@@ -240,10 +239,7 @@ function holdForWorkspace(serverUrl: string, api: ApiClient): void {
       if (!waiting()) return;
       try {
         if (!(await establishSession(serverUrl, api, null, false, waiting))) {
-          if (waiting()) {
-            useApp.getState().setBoot('onboarding');
-            navigateToOnboarding(); // boot was 'noWorkspace', so a screen is showing
-          }
+          if (waiting()) useApp.getState().setBoot('onboarding'); // the root layout's effect leaves the screen
         }
         return;
       } catch (e) {
@@ -299,9 +295,7 @@ async function landOutside(lostId: string): Promise<void> {
   }
   if (!ok) {
     teardownSync();
-    const pastGate = pastColdStartGate();
-    useApp.getState().setBoot('onboarding');
-    if (pastGate) navigateToOnboarding(); // earlier boot phases: the index gate redirects on its own
+    useApp.getState().setBoot('onboarding'); // the root layout's effect (or the index gate) navigates
   } else {
     resetToWorkspaceRoot();
   }
@@ -408,8 +402,8 @@ export async function bootApp(): Promise<void> {
       try {
         const cached = JSON.parse(sessionRaw) as { user: User; workspace: Workspace };
         store.setSession(cached.user, [], cached.workspace);
-        // The cached user carries the language of the last /me, not the user's
-        // latest choice (made offline, or confirmed after the cache was written).
+        // Covers sessions cached before setLocale kept the cache in step: those carry
+        // the language of the last /me, not the user's latest choice.
         if (localeRaw === 'de' || localeRaw === 'en') store.setLocale(localeRaw as Locale);
         initSync(serverUrl, cached.workspace.id, cached.user.id);
         void resumeReminders();
@@ -432,13 +426,10 @@ export async function expireSession(): Promise<void> {
   teardownSync();
   await getApi()?.logout().catch(() => {}); // no network call once the refresh token is gone
   const st = useApp.getState();
-  // The notice screens may sit on the tabs or on the index gate (a cold start with no
-  // workspace); replacing to /onboarding from the gate is harmless, it goes there anyway.
-  const pastGate = pastColdStartGate();
+  // Only the state changes here: the root layout's effect leaves a screen of the app,
+  // the index gate handles the cold start.
   st.reset();
   st.setLoginNotice('sessionExpired');
-  if (!pastGate) return; // earlier boot phases: the index gate redirects on its own
-  navigateToOnboarding();
 }
 
 setSessionExpiredHandler(() => {
@@ -447,9 +438,9 @@ setSessionExpiredHandler(() => {
 
 /**
  * Log out everywhere: stop syncing, revoke server-side, wipe local user data,
- * and leave for onboarding. The navigation lives here so every caller (Settings
- * logout, change server) clears the stack: a bare replace left Today underneath
- * and the Android back button returned to it.
+ * and end the session. Leaving for onboarding is the root layout's effect (it
+ * clears the stack for every caller: Settings logout, change server, BootNotice), so
+ * a bare replace can not leave Today underneath for the Android back button.
  */
 export async function logout(): Promise<void> {
   let revoked: Promise<void> = Promise.resolve();
@@ -473,13 +464,8 @@ export async function logout(): Promise<void> {
     await purgeUserData();
   } finally {
     // A failing purge must still end the session in the UI and leave the screen.
+    // The root layout's effect sees boot 'onboarding' and clears the stack.
     useApp.getState().reset();
-    try {
-      if (router.canDismiss()) router.dismissAll();
-      router.replace('/onboarding');
-    } catch {
-      /* router not ready */
-    }
   }
   await revoked;
 }

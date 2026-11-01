@@ -21,8 +21,8 @@ vi.mock('../src/features/ScheduleSheet', () => ({ ScheduleSheet: () => null }));
 vi.mock('../src/features/TaskDetailSheet', () => ({ TaskDetailSheet: () => null }));
 vi.mock('../src/lib/boot', () => ({ bootApp: async () => {}, navigateToOnboarding: () => {} }));
 vi.mock('../src/lib/clients', () => ({ getSync: () => null, subscribeSyncClient: () => () => {} }));
-vi.mock('../src/lib/goBack', () => ({ needsOnboardingRedirect: () => false }));
-vi.mock('../src/lib/localeChoice', () => ({ retryLocaleOnReconnect: () => () => {}, retryPendingLocale: async () => {} }));
+vi.mock('../src/lib/goBack', () => ({ leaveForOnboarding: () => false }));
+vi.mock('../src/lib/localeChoice', () => ({ watchLocaleRetries: () => () => {} }));
 vi.mock('../src/store/app', () => ({ useApp: () => 'loading' }));
 vi.mock('../src/lib/notifications', () => ({
   configureNotifications: () => {},

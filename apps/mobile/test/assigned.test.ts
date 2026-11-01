@@ -16,7 +16,7 @@ describe('shouldLeaveAssigned', () => {
     expect(shouldLeaveAssigned({ ...ready, memberCount: 1 })).toBe('back');
     expect(shouldLeaveAssigned({ ...ready, hasUser: false })).toBe('back');
   });
-  it('hands over to the index gate when boot resolves to logged out', () => {
-    expect(shouldLeaveAssigned({ boot: 'onboarding', status: 'offline', hasUser: false, memberCount: 0 })).toBe('gate');
+  it('stays when boot resolves to logged out (the root layout redirects)', () => {
+    expect(shouldLeaveAssigned({ boot: 'onboarding', status: 'offline', hasUser: false, memberCount: 0 })).toBeNull();
   });
 });

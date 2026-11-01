@@ -7,7 +7,7 @@ import { TaskItems } from '../components/TaskList';
 import { EmptyState } from '../components/ui';
 import { useT } from '../i18n';
 import { shouldLeaveAssigned } from '../lib/assigned';
-import { goBackOr, replaceWithGate } from '../lib/goBack';
+import { goBackOr } from '../lib/goBack';
 import { useApp } from '../store/app';
 import { useMaps, useSnapshot } from '../store/useSnapshot';
 import { useTheme } from '../theme/ThemeProvider';
@@ -23,14 +23,12 @@ export default function AssignedScreen() {
   const today = todayLocalISO();
 
   // Solo workspace or logged out → nothing to show here; bounce back, but only
-  // once boot/data are confirmed. Logged out: clear the stack and hand over to
-  // the index gate, so no session-less screen stays reachable by Back.
+  // once boot/data are confirmed. Logged out is the root layout's redirect.
   const boot = useApp((s) => s.boot);
   const memberCount = snap.members.filter((m) => !m.is_deleted).length;
   const leave = shouldLeaveAssigned({ boot, status: snap.status, hasUser: user != null, memberCount });
   useEffect(() => {
-    if (leave === 'gate') replaceWithGate();
-    else if (leave === 'back') goBackOr('/');
+    if (leave === 'back') goBackOr('/');
   }, [leave]);
 
   const tasks = user ? selectList(snap.tasks, snap.projects, 'assigned', today, user.id) : [];

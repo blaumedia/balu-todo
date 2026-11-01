@@ -17,6 +17,5 @@ describe('purgeUserData', () => {
     const [sql, ...kept] = db.calls[0] as string[];
     expect(sql).toContain('NOT IN');
     expect(kept).toEqual([SETTINGS.serverUrl, SETTINGS.theme, SETTINGS.locale, SETTINGS.remindersEnabled]);
-    expect(kept).not.toContain(SETTINGS.localePending);
   });
 });

@@ -25,8 +25,11 @@ let pushChain: Promise<void> = Promise.resolve();
 
 function pushLocale(locale: Locale): void {
   pushChain = pushChain.then(async () => {
+    // No client (logged out, or not built yet): nothing was sent, so the mark stays.
+    const api = getApi();
+    if (!api) return;
     try {
-      await getApi()?.patchMe({ locale });
+      await api.patchMe({ locale });
       // A newer choice made while this request was in flight stays pending.
       if (useApp.getState().locale === locale) await sqliteKV.removeItem(SETTINGS.localePending);
     } catch {
@@ -49,15 +52,45 @@ export async function retryPendingLocale(): Promise<void> {
   if (pending === '1' && (stored === 'de' || stored === 'en')) pushLocale(stored);
 }
 
-/** Retry the pending choice whenever `sync` goes from offline/error back online. Returns the unsubscribe. */
+/**
+ * Retry the pending choice when `sync` comes back online after a down state seen
+ * since subscribing. A fresh client starts offline and connects on its own: that
+ * first connect is not a reconnect (the boot already sent the choice), so only an
+ * offline/error observed after subscribing arms the retry. Returns the unsubscribe.
+ */
 export function retryLocaleOnReconnect(sync: Pick<SyncClient, 'getStatus' | 'subscribe'>): () => void {
-  let wasDown = sync.getStatus() === 'offline' || sync.getStatus() === 'error';
+  let wasDown = false;
   return sync.subscribe(() => {
     const status = sync.getStatus();
     const down = status === 'offline' || status === 'error';
     if (wasDown && !down) void retryPendingLocale();
     wasDown = down;
   });
+}
+
+/**
+ * Wire the retries: the app returning to the foreground, and every sync client's
+ * reconnect (the previous client's watcher is dropped when the client is swapped
+ * or torn down). Returns the cleanup that removes all of it.
+ */
+export function watchLocaleRetries(deps: {
+  onAppStateChange: (cb: (state: string) => void) => { remove(): void };
+  subscribeSyncClient: (cb: (client: SyncClient | null) => void) => () => void;
+}): () => void {
+  const sub = deps.onAppStateChange((state) => {
+    if (state === 'active') void retryPendingLocale();
+  });
+  let unwatch: (() => void) | null = null;
+  const unsubscribe = deps.subscribeSyncClient((client) => {
+    unwatch?.();
+    unwatch = client ? retryLocaleOnReconnect(client) : null;
+  });
+  return () => {
+    sub.remove();
+    unsubscribe();
+    unwatch?.();
+    unwatch = null;
+  };
 }
 
 /** What /me and the saved choice add up to; decided without side effects. */

@@ -1,4 +1,5 @@
 import { router, type Href } from 'expo-router';
+import type { Boot } from '../store/app';
 
 /** A screen's own navigation object (what `useNavigation()` returns). */
 export interface BackNav {
@@ -25,21 +26,8 @@ export function goBackOr(fallback: Href = '/browse', nav?: BackNav): void {
   else router.replace(fallback);
 }
 
-/**
- * Hand over to the index gate with no history left behind.
- *
- * `replace` alone only swaps the top route: with `[(tabs), assigned]` the stack
- * would become `[(tabs), index]`, and Android back from the login step would
- * return to a tab with no session. Dismissing the stack first leaves nothing to
- * go back to, the same way boot's own navigation to onboarding does.
- */
-export function replaceWithGate(): void {
-  if (router.canDismiss()) router.dismissAll();
-  router.replace('/');
-}
-
 /** Where the index gate sends the app for a boot state: '/today', '/onboarding', or null to keep waiting. */
-export function gateTarget(boot: 'loading' | 'onboarding' | 'ready' | 'reconnecting' | 'noWorkspace'): Href | null {
+export function gateTarget(boot: Boot): Href | null {
   if (boot === 'ready') return '/today';
   if (boot === 'onboarding') return '/onboarding';
   return null;
@@ -50,8 +38,20 @@ export function gateTarget(boot: 'loading' | 'onboarding' | 'ready' | 'reconnect
  * the session): that screen sits on the (tabs) anchor with no session. True when
  * the focused route is neither the gate (no segment) nor onboarding.
  */
-export function needsOnboardingRedirect(boot: string, segments: readonly string[]): boolean {
+export function needsOnboardingRedirect(boot: Boot, segments: readonly string[]): boolean {
   return boot === 'onboarding' && segments.length > 0 && segments[0] !== 'onboarding';
+}
+
+/**
+ * The one owner of "leave for onboarding" past the gate: the root layout runs this
+ * from an effect on boot and segments. Whoever ends the session only sets boot
+ * 'onboarding'; at the gate (no segment) the index gate navigates instead.
+ * Returns whether it navigated.
+ */
+export function leaveForOnboarding(boot: Boot, segments: readonly string[], navigate: () => void): boolean {
+  if (!needsOnboardingRedirect(boot, segments)) return false;
+  navigate();
+  return true;
 }
 
 /**

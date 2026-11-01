@@ -28,6 +28,7 @@ const fake = vi.hoisted(() => ({
   logoutGate: null as Promise<void> | null,
   patched: [] as string[],
   patchFails: false,
+  noApi: false,
   patchHolds: [] as Array<Promise<void>>,
   syncCreated: 0,
 }));
@@ -94,7 +95,7 @@ vi.mock('../src/lib/kv', () => ({
   },
 }));
 vi.mock('../src/lib/clients', () => ({
-  getApi: () => fakeApi,
+  getApi: () => (fake.noApi ? null : fakeApi),
   getSync: () => null,
   initApi: () => fakeApi,
   initSync: (_url: string, id: string) => {
@@ -138,7 +139,7 @@ import {
   logout,
   moveOffLostWorkspace,
 } from '../src/lib/boot';
-import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale } from '../src/lib/localeChoice';
+import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale, watchLocaleRetries } from '../src/lib/localeChoice';
 import { useApp } from '../src/store/app';
 
 const user = { id: 'u1', name: 'U', email: 'u@x', locale: 'en' } as any;
@@ -172,6 +173,7 @@ beforeEach(() => {
   fake.logoutGate = null;
   fake.patched = [];
   fake.patchFails = false;
+  fake.noApi = false;
   fake.patchHolds = [];
   fake.getMe = async () => me('a', 'b');
   useApp.setState({
@@ -235,7 +237,7 @@ describe('discardLostWorkspaces', () => {
 });
 
 describe('expireSession', () => {
-  it('while ready: stops sync, shows the notice and navigates to onboarding', async () => {
+  it('while ready: stops sync, shows the notice and leaves the navigation to the root layout', async () => {
     useApp.setState({ boot: 'ready' } as any);
     fake.canDismiss = true;
     await expireSession();
@@ -245,15 +247,15 @@ describe('expireSession', () => {
     expect(fake.logouts).toBe(1);
     expect(st.boot).toBe('onboarding');
     expect(st.loginNotice).toBe('sessionExpired');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
-  it.each(['reconnecting', 'noWorkspace'] as const)('while the %s notice shows: navigates to onboarding too', async (state) => {
+  it.each(['reconnecting', 'noWorkspace'] as const)('while the %s notice shows: sets onboarding, no navigation of its own', async (state) => {
     useApp.setState({ boot: state } as any);
     fake.canDismiss = true;
     await expireSession();
     expect(useApp.getState().boot).toBe('onboarding');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
   it('during boot: no navigation, the index gate redirects on its own', async () => {
@@ -414,12 +416,17 @@ describe('language choice details (review cb533720)', () => {
     fake.kv.set('localePending', '1');
     fake.getMe = async () => ({ user: serverDe, memberships: [mem('a')] });
     const seen: string[] = [];
+    const initedAfterTick: number[] = [];
     const unsub = useApp.subscribe((s) => {
-      if (s.boot === 'ready') seen.push(s.locale);
+      if (s.boot !== 'ready') return;
+      seen.push(s.locale);
+      // Runs at the first await after setSession: the sync client must exist by then.
+      queueMicrotask(() => initedAfterTick.push(fake.inited.length));
     });
     await establishSession('https://x', api);
     unsub();
     expect(seen[0]).toBe('en');
+    expect(initedAfterTick[0]).toBe(1);
     expect(fake.inited).toEqual(['a']);
   });
 
@@ -452,30 +459,128 @@ describe('language choice details (review cb533720)', () => {
     expect(fake.kv.has('localePending')).toBe(false);
   });
 
+  it('retryPendingLocale sends nothing when logged out', async () => {
+    fake.kv.set('locale', 'de');
+    fake.kv.set('localePending', '1');
+    useApp.setState({ user: null } as any);
+    await retryPendingLocale();
+    await flush();
+    expect(fake.patched).toEqual([]);
+    expect(fake.kv.get('localePending')).toBe('1');
+  });
+
+  it('without an API client the choice stays pending', async () => {
+    fake.noApi = true;
+    chooseLocale('en');
+    await flush();
+    expect(fake.patched).toEqual([]);
+    expect(fake.kv.get('localePending')).toBe('1');
+  });
+
+  const fakeSync = () => {
+    let status = 'offline';
+    let notify = () => {};
+    return {
+      set: (s: string) => {
+        status = s;
+        notify();
+      },
+      sync: {
+        getStatus: () => status as any,
+        subscribe: (cb: () => void) => {
+          notify = cb;
+          return () => {};
+        },
+      },
+    };
+  };
+
+  it('a fresh client going offline -> syncing -> synced does not send again', async () => {
+    fake.kv.set('locale', 'de');
+    fake.kv.set('localePending', '1');
+    const f = fakeSync();
+    retryLocaleOnReconnect(f.sync);
+    f.set('syncing');
+    f.set('synced');
+    await flush();
+    expect(fake.patched).toEqual([]);
+  });
+
   it('retries when sync comes back online, not on other status changes', async () => {
     fake.kv.set('locale', 'de');
     fake.kv.set('localePending', '1');
-    let status = 'offline';
-    let notify = () => {};
-    retryLocaleOnReconnect({
-      getStatus: () => status as any,
-      subscribe: (cb: () => void) => {
-        notify = cb;
-        return () => {};
-      },
-    });
-    status = 'error';
-    notify();
+    const f = fakeSync();
+    retryLocaleOnReconnect(f.sync);
+    const status = (v: string) => f.set(v);
+    status('error');
     await flush();
     expect(fake.patched).toEqual([]);
-    status = 'synced';
-    notify();
+    status('synced');
     await flush();
     expect(fake.patched).toEqual(['de']);
-    status = 'syncing';
-    notify();
+    status('syncing');
     await flush();
     expect(fake.patched).toEqual(['de']);
+  });
+
+  describe('watchLocaleRetries', () => {
+    const setup = () => {
+      let appState: (s: string) => void = () => {};
+      let swap: (c: any) => void = () => {};
+      const log = { removed: 0, unsubscribed: 0 };
+      const clients: Array<ReturnType<typeof fakeSync> & { unsubscribed: number }> = [];
+      const mk = () => {
+        const f = fakeSync();
+        const c = { ...f, unsubscribed: 0 };
+        const subscribe = f.sync.subscribe;
+        f.sync.subscribe = (cb: () => void) => {
+          const off = subscribe(cb);
+          return () => {
+            c.unsubscribed++;
+            off();
+          };
+        };
+        clients.push(c);
+        return c;
+      };
+      const stop = watchLocaleRetries({
+        onAppStateChange: (cb) => {
+          appState = cb;
+          return { remove: () => void log.removed++ };
+        },
+        subscribeSyncClient: (cb) => {
+          swap = cb;
+          return () => void log.unsubscribed++;
+        },
+      });
+      return { appState: (s: string) => appState(s), swap: (c: any) => swap(c), log, clients, mk, stop };
+    };
+
+    it('foreground retries a pending choice, other app states do not', async () => {
+      fake.kv.set('locale', 'de');
+      fake.kv.set('localePending', '1');
+      const w = setup();
+      w.appState('background');
+      await flush();
+      expect(fake.patched).toEqual([]);
+      w.appState('active');
+      await flush();
+      expect(fake.patched).toEqual(['de']);
+    });
+
+    it('a client swap drops the old client watcher and cleanup removes everything', async () => {
+      fake.kv.set('locale', 'de');
+      fake.kv.set('localePending', '1');
+      const w = setup();
+      const c1 = w.mk();
+      const c2 = w.mk();
+      w.swap(c1.sync);
+      w.swap(c2.sync);
+      expect(c1.unsubscribed).toBe(1);
+      w.stop();
+      expect(c2.unsubscribed).toBe(1);
+      expect(w.log).toEqual({ removed: 1, unsubscribed: 1 });
+    });
   });
 });
 
@@ -515,18 +620,18 @@ describe('logout', () => {
     expect(fake.logouts).toBe(1);
   });
 
-  it('clears the navigation stack before replacing with onboarding', async () => {
+  it('ends the session without navigating itself', async () => {
     fake.canDismiss = true;
     await logout();
     expect(useApp.getState().boot).toBe('onboarding');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
-  it('only replaces with onboarding when there is nothing to dismiss (deep link, single screen)', async () => {
+  it('does not navigate when there is nothing to dismiss either', async () => {
     fake.canDismiss = false;
     useApp.setState({ boot: 'ready' } as any);
     await logout();
-    expect(fake.nav).toEqual(['replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
   it('still resets the session and leaves the screen when the purge fails', async () => {
@@ -535,7 +640,7 @@ describe('logout', () => {
     useApp.setState({ boot: 'ready' } as any);
     await expect(logout()).rejects.toThrow('sqlite');
     expect(useApp.getState().boot).toBe('onboarding');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 });
 
@@ -549,7 +654,7 @@ describe('logout during an outage (what-if 3)', () => {
     expect(fake.events).toContain('purge');
     expect(fake.events).not.toContain('post done');
     expect(useApp.getState().boot).toBe('onboarding');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
     release();
     await out;
     expect(fake.events.indexOf('purge')).toBeLessThan(fake.events.indexOf('post done'));
@@ -603,7 +708,7 @@ describe('leaving for onboarding past the gate (review 026272d7)', () => {
   // Defensive branch: establishSession declining while still waiting. With a
   // non-empty /me the real pickMembership always picks one (an empty /me throws
   // NoWorkspaceError and the wait goes on), so the pick is mocked; unreachable today.
-  it('defensive: establishSession declines while still waiting: dismisses and replaces to /onboarding', async () => {
+  it('defensive: establishSession declines while still waiting: sets onboarding without navigating', async () => {
     vi.useFakeTimers();
     fake.canDismiss = true;
     useApp.setState({ memberships: [mem('lost')] } as any);
@@ -615,20 +720,20 @@ describe('leaving for onboarding past the gate (review 026272d7)', () => {
     fake.getMe = async () => me('a');
     await vi.advanceTimersByTimeAsync(60_000);
     expect(useApp.getState().boot).toBe('onboarding');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
-  it('landOutside without a client: navigates once past the gate', async () => {
+  it('landOutside without a client: sets onboarding, the root layout navigates', async () => {
     useApp.setState({ serverUrl: null, boot: 'ready' } as any);
     fake.canDismiss = true;
     await moveOffLostWorkspace('lost');
     expect(useApp.getState().boot).toBe('onboarding');
-    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
   // Guard only: setSession sets boot 'ready' before any sync client exists, so an
   // access loss during 'loading' is not reachable today.
-  it('landOutside before the cold-start gate: no navigation', async () => {
+  it('landOutside before the cold-start gate: no navigation either', async () => {
     useApp.setState({ serverUrl: null, boot: 'loading' } as any);
     fake.canDismiss = true;
     await moveOffLostWorkspace('lost');

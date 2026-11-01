@@ -9,7 +9,7 @@ const router = vi.hoisted(() => ({
 }));
 vi.mock('expo-router', () => ({ router }));
 
-import { gateTarget, goBackOr, leaveGate, needsOnboardingRedirect, replaceWithGate } from '../src/lib/goBack';
+import { gateTarget, goBackOr, leaveForOnboarding, leaveGate, needsOnboardingRedirect } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -45,25 +45,6 @@ describe('goBackOr', () => {
     goBackOr('/browse', nav);
     expect(router.replace).toHaveBeenCalledWith('/browse');
     expect(nav.goBack).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('replaceWithGate', () => {
-  it('clears the stack before handing over to the index gate', () => {
-    router.canDismiss.mockReturnValue(true);
-    replaceWithGate();
-    expect(router.dismissAll).toHaveBeenCalledTimes(1);
-    expect(router.replace).toHaveBeenCalledWith('/');
-    expect(router.dismissAll.mock.invocationCallOrder[0]).toBeLessThan(
-      router.replace.mock.invocationCallOrder[0]!,
-    );
-  });
-
-  it('only replaces when there is nothing to dismiss (cold deep link)', () => {
-    router.canDismiss.mockReturnValue(false);
-    replaceWithGate();
-    expect(router.dismissAll).not.toHaveBeenCalled();
-    expect(router.replace).toHaveBeenCalledWith('/');
   });
 });
 
@@ -115,5 +96,21 @@ describe('needsOnboardingRedirect', () => {
     expect(needsOnboardingRedirect('onboarding', ['onboarding'])).toBe(false);
     expect(needsOnboardingRedirect('loading', ['settings'])).toBe(false);
     expect(needsOnboardingRedirect('ready', ['settings'])).toBe(false);
+  });
+});
+
+describe('leaveForOnboarding (the root layout effect)', () => {
+  it('navigates once for a pushed screen when logged out', () => {
+    const nav = vi.fn();
+    expect(leaveForOnboarding('onboarding', ['settings'], nav)).toBe(true);
+    expect(nav).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the gate, onboarding itself and other boot states alone', () => {
+    const nav = vi.fn();
+    expect(leaveForOnboarding('onboarding', [], nav)).toBe(false);
+    expect(leaveForOnboarding('onboarding', ['onboarding'], nav)).toBe(false);
+    expect(leaveForOnboarding('ready', ['settings'], nav)).toBe(false);
+    expect(nav).not.toHaveBeenCalled();
   });
 });
