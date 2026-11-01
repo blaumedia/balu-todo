@@ -169,7 +169,8 @@ Field semantics (these ARE the product decisions - implement precisely):
   an append after `2147483647` is never lost), but clamped items then tie: their relative
   order is unspecified, and clients should renumber the container.
 - Subtasks: one level only in v1 - server rejects a `parent_task_id` pointing at a task
-  that itself has a parent (`invalid_args`).
+  that itself has a parent, or at the task itself, and making a task that has live subtasks
+  a subtask (`invalid_args`).
 - A subtask's `project_id` and `section_id` always equal its parent's. The server enforces
   it: `task_add` with a live parent takes the parent's project and section whatever it was
   sent; `task_move` of a parent bumps and rewrites its live subtasks (so clients pull

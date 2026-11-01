@@ -500,7 +500,10 @@ def t_update_task(ctx: ToolContext, args: dict) -> dict:
                 sent = _uuid_arg(args, key, required=False)
                 if sent != current:
                     raise ToolError("subtasks follow their parent's project; move the parent")
+        echoed_only = any(k in args for k in ("project_id", "section_id"))
         args = {k: v for k, v in args.items() if k not in ("project_id", "section_id")}
+    else:
+        echoed_only = False
     # project/section live on `task_move`, not `task_update` - moving also has to
     # drop a section that no longer belongs to the new project, which that handler
     # already does.
@@ -512,6 +515,10 @@ def t_update_task(ctx: ToolContext, args: dict) -> dict:
     if move_args:
         commands.append(command("task_move", move_args))
     if not commands:
+        if echoed_only:
+            # Only the subtask's own container was echoed: a no-op, like the same
+            # call on a top-level task.
+            return {"updated": _task_view(task, _names(ctx, ws_id))}
         raise ToolError("nothing to update: pass at least one field")
 
     _apply(ctx, ws_id, role, commands)

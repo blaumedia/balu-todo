@@ -953,3 +953,8 @@ def test_update_task_refuses_placement_on_a_subtask(client, user, mcp_on):
         "project_id": m["p1"], "section_id": None,
     })
     assert echo["isError"] is False
+    # an echo-only call is a no-op, like on a top-level task, not "nothing to update"
+    echo_only = call(client, key, "update_task", {
+        "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
+    })
+    assert echo_only["isError"] is False, payload(echo_only)
