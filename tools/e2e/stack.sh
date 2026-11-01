@@ -51,9 +51,11 @@ dc() {
 
 cmd=${1:-}
 [ $# -gt 0 ] && shift
-if [ "$cmd" = "purge" ] && [ ! -f "$MARKER" ]; then
-  echo "not purging $STATE: no marker file created by stack.sh" >&2
-  exit 1
+# purge always tears the compose project down; the state dir is deleted only when it
+# is ours (marker present) or already gone, decided before ensure_env adopts it.
+rm_state=0
+if [ ! -d "$STATE" ] || [ -f "$MARKER" ] || [ -z "$(ls -A "$STATE")" ]; then
+  rm_state=1
 fi
 ensure_env
 
@@ -80,8 +82,10 @@ case "$cmd" in
     ;;
   purge)
     dc down -v
-    # Only a directory this script created (it holds the .balu-e2e-state marker) is removed.
-    rm -rf "$STATE"
+    # Only a directory this tooling created (it holds the .balu-e2e-state marker) is removed.
+    if [ "$rm_state" = 1 ]; then
+      rm -rf "$STATE"
+    fi
     echo "purged"
     ;;
   ps)

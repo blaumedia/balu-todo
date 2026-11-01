@@ -25,7 +25,8 @@ class H(http.server.BaseHTTPRequestHandler):
             path = e.run_dir() / f"invite-{parts[1]}.token"
             if path.exists():
                 self.send_response(302)
-                self.send_header("Location", f"{PUBLIC}/invite/{path.read_text().strip()}")
+                tok = path.read_text(encoding="utf-8").strip()
+                self.send_header("Location", f"{PUBLIC}/invite/{tok}")
                 self.end_headers()
                 return
         self.send_response(404)

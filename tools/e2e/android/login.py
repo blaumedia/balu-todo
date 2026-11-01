@@ -5,6 +5,7 @@ Prints only the tap bounds, never the credentials. Labels in en/de.
 """
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import time
@@ -30,14 +31,18 @@ def type_text(text: str) -> None:
 
 
 def main() -> int:
-    role = sys.argv[1]
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("role", choices=["owner", "member"])
+    role = ap.parse_args().role
+    # fail before touching the device when this run has no setup for the role
+    pw = e.load(f"{role}.pw")
     tap(r"^(Email|E-Mail)$")
     time.sleep(1)
     type_text(e.email(role))
     time.sleep(1)
     tap(r"^(Password|Passwort)$")
     time.sleep(1)
-    type_text(e.password(role))
+    type_text(pw)
     time.sleep(1)
     ui.adb("shell", "input", "keyevent", "4")  # BACK closes the keyboard
     time.sleep(1)

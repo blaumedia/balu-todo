@@ -1,12 +1,14 @@
 """Shared helpers for the e2e CLIs (stdlib only).
 
 State (generated passwords, tokens, ids) lives in ~/.cache/balu-e2e/<project>/<run>/
-(one directory per BALU_E2E_RUN) with mode 700/600. Nothing here prints a password, a token or a request/response body.
+(one directory per BALU_E2E_RUN) with mode 700/600. Nothing here prints a password, a token
+or a request/response body.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import string
 import time
@@ -22,12 +24,23 @@ BASE = os.environ.get("BALU_E2E_BASE", f"http://127.0.0.1:{PORT}")
 API = BASE + "/api/v1"
 STATE = Path(os.environ.get("BALU_E2E_STATE") or Path.home() / ".cache" / "balu-e2e" / PROJECT)
 RUN = os.environ.get("BALU_E2E_RUN") or time.strftime("%Y%m%d")
+# same file and rule as stack.sh: purge may only delete dirs that carry it
+MARKER = ".balu-e2e-state"
+_SAFE = re.compile(r"[A-Za-z0-9_-]+")
+if not _SAFE.fullmatch(RUN):
+    raise SystemExit("BALU_E2E_RUN must match [A-Za-z0-9_-]+ (it is used in paths and emails)")
+if os.environ.get("BALU_E2E_PROJECT") and not _SAFE.fullmatch(PROJECT):
+    raise SystemExit("BALU_E2E_PROJECT must match [A-Za-z0-9_-]+ (it is used in paths)")
 TOKEN_MAX_AGE = 25 * 60  # server access tokens live 30 min (config.access_token_expire_minutes)
 
 
 def state_dir() -> Path:
     STATE.mkdir(parents=True, exist_ok=True)
     STATE.chmod(0o700)
+    marker = STATE / MARKER
+    if not marker.exists() and not any(STATE.iterdir()):
+        # new or empty dir: adopt it, exactly like stack.sh ensure_env
+        os.close(os.open(marker, os.O_WRONLY | os.O_CREAT, 0o600))
     return STATE
 
 
@@ -43,7 +56,7 @@ def save(name: str, value: str) -> None:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.fchmod(fd, 0o600)
-        os.write(fd, value.encode())
+        os.write(fd, value.encode("utf-8"))
     finally:
         os.close(fd)
 
@@ -52,7 +65,7 @@ def load(name: str) -> str:
     path = run_dir() / name
     if not path.exists():
         raise SystemExit(f"missing {name} in the state dir: run api.py setup first")
-    return path.read_text().strip()
+    return path.read_text(encoding="utf-8").strip()
 
 
 def password(role: str) -> str:
@@ -132,7 +145,7 @@ def login(role: str) -> str:
 def token(role: str) -> str:
     path = run_dir() / f"{role}.tok"
     if path.exists() and time.time() - path.stat().st_mtime < TOKEN_MAX_AGE:
-        return path.read_text().strip()
+        return path.read_text(encoding="utf-8").strip()
     return login(role)
 
 

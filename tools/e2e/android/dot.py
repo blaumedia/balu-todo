@@ -42,7 +42,12 @@ def near(p, c) -> float:
 
 def sample() -> str:
     cmd = ["adb", "-s", SER, "exec-out", "screencap", "-p"]
-    png = subprocess.run(cmd, capture_output=True).stdout
+    try:
+        png = subprocess.run(cmd, capture_output=True, check=True).stdout
+    except subprocess.CalledProcessError as err:
+        raise SystemExit(f"adb screencap failed for {SER}: exit {err.returncode}") from None
+    except FileNotFoundError:
+        raise SystemExit("adb not found on PATH") from None
     im = Image.open(io.BytesIO(png)).convert("RGB")
     sx = im.size[0] / 1080.0  # scale by width so the window follows other resolutions
     box = (int(900 * sx), int(115 * sx), int(957 * sx), int(152 * sx))

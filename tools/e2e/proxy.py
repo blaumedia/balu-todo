@@ -108,7 +108,8 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def serve(a) -> int:
     e.state_dir()
     CTL.mkdir(mode=0o700, exist_ok=True)
-    log = open(os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "a", buffering=1)
+    fd = os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    log = open(fd, "a", buffering=1, encoding="utf-8")
     LOG.chmod(0o600)
     Server(("127.0.0.1", a.listen), make_handler(a.upstream, log)).serve_forever()
     return 0

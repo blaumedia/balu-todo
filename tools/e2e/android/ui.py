@@ -29,7 +29,9 @@ def adb(*a: str, check: bool = True) -> str:
     try:
         r = subprocess.run(["adb", "-s", SER, *a], capture_output=True, text=True, check=check)
     except subprocess.CalledProcessError as err:
-        raise SystemExit(f"adb failed for {SER} ({' '.join(a[:2])}): exit {err.returncode}") from None
+        raise SystemExit(
+            f"adb failed for {SER} ({' '.join(a[:2])}): exit {err.returncode}"
+        ) from None
     except FileNotFoundError:
         raise SystemExit("adb not found on PATH") from None
     return r.stdout
@@ -75,7 +77,7 @@ def main() -> int:
     cmd = argv[0]
     desc = "--desc" in argv
     args = [x for x in argv[1:] if x != "--desc"]
-    need = {"list": 0, "state": 0, "type": 0, "tap": 1, "has": 1, "dump": 1, "swipe": 2}
+    need = {"list": 0, "state": 0, "type": 1, "tap": 1, "has": 1, "dump": 1, "swipe": 2}
     if cmd not in need:
         raise SystemExit(__doc__)
     if len(args) < need[cmd] or (cmd != "type" and len(args) > need[cmd]):
@@ -116,7 +118,7 @@ def main() -> int:
         for n in root.iter("node"):
             if n.get("password") == "true":
                 n.set("text", "")
-        with open(args[0], "w") as f:
+        with open(args[0], "w", encoding="utf-8") as f:
             f.write(ET.tostring(root, encoding="unicode"))
         print("saved", args[0])
     elif cmd == "swipe":

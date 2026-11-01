@@ -6,8 +6,9 @@ runbook. Python is stdlib only (3.11+), shell is POSIX `sh`.
 
 ## 1. What this is and where the state lives
 
-State lives in `~/.cache/balu-e2e/<project>/<run>/` (mode 700; `stack.env` and the other stack files sit one level up). It holds the generated
-passwords, tokens, ids and `stack.env`. **Never cat it.** No script here prints a
+State lives in `~/.cache/balu-e2e/<project>/<run>/` (mode 700; `stack.env` and the other
+stack files sit one level up). It holds the generated passwords, tokens, ids and `stack.env`.
+**Never cat it.** No script here prints a
 password, an access or refresh token, an invite token or a request/response body.
 
 The default project is `balu-e2e-<checkout dir>`. Environment variables:
@@ -17,7 +18,7 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `BALU_PORT` | host port of the stack (default 8090) |
 | `BALU_E2E_PROJECT` | compose project name |
 | `BALU_E2E_STATE` | state directory |
-| `BALU_E2E_RUN` | run id, default today; used in emails `e2e-<run>-<role>@example.com` |
+| `BALU_E2E_RUN` | run id (`[A-Za-z0-9_-]+`), default today; used in emails `e2e-<run>-<role>@example.com` |
 | `BALU_E2E_BASE` | API base URL override |
 | `BALU_E2E_PUBLIC_BASE` | base URL `invite_shim.py` redirects to (default `http://localhost:<BALU_PORT>`) |
 | `BALU_ANDROID_PACKAGE` | app id for `android/cold.sh` (default `com.blaumedia.balutodo`) |
@@ -31,9 +32,17 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 - Health is `GET /healthz`, not `/api/v1/health`.
 - The image is built, not live-mounted. Run `up` again after code changes.
 - Never use the project `balu` (the dev data); `stack.sh` refuses it.
-- Cleanup is `stack.sh purge` (removes containers, volumes and the state dir). It deletes
-  the state dir only if it carries the `.balu-e2e-state` marker `stack.sh` wrote, and `up`
-  refuses a non-empty `BALU_E2E_STATE` without it.
+- Cleanup is `stack.sh purge` (removes containers, volumes and the state dir). Every
+  `stack.sh` command (default path too) refuses a state dir that is non-empty and lacks the
+  `.balu-e2e-state` marker; the Python helpers and `stack.sh` both write it when they create
+  the dir or find it empty. `purge` always runs `down -v` and deletes the dir only when it
+  is marked, empty or absent.
+- **State dirs from before the marker:** check what is in the dir, then
+  `touch <state dir>/.balu-e2e-state`; after that `stack.sh` works again.
+- **After upgrading to the per-run layout** (`<state>/<run>/`): old `*.pw`, `*.tok`, ids and
+  `tasks.json` at the state root are not migrated. Use a new `BALU_E2E_RUN` (or `stack.sh
+  purge`), otherwise the freshly generated password no longer matches the account already
+  registered for that run (login 401). The old root files can be deleted.
 - The app container does **not** read the checkout's root `.env`: `stack.sh` adds an override
   (`env_file: !reset []`, compose >= 2.24) so real SMTP/Telegram/`BALU_DEV` values stay out.
 - **MCP toggle:** `stack.sh mcp on|off` (no argument prints the state) sets
