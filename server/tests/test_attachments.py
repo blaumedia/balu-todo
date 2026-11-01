@@ -984,20 +984,20 @@ def test_failed_commit_on_project_delete_keeps_blob(client, user, data_dir, db, 
 
 
 
-def test_download_blob_vanishing_before_the_open_is_not_found(client, user, data_dir, monkeypatch):
+def test_download_blob_vanishing_before_the_stat_is_not_found(client, user, data_dir, monkeypatch):
     import os
 
     task_id = _add_task(client, user)
     meta = _upload(client, user, task_id).json()
     (_blob_dir(data_dir, user["workspace_id"]) / meta["id"]).unlink()
-    real_open = os.open
+    real_stat = os.stat
 
-    def racing_open(path, *args, **kwargs):
+    def racing_stat(path, *args, **kwargs):
         if str(path).endswith(meta["id"]):
             raise FileNotFoundError(path)
-        return real_open(path, *args, **kwargs)
+        return real_stat(path, *args, **kwargs)
 
-    monkeypatch.setattr("balu.routers.attachments.os.open", racing_open)
+    monkeypatch.setattr("balu.routers.attachments.os.stat", racing_stat)
     got = client.get(
         f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
         headers=user["headers"],
@@ -1018,28 +1018,18 @@ def test_download_of_a_non_regular_file_is_not_found(client, user, data_dir):
     assert got.status_code == 404
 
 
-def test_download_unlinked_after_the_open_still_streams_the_whole_file(
-    client, user, data_dir, monkeypatch
-):
-    import os
-
+def test_download_honours_a_range_request(client, user, data_dir):
+    # PDF and media viewers fetch byte ranges; the response must not advertise
+    # accept-ranges and then ignore them.
     task_id = _add_task(client, user)
     meta = _upload(client, user, task_id).json()
-    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
-    real_fstat = os.fstat
-
-    def unlink_then_fstat(fd):
-        result = real_fstat(fd)
-        blob.unlink()  # a concurrent delete lands right after the open
-        return result
-
-    monkeypatch.setattr("balu.routers.attachments.os.fstat", unlink_then_fstat)
     got = client.get(
         f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
-        headers=user["headers"],
+        headers={**user["headers"], "Range": "bytes=0-9"},
     )
-    assert got.status_code == 200
-    assert got.content == PNG
+    assert got.status_code == 206
+    assert got.content == PNG[:10]
+    assert got.headers["content-range"] == f"bytes 0-9/{len(PNG)}"
 
 
 def test_download_headers_match_a_plain_file_response(client, user, data_dir):

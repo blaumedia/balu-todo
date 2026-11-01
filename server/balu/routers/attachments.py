@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from python_multipart.exceptions import FormParserError
 from python_multipart.multipart import MultipartParser, parse_options_header
 from sqlalchemy.orm import Session
@@ -462,16 +462,13 @@ async def upload_attachment(
         raise
 
 
-_DOWNLOAD_CHUNK = 64 * 1024
-
-
 @router.get("/{workspace_id}/attachments/{attachment_id}/file")
 def download_attachment(
     workspace_id: str,
     attachment_id: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> StreamingResponse:
+) -> FileResponse:
     ws_id = _parse_ws_id(workspace_id)
     get_membership(db, ws_id, user.id)  # any role, including viewer
     aid = _parse_attachment_id(attachment_id)
@@ -481,29 +478,20 @@ def download_attachment(
         raise not_found("attachment not found")
 
     path = blob_path(ws_id, attachment.id)
-    # One open, then fstat and stream from that descriptor: a delete that lands
-    # after this point unlinks the name but not the open file, so the response
-    # cannot fail half-way with a 200 already sent. A row without bytes (a torn
-    # upload, or a restored database on an empty volume), a vanished file and a
-    # non-regular file all end up as the same 404.
+    # One stat: a row without bytes (a torn upload, or a restored database on an
+    # empty volume), a vanished file and a non-regular file all end up as the
+    # same 404. FileResponse then serves the path with this stat, which keeps
+    # Range support (PDF/media viewers). A delete landing between this stat and
+    # the open inside FileResponse can still abort the body; blobs are removed
+    # only after the delete commits, so that window is a few milliseconds of a
+    # concurrent delete, accepted over losing Range requests.
     try:
-        fd = os.open(path, os.O_RDONLY)
+        stat_result = os.stat(path)
     except OSError:
         raise not_found("attachment not found") from None
-    try:
-        stat_result = os.fstat(fd)
-        if not stat.S_ISREG(stat_result.st_mode):
-            raise not_found("attachment not found")
-        file = os.fdopen(fd, "rb")
-    except BaseException:
-        os.close(fd)
-        raise
-
-    # FileResponse only supplies the header set (length, type, disposition, etag,
-    # last-modified, accept-ranges): it cannot be handed an open descriptor, so
-    # the body is streamed from the descriptor opened above. Range requests are
-    # answered with the full body.
-    headers = FileResponse(
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise not_found("attachment not found")
+    return FileResponse(
         str(path),
         stat_result=stat_result,
         media_type=attachment.content_type,
@@ -513,11 +501,4 @@ def download_attachment(
         # it a browser may ignore the declared type and execute what it guesses.
         filename=attachment.filename,
         headers={"X-Content-Type-Options": "nosniff"},
-    ).headers
-
-    def _chunks():
-        with file:
-            while chunk := file.read(_DOWNLOAD_CHUNK):
-                yield chunk
-
-    return StreamingResponse(_chunks(), headers=dict(headers))
+    )
