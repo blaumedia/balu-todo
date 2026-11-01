@@ -6,7 +6,7 @@
 Looks only at the dot window left of the Settings button and prints the dominant
 status colour. The window is tied to the current header layout (x 900-957, y 115-152
 on a 1080 px wide screen); re-measure it if the header changes.
-Needs ANDROID_SERIAL and Pillow: uv run --with pillow python tools/e2e/android/dot.py
+Needs ANDROID_SERIAL and Pillow: uv run --python 3.11 --with pillow python tools/e2e/android/dot.py
 """
 from __future__ import annotations
 
@@ -26,7 +26,9 @@ import time
 try:
     from PIL import Image
 except ImportError:
-    raise SystemExit("needs Pillow: uv run --with pillow python tools/e2e/android/dot.py") from None
+    raise SystemExit(
+        "needs Pillow: uv run --python 3.11 --with pillow python tools/e2e/android/dot.py"
+    ) from None
 
 SER = os.environ.get("ANDROID_SERIAL")
 if not SER:

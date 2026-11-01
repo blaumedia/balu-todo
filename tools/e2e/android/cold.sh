@@ -11,6 +11,7 @@ DEV=0
 if [ "${1:-}" = "--dev-client" ]; then DEV=1; shift; fi
 URL=${1:-}
 
+case "$PKG" in *[!A-Za-z0-9._]*|"") echo "bad BALU_ANDROID_PACKAGE" >&2; exit 2 ;; esac
 adb -s "$ANDROID_SERIAL" shell am force-stop "$PKG"
 if [ -n "$URL" ]; then
   case "$URL" in *"'"*) echo "URL must not contain a single quote" >&2; exit 2 ;; esac

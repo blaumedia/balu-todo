@@ -20,6 +20,9 @@ esac
 # BALU_E2E_PORT first so the dev stack's BALU_PORT (root .env) does not leak in; same order as balu_e2e.py
 PORT=${BALU_E2E_PORT:-${BALU_PORT:-8090}}
 export BALU_PORT="$PORT"
+# Shell values beat --env-file in compose interpolation: drop everything docker-compose.yml
+# interpolates (besides BALU_PORT) so a direnv-loaded root .env cannot leak into the stack.
+unset BALU_SECRET_KEY BALU_DB_PASSWORD BALU_ALLOW_REGISTRATION BALU_CORS_ORIGINS
 STATE=${BALU_E2E_STATE:-$HOME/.cache/balu-e2e/$PROJECT}
 ENVF=$STATE/stack.env
 

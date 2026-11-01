@@ -69,10 +69,20 @@ def cmd_setup(a) -> int:
     ws = owned[0]["workspace"]["id"]
     e.save("ws.id", ws)
     s, mme = e.authed("member", "GET", "/me")
-    if any(m["workspace"]["id"] == ws for m in mme.get("memberships", [])):
-        print("member already in workspace")
+    cur = [m for m in mme.get("memberships", []) if m["workspace"]["id"] == ws]
+    if cur:
+        have = cur[0].get("role")
+        if a.member_role and have != a.member_role:
+            path = f"/workspaces/{ws}/members/{e.load('member.uid')}"
+            s3, _ = e.authed("owner", "PATCH", path, {"role": a.member_role})
+            print("member already in workspace; role", have, "->", a.member_role, s3)
+            if s3 not in (200, 204):
+                raise SystemExit(f"set role: HTTP {s3}")
+        else:
+            print("member already in workspace; role kept:", have)
     else:
-        s, inv = e.authed("owner", "POST", f"/workspaces/{ws}/invites", {"role": a.member_role})
+        role = a.member_role or "viewer"
+        s, inv = e.authed("owner", "POST", f"/workspaces/{ws}/invites", {"role": role})
         print("invite", s)
         if s not in (200, 201):
             raise SystemExit(f"invite: HTTP {s}")
@@ -229,7 +239,7 @@ def main() -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("health").set_defaults(fn=cmd_health)
     s = sub.add_parser("setup")
-    s.add_argument("--member-role", choices=["viewer", "member", "admin"], default="viewer")
+    s.add_argument("--member-role", choices=["viewer", "member", "admin"], default=None)
     s.add_argument("--tasks", type=int, default=5)
     s.set_defaults(fn=cmd_setup)
     s = sub.add_parser("role")
