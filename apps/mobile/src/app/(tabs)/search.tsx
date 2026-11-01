@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidKeyboardSpacer } from '../../components/AndroidKeyboardSpacer';
 import { HeaderActions } from '../../components/HeaderActions';
 import { Icon } from '../../components/Icon';
 import { TaskItems } from '../../components/TaskList';
@@ -126,6 +127,7 @@ export default function SearchScreen() {
             ) : null}
           </>
         )}
+        <AndroidKeyboardSpacer bottomInset={insets.bottom} />
       </ScrollView>
     </View>
   );

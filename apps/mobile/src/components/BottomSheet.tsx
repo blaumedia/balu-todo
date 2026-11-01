@@ -24,8 +24,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
-import { AndroidKeyboardSpacer } from './AndroidKeyboardSpacer';
 import { radius, space } from '../theme/tokens';
+import { AndroidKeyboardSpacer } from './AndroidKeyboardSpacer';
 
 export interface BottomSheetProps {
   visible: boolean;
@@ -131,7 +131,7 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
           </View>
         </GestureDetector>
         {children}
-        {Platform.OS === 'android' ? <AndroidKeyboardSpacer bottomInset={insets.bottom} /> : null}
+        <AndroidKeyboardSpacer bottomInset={insets.bottom} />
       </Animated.View>
     </View>
   );

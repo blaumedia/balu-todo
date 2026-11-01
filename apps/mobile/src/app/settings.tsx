@@ -22,6 +22,7 @@ import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
+import { useKeyboardReveal } from '../hooks/use-keyboard-reveal';
 import { clearExpectedAccessLoss, expectAccessLoss, getApi, purgeWorkspaceStorage } from '../lib/clients';
 import { landAfterDelete, logout, switchWorkspace } from '../lib/boot';
 import { chooseLocale } from '../lib/localeChoice';
@@ -45,6 +46,7 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const keyboardReveal = useKeyboardReveal();
   const user = useApp((s) => s.user);
   const workspace = useApp((s) => s.workspace);
   const memberships = useApp((s) => s.memberships);
@@ -251,6 +253,11 @@ export default function SettingsScreen() {
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <StackHeader title={t('settings.title')} backFallback="/today" />
       <ScrollView
+        ref={keyboardReveal.ref}
+        onScroll={keyboardReveal.onScroll}
+        onTouchStart={keyboardReveal.onTouchStart}
+        onTouchEnd={keyboardReveal.onTouchEnd}
+        scrollEventThrottle={16}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         // iOS only: keeps the inline delete confirmation above the keyboard.
@@ -537,7 +544,7 @@ export default function SettingsScreen() {
 
         <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} disabled={leavingUi} style={{ marginTop: space.s6 }} />
         <View style={{ height: space.s8 }} />
-        {Platform.OS === 'android' ? <AndroidKeyboardSpacer bottomInset={insets.bottom} /> : null}
+        <AndroidKeyboardSpacer bottomInset={insets.bottom} onKeyboardSettled={keyboardReveal.onKeyboardSettled} />
       </ScrollView>
     </View>
   );
