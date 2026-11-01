@@ -6,6 +6,7 @@ Prints statuses and counts only: never a password, token, invite token or body.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import mimetypes
@@ -97,10 +98,8 @@ def cmd_setup(a) -> int:
     live = [p for p in snap.get("projects", []) if not p.get("is_deleted")]
     # a stored project.id that is still alive wins, so a renamed project is not duplicated
     stored = None
-    try:
+    with contextlib.suppress(SystemExit):
         stored = e.load("project.id")
-    except SystemExit:
-        pass
     existing = [p for p in live if p.get("id") == stored] or [
         p for p in live if p.get("name") == PROJECT_NAME
     ]
@@ -110,11 +109,11 @@ def cmd_setup(a) -> int:
         known = tasks_map()
         seen: set[str] = set()
         for t in snap.get("tasks", []):
-            if t.get("project_id") == existing[0]["id"] and not t.get("is_deleted"):
-                # the snapshot wins over a stale tasks.json; first seen per title
-                if t["title"] not in seen:
-                    seen.add(t["title"])
-                    known[t["title"]] = t["id"]
+            in_project = t.get("project_id") == existing[0]["id"] and not t.get("is_deleted")
+            # the snapshot wins over a stale tasks.json; first seen per title
+            if in_project and t["title"] not in seen:
+                seen.add(t["title"])
+                known[t["title"]] = t["id"]
         e.save("tasks.json", json.dumps(known))
         print("project exists")
         return 0
