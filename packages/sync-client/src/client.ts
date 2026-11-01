@@ -952,6 +952,12 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
   const onWake = (): void => {
     void wake();
   };
+  // The browser says the network is gone: show it now instead of at the next failed
+  // request (up to a 60 s poll later). Only from a healthy status; an existing
+  // offline/error stays as it is until a sync succeeds (setStatus keeps `failing`).
+  const onOffline = (): void => {
+    if (!failing) setStatus("offline");
+  };
   const onVisibility = (): void => {
     if (!isHidden()) void wake();
   };
@@ -971,6 +977,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     if (typeof globalThis.addEventListener === "function") {
       globalThis.addEventListener("focus", onWake);
       globalThis.addEventListener("online", onWake);
+      globalThis.addEventListener("offline", onOffline);
     }
     globalThis.document?.addEventListener("visibilitychange", onVisibility);
   }
@@ -985,6 +992,7 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     if (typeof globalThis.removeEventListener === "function") {
       globalThis.removeEventListener("focus", onWake);
       globalThis.removeEventListener("online", onWake);
+      globalThis.removeEventListener("offline", onOffline);
     }
     globalThis.document?.removeEventListener("visibilitychange", onVisibility);
   }
