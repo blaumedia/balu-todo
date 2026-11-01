@@ -654,6 +654,11 @@ describe('logout', () => {
     await expect(logout()).rejects.toThrow('sqlite');
     expect(useApp.getState().boot).toBe('onboarding');
     expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
+    // The ending-session guard is released: the next sign-in is not refused.
+    fake.purgeFails = false;
+    fake.getMe = async () => me('a');
+    expect(await establishSession('https://x', fakeApi as any)).toBe(true);
+    expect(useApp.getState().boot).toBe('ready');
   });
 });
 

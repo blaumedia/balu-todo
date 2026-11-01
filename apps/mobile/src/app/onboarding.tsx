@@ -191,8 +191,12 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
       router.replace('/today');
     } catch (e) {
       if (e instanceof NoWorkspaceError) {
-        // Signed in, but the account has no workspace yet: the notice explains it and keeps asking.
-        void holdForWorkspace(serverUrl, getApi() ?? api);
+        // Signed in, but the account has no workspace yet: the notice explains it and keeps
+        // asking. Nothing else moves this screen once a workspace appears (the root layout
+        // only leaves *for* onboarding, the index gate only runs on its own route), so wait
+        // for the hold and leave for Today if the session landed.
+        await holdForWorkspace(serverUrl, getApi() ?? api);
+        if (useApp.getState().boot === 'ready') router.replace('/today');
         return;
       }
       const code = e instanceof ApiError ? (`auth.${e.code}` as TranslationKey) : 'auth.errorGeneric';

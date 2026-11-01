@@ -668,10 +668,12 @@ export async function logout(): Promise<void> {
     })();
     await purgeUserData();
   } finally {
+    // Decrement first: if reset() ever threw, a counter left above zero would make
+    // every flow refuse until restart.
+    endingSession--;
     // A failing purge must still end the session in the UI and leave the screen.
     // The root layout's effect sees boot 'onboarding' and clears the stack.
     useApp.getState().reset();
-    endingSession--;
   }
   await revoked;
 }
