@@ -32,10 +32,23 @@ describe("<TaskItem /> due-today chip", () => {
     expect(row({ start_date: TODAY as never }).container.textContent).toContain("Today");
   });
 
-  it("hides it in the Today view, start date and deadline alike", () => {
+  it("hides the start-date today chip in the Today view", () => {
     expect(row({ start_date: TODAY as never }, true).container.textContent).not.toContain("Today");
+  });
+
+  it("never hides the deadline today chip, even in the Today view", () => {
+    const c = row({ deadline: TODAY as never }, true).container;
+    expect(c.textContent).toContain("Today");
+    expect(c.querySelector("svg")).not.toBeNull();
+  });
+
+  it("keeps the deadline chip when the start date is yesterday, tomorrow or today", () => {
+    expect(row({ start_date: "2026-07-09" as never, deadline: TODAY as never }, true).container.textContent).toMatch(/Yesterday.*Today/);
     cleanup();
-    expect(row({ deadline: TODAY as never }, true).container.textContent).not.toContain("Today");
+    expect(row({ start_date: "2026-07-11" as never, deadline: TODAY as never }, true).container.textContent).toMatch(/Tomorrow.*Today/);
+    cleanup();
+    // Both today: the start chip is hidden, the deadline chip stays.
+    expect((row({ start_date: TODAY as never, deadline: TODAY as never }, true).container.textContent ?? "").match(/Today/g)).toHaveLength(1);
   });
 
   it("keeps overdue and future dates in the Today view", () => {

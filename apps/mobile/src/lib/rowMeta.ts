@@ -25,9 +25,10 @@ export function moreLabelsText(n: number, t: (k: TranslationKey) => string): str
 }
 
 /**
- * The date chip of a row: start date, else deadline. The accent "today" chip is
- * dropped only when hideToday is set (the Today list, where every row is due
- * today); overdue and future dates always show. isDeadlineOnly marks a task
+ * The date chip of a row: start date, else deadline. The accent "today" chip of
+ * a start date is dropped only when hideToday is set (the Today list, where it
+ * is redundant); a deadline due today always shows, since Today also lists rows
+ * that merely start earlier, and overdue and future dates always show. isDeadlineOnly marks a task
  * with a deadline but no start date, so the chip can carry the deadline icon.
  */
 export function rowDate(
@@ -40,6 +41,6 @@ export function rowDate(
   const primary = task.start_date ?? task.deadline;
   if (!primary) return null;
   const info = relativeDate(primary, today, locale, t);
-  if (hideToday && info.tone === 'today') return null;
+  if (hideToday && info.tone === 'today' && task.start_date != null) return null;
   return { info, isDeadlineOnly: task.start_date == null };
 }

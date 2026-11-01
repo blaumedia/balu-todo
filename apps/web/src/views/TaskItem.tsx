@@ -64,7 +64,7 @@ export function TaskItem({ task, projects, labels, members, currentUserId, isSha
   const startRaw = task.start_date ? relativeDate(task.start_date, today, locale, t) : null;
   const deadlineRaw = task.deadline ? relativeDate(task.deadline, today, locale, t) : null;
   const start = hideTodayDate && startRaw?.tone === "today" ? null : startRaw;
-  const deadline = hideTodayDate && deadlineRaw?.tone === "today" ? null : deadlineRaw;
+  const deadline = deadlineRaw;
   const taskLabels = task.label_ids.map((id) => labels.get(id)).filter((l): l is Label => l != null && !l.is_deleted);
 
   return (

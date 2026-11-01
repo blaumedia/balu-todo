@@ -47,6 +47,12 @@ describe('rowDate', () => {
     expect(d(today, null, true)).toBeNull();
     expect(d(today, null, false)?.info.tone).toBe('today');
   });
+  it('never hides a deadline-only task due today, even with hideToday', () => {
+    const r = d(null, today, true);
+    expect(r?.info.tone).toBe('today');
+    expect(r?.isDeadlineOnly).toBe(true);
+    expect(d(today, today, true)).toBeNull();
+  });
   it('always shows overdue and future dates', () => {
     expect(d('2026-05-01', null, true)?.info.tone).toBe('overdue');
     expect(d('2026-05-20', null, true)?.info.tone).not.toBe('today');
