@@ -15,6 +15,11 @@ name: release
 #
 # Image tags are the version - rollback is a re-point, never a rebuild.
 #
+# If the test gate fails on a tag: for a flake, re-run the workflow; for a real
+# failure, fix it and cut the next patch version. Never move a pushed tag (it may
+# already be mirrored). Before the first real tag, run a dispatch dry run from `main`
+# (see below) to exercise the gate and the credentials.
+#
 # Can also be dispatched manually. A dispatch is a **dry run by default**: it
 # authenticates and builds, then pushes nothing - the way to prove credentials
 # and variables still resolve without burning a version number. Note that a run
