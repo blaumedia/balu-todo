@@ -20,6 +20,7 @@ export function TodayView({ snapshot }: { snapshot: Snapshot }) {
       ]}
       emptyLabel={t("empty.today")}
       showProject
+      hideTodayDate
       projects={maps.projects}
       labels={maps.labels}
       today={today}
