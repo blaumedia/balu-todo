@@ -200,7 +200,7 @@ export interface ApiClient {
    * the section. Probes with `?probe=true` so a current server answers 200
    * `{enabled:false}` instead of a 404 (which browsers log as a console error);
    * an older server ignores the parameter and 404s, which also maps to null.
-   * Any other failure throws `ApiError`.
+   * Any other HTTP failure or a timeout throws `ApiError`; a network failure rejects as the underlying `TypeError`.
    */
   getMcpSettings(): Promise<McpSettings | null>;
   /** Mint a key, or replace the existing one. Never implicit - user action only. */

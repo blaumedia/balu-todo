@@ -114,6 +114,25 @@ def test_disabled_probe_still_requires_a_session(client):
     assert client.get("/api/v1/me/mcp").status_code == 404
 
 
+def test_probe_without_a_session_answers_the_same_whether_mcp_is_on_or_off(client, mcp_on):
+    # The probe must not reveal the MCP state to an unauthenticated caller.
+    assert client.get("/api/v1/me/mcp?probe=true").status_code == 401
+    get_settings().mcp_enabled = False
+    assert client.get("/api/v1/me/mcp?probe=true").status_code == 401
+
+
+@pytest.mark.parametrize("value", ["maybe", "", "no", "0", "false"])
+def test_a_non_true_probe_value_is_ignored(client, user, value):
+    # MCP off: anything but true/1 is no probe, so the old 404 (never a 422)
+    resp = client.get(f"/api/v1/me/mcp?probe={value}", headers=user["headers"])
+    assert resp.status_code == 404, resp.text
+
+
+def test_a_bad_probe_value_is_ignored_while_enabled(client, user, mcp_on):
+    resp = client.get("/api/v1/me/mcp?probe=maybe", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+
+
 def test_probe_is_ignored_when_enabled(client, user, mcp_on):
     resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
     assert resp.status_code == 200, resp.text

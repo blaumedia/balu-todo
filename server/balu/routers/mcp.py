@@ -47,7 +47,7 @@ def require_mcp_enabled() -> None:
         raise not_found("Not found")
 
 
-def _settings_gate(probe: bool = False) -> bool:
+def _settings_gate(probe: str | None = None) -> bool:
     """Feature gate for GET /me/mcp only.
 
     Clients that understand `{"enabled": false}` ask with `?probe=true` and get a
@@ -55,9 +55,13 @@ def _settings_gate(probe: bool = False) -> bool:
     old web bundles - keeps the 404 they read as "hide the section", because they
     render any 200 body. Runs before auth, so an unauthenticated non-probe call
     still 404s exactly as before.
+
+    `probe` is read leniently: only "true"/"1" count, any other value is
+    ignored like before (no 422 for a value an old server never validated).
     """
     enabled = get_settings().mcp_enabled
-    if not enabled and not probe:
+    probing = probe is not None and probe.strip().lower() in ("true", "1")
+    if not enabled and not probing:
         raise not_found("Not found")
     return enabled
 
