@@ -834,6 +834,12 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     m.update(body["temp_id_mapping"])
     sync(client, user, body["sync_token"], [cmd("task_delete", id=m["s3"])])
     ws = user["workspace_id"]
+    # nesting deeper than one level, as older servers could create it
+    body = sync(client, user, "*", [
+        cmd("task_add", temp_id="g1", title="Grandchild"),
+        cmd("task_add", temp_id="g2", title="Great-grandchild"),
+    ])
+    m.update(body["temp_id_mapping"])
     # a second workspace holding only matching subtasks must not be bumped
     other = _second_workspace(client, user)
     resp = client.post(
@@ -850,6 +856,10 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         conn.execute(text(
             "UPDATE tasks SET project_id = :p, section_id = :sec WHERE id IN (:a, :b, :c)"
         ), {"p": m["pb"], "sec": m["sb"], "a": m["s1"], "b": m["s3"], "c": m["s4"]})
+        conn.execute(text("UPDATE tasks SET parent_task_id = :par WHERE id = :g"),
+                     {"par": m["s2"], "g": m["g1"]})
+        conn.execute(text("UPDATE tasks SET parent_task_id = :par WHERE id = :g"),
+                     {"par": m["g1"], "g": m["g2"]})
         other_version = conn.execute(
             text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
         ).scalar_one()
@@ -877,7 +887,7 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         rows = {
             str(r.id): r
             for r in conn.execute(text(
-                "SELECT id, project_id, section_id, version FROM tasks"
+                "SELECT id, project_id, section_id, version, parent_task_id FROM tasks"
             ))
         }
         new_ws_version = conn.execute(
@@ -886,7 +896,7 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         new_other_version = conn.execute(
             text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
         ).scalar_one()
-    # two mismatched subtasks, one bump for the workspace, the same version on both
+    # two mismatched subtasks plus two deep ones, one bump for the workspace
     assert new_ws_version == ws_version + 1
     assert new_other_version == other_version
     s4 = rows[m["s4"]]
@@ -896,6 +906,11 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     assert (str(s1.project_id), str(s1.section_id)) == (m["pa"], m["sa"])
     assert s1.version == new_ws_version
     assert rows[m["s2"]].version == s2_version
+    for g in ("g1", "g2"):  # flattened onto the top-level ancestor, then aligned
+        row = rows[m[g]]
+        assert str(row.parent_task_id) == m["par"]
+        assert (str(row.project_id), str(row.section_id)) == (m["pa"], m["sa"])
+        assert row.version == new_ws_version
     assert str(rows[m["s3"]].project_id) == m["pb"]  # deleted: untouched
 
 
