@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const router = vi.hoisted(() => ({ back: vi.fn(), replace: vi.fn(), canGoBack: vi.fn() }));
+const router = vi.hoisted(() => ({
+  back: vi.fn(),
+  replace: vi.fn(),
+  canGoBack: vi.fn(),
+  canDismiss: vi.fn(),
+  dismissAll: vi.fn(),
+}));
 vi.mock('expo-router', () => ({ router }));
 
-import { goBackOr } from '../src/lib/goBack';
+import { goBackOr, replaceWithGate } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -39,5 +45,24 @@ describe('goBackOr', () => {
     goBackOr('/browse', nav);
     expect(router.replace).toHaveBeenCalledWith('/browse');
     expect(nav.goBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('replaceWithGate', () => {
+  it('clears the stack before handing over to the index gate', () => {
+    router.canDismiss.mockReturnValue(true);
+    replaceWithGate();
+    expect(router.dismissAll).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith('/');
+    expect(router.dismissAll.mock.invocationCallOrder[0]).toBeLessThan(
+      router.replace.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('only replaces when there is nothing to dismiss (cold deep link)', () => {
+    router.canDismiss.mockReturnValue(false);
+    replaceWithGate();
+    expect(router.dismissAll).not.toHaveBeenCalled();
+    expect(router.replace).toHaveBeenCalledWith('/');
   });
 });

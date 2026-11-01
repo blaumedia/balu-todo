@@ -3,9 +3,9 @@ import type { Boot } from '../store/app';
 
 /**
  * What the Assigned screen should do:
- * - `'gate'`: boot resolved to logged out (`onboarding`); replace to `/` so the
- *   index gate picks onboarding, whatever history there is (popping back would
- *   land on a tab with no session).
+ * - `'gate'`: boot resolved to logged out (`onboarding`); clear the stack and
+ *   replace to `/` so the index gate picks onboarding (popping back would land
+ *   on a tab with no session).
  * - `'back'`: solo workspace or missing user, once boot is ready and synced;
  *   before that `user` is null and the member list empty, which would bounce a
  *   cold deep link.

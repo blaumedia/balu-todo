@@ -386,9 +386,11 @@ describe('accounts without a workspace (what-if 6)', () => {
     expect(useApp.getState().boot).toBe('noWorkspace');
     expect(fake.alerts).toHaveLength(0);
     expect(fake.logouts).toBe(0);
+    expect(fake.nav).toEqual([]); // the rescue wait never sends the user to onboarding
     await vi.advanceTimersByTimeAsync(60_000);
     expect(calls).toBe(3);
     expect(useApp.getState().boot).toBe('ready');
+    expect(fake.nav).toEqual([]);
   });
 
   it('stops asking once the user logs out from the notice', async () => {
@@ -412,7 +414,10 @@ describe('accounts without a workspace (what-if 6)', () => {
 describe('leaving for onboarding past the gate (review 026272d7)', () => {
   afterEach(() => vi.useRealTimers());
 
-  it('/me stops listing a workspace while waiting: dismisses and replaces to /onboarding', async () => {
+  // Defensive branch: establishSession declining while still waiting. With a
+  // non-empty /me the real pickMembership always picks one (an empty /me throws
+  // NoWorkspaceError and the wait goes on), so the pick is mocked; unreachable today.
+  it('defensive: establishSession declines while still waiting: dismisses and replaces to /onboarding', async () => {
     vi.useFakeTimers();
     fake.canDismiss = true;
     useApp.setState({ memberships: [mem('lost')] } as any);
@@ -435,6 +440,8 @@ describe('leaving for onboarding past the gate (review 026272d7)', () => {
     expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
   });
 
+  // Guard only: setSession sets boot 'ready' before any sync client exists, so an
+  // access loss during 'loading' is not reachable today.
   it('landOutside before the cold-start gate: no navigation', async () => {
     useApp.setState({ serverUrl: null, boot: 'loading' } as any);
     fake.canDismiss = true;

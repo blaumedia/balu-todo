@@ -22,3 +22,16 @@ export function goBackOr(fallback: Href = '/browse', nav?: BackNav): void {
   if (target.canGoBack()) target.goBack();
   else router.replace(fallback);
 }
+
+/**
+ * Hand over to the index gate with no history left behind.
+ *
+ * `replace` alone only swaps the top route: with `[(tabs), assigned]` the stack
+ * would become `[(tabs), index]`, and Android back from the login step would
+ * return to a tab with no session. Dismissing the stack first leaves nothing to
+ * go back to, the same way boot's own navigation to onboarding does.
+ */
+export function replaceWithGate(): void {
+  if (router.canDismiss()) router.dismissAll();
+  router.replace('/');
+}
