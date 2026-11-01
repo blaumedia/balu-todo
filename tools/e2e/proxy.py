@@ -13,7 +13,7 @@ Control files (presence = on), in $STATE/ctl:
   me_empty     - rewrite the body of 200 GET /api/v1/me to an empty memberships list
 
 The emulator reaches the proxy via http://10.0.2.2:<listen>. The API helpers
-bypass the proxy: run them with `BALU_PORT=<upstream port>`.
+bypass the proxy: run them with `BALU_E2E_PORT=<upstream port>`.
 """
 from __future__ import annotations
 

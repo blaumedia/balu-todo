@@ -6,24 +6,27 @@ set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-PROJECT=${BALU_E2E_PROJECT:-balu-e2e-$(basename "$ROOT")}
-if [ -n "${BALU_E2E_PROJECT:-}" ]; then
-  case "$PROJECT" in
-    *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*)
-      echo "BALU_E2E_PROJECT must match [a-z0-9_-]+ (compose needs lowercase; it is used in paths)" >&2
-      exit 2
-      ;;
-  esac
-fi
-PORT=${BALU_PORT:-8090}
+# Default name: lowercase, every other character outside [a-z0-9_-] becomes '-' (same rule as
+# balu_e2e.py and the server Makefile).
+DEFAULT_PROJECT=balu-e2e-$(basename "$ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')
+PROJECT=${BALU_E2E_PROJECT:-$DEFAULT_PROJECT}
+# `purge` deletes the project's volumes, so only a name that cannot be a dev project is accepted.
+case "$PROJECT" in
+  balu-e2e-*[!abcdefghijklmnopqrstuvwxyz0123456789_-]* | balu-e2e-)
+    echo "BALU_E2E_PROJECT must start with balu-e2e- and match [a-z0-9_-]+ (purge deletes the project's volumes; compose needs lowercase)" >&2
+    exit 2
+    ;;
+  balu-e2e-*) ;;
+  *)
+    echo "BALU_E2E_PROJECT must start with balu-e2e- and match [a-z0-9_-]+ (purge deletes the project's volumes; compose needs lowercase)" >&2
+    exit 2
+    ;;
+esac
+# BALU_E2E_PORT first so the dev stack's BALU_PORT (root .env) does not leak in; same order as balu_e2e.py
+PORT=${BALU_E2E_PORT:-${BALU_PORT:-8090}}
 export BALU_PORT="$PORT"
 STATE=${BALU_E2E_STATE:-$HOME/.cache/balu-e2e/$PROJECT}
 ENVF=$STATE/stack.env
-
-if [ "$PROJECT" = "balu" ]; then
-  echo "refusing to touch the dev project 'balu'" >&2
-  exit 2
-fi
 
 MARKER=$STATE/.balu-e2e-state
 
@@ -72,7 +75,7 @@ ensure_env
 case "$cmd" in
   up)
     if curl -fsS "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1 && [ -z "$(dc ps -q app)" ]; then
-      echo "port $PORT is served by another stack; set BALU_PORT" >&2
+      echo "port $PORT is served by another stack; set BALU_E2E_PORT" >&2
       exit 1
     fi
     dc up -d --build

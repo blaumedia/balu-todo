@@ -11,16 +11,36 @@ import os
 import re
 import secrets
 import string
+import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 
+if sys.version_info < (3, 11):
+    raise SystemExit("tools/e2e needs Python 3.11+")
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROJECT = os.environ.get("BALU_E2E_PROJECT") or f"balu-e2e-{REPO_ROOT.name}"
-PORT = int(os.environ.get("BALU_PORT", "8090"))
+
+
+def _sanitized(name: str) -> str:
+    # same rule as stack.sh: lowercase, every other byte outside [a-z0-9_-] becomes '-'
+    return "".join(
+        c if re.fullmatch(r"[a-z0-9_-]", c) else "-" * len(c.encode()) for c in name.lower()
+    )
+
+
+PROJECT = os.environ.get("BALU_E2E_PROJECT") or f"balu-e2e-{_sanitized(REPO_ROOT.name)}"
+# BALU_E2E_PORT first so the dev stack's BALU_PORT (root .env, direnv) does not leak in
+PORT = int(os.environ.get("BALU_E2E_PORT") or os.environ.get("BALU_PORT") or "8090")
 BASE = os.environ.get("BALU_E2E_BASE", f"http://127.0.0.1:{PORT}")
+if urllib.parse.urlsplit(BASE).scheme not in {"http", "https"}:
+    raise SystemExit("BALU_E2E_BASE must be an http(s) URL")
+_HOST = urllib.parse.urlsplit(BASE).hostname or ""
+if _HOST not in {"127.0.0.1", "localhost", "::1"} and os.environ.get("BALU_E2E_ALLOW_REMOTE") != "1":
+    raise SystemExit(f"refusing non-local BALU_E2E_BASE host {_HOST!r} (set BALU_E2E_ALLOW_REMOTE=1)")
 API = BASE + "/api/v1"
 STATE = Path(os.environ.get("BALU_E2E_STATE") or Path.home() / ".cache" / "balu-e2e" / PROJECT)
 RUN = os.environ.get("BALU_E2E_RUN") or time.strftime("%Y%m%d")
@@ -29,9 +49,10 @@ MARKER = ".balu-e2e-state"
 _SAFE = re.compile(r"[A-Za-z0-9_-]+")
 if not _SAFE.fullmatch(RUN):
     raise SystemExit("BALU_E2E_RUN must match [A-Za-z0-9_-]+ (it is used in paths and emails)")
-if os.environ.get("BALU_E2E_PROJECT") and not re.fullmatch(r"[a-z0-9_-]+", PROJECT):
+if not re.fullmatch(r"balu-e2e-[a-z0-9_-]+", PROJECT):
     raise SystemExit(
-        "BALU_E2E_PROJECT must match [a-z0-9_-]+ (compose needs lowercase; it is used in paths)"
+        "BALU_E2E_PROJECT must start with balu-e2e- and match [a-z0-9_-]+ "
+        "(purge deletes the project's volumes; compose needs lowercase)"
     )
 TOKEN_MAX_AGE = 25 * 60  # server access tokens live 30 min (config.access_token_expire_minutes)
 
@@ -72,11 +93,19 @@ def load(name: str) -> str:
 
 
 def password(role: str) -> str:
-    name = f"{role}.pw"
-    if not (run_dir() / name).exists():
-        alphabet = string.ascii_letters + string.digits
-        save(name, "".join(secrets.choice(alphabet) for _ in range(24)))
-    return load(name)
+    path = run_dir() / f"{role}.pw"
+    alphabet = string.ascii_letters + string.digits
+    value = "".join(secrets.choice(alphabet) for _ in range(24))
+    try:
+        # O_EXCL: of two racing processes only one writes, the other reads that password
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return load(path.name)
+    try:
+        os.write(fd, value.encode("utf-8"))
+    finally:
+        os.close(fd)
+    return value
 
 
 def email(role: str) -> str:
@@ -97,9 +126,11 @@ def req(method: str, path: str, body=None, token: str | None = None) -> tuple[in
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(API + path, data=data, method=method, headers=headers)
+    request = urllib.request.Request(  # nosec B310 - scheme checked above
+        API + path, data=data, method=method, headers=headers
+    )
     try:
-        with urllib.request.urlopen(request, timeout=60) as r:
+        with urllib.request.urlopen(request, timeout=60) as r:  # nosec B310
             status, raw = r.status, r.read()
     except urllib.error.HTTPError as err:
         status, raw = err.code, err.read()
@@ -114,7 +145,7 @@ def req(method: str, path: str, body=None, token: str | None = None) -> tuple[in
 
 def health() -> int:
     try:
-        with urllib.request.urlopen(BASE + "/healthz", timeout=10) as r:
+        with urllib.request.urlopen(BASE + "/healthz", timeout=10) as r:  # nosec B310
             return r.status
     except urllib.error.HTTPError as err:
         return err.code

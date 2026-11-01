@@ -15,8 +15,9 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `BALU_PORT` | host port of the stack (default 8090) |
-| `BALU_E2E_PROJECT` | compose project name (`[a-z0-9_-]+`, lowercase because compose requires it; `stack.sh` and the Python helpers both reject anything else) |
+| `BALU_E2E_PORT` | host port of the stack, used by `stack.sh` and the Python helpers alike; falls back to `BALU_PORT`, then 8090. Prefer it: `BALU_PORT` is usually the dev stack's port (root `.env`) |
+| `BALU_E2E_ALLOW_REMOTE` | set to `1` to let `BALU_E2E_BASE` point at a non-local host (default: only 127.0.0.1, localhost, ::1; the helpers register users and create data) |
+| `BALU_E2E_PROJECT` | compose project name, must start with `balu-e2e-` and match `[a-z0-9_-]+` (`purge` deletes the project's volumes, so a dev project name such as `balu-wt-x` is refused; `stack.sh` and the Python helpers both enforce it). Default: `balu-e2e-<checkout dir>`, lowercased with other characters turned into `-` |
 | `BALU_E2E_STATE` | state directory |
 | `BALU_E2E_RUN` | run id (`[A-Za-z0-9_-]+`), default today; used in emails `e2e-<run>-<role>@example.com` |
 | `BALU_E2E_BASE` | API base URL override |
@@ -83,9 +84,9 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 
 ## 4. Control proxy
 
-Start the stack on 8091 (`BALU_PORT=8091 stack.sh up`), then
+Start the stack on 8091 (`BALU_E2E_PORT=8091 stack.sh up`), then
 `proxy.py serve --listen 8090 --upstream http://127.0.0.1:8091`. The emulator talks to
-`http://10.0.2.2:8090`; the API helpers bypass the proxy and use `BALU_PORT=8091`.
+`http://10.0.2.2:8090`; the API helpers bypass the proxy and use `BALU_E2E_PORT=8091`.
 
 `proxy.py ctl on|off dark|dark_on_403|me_empty` switches the failure modes (see the
 header of `proxy.py`).
