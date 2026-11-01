@@ -34,7 +34,7 @@ def type_password(pw: str) -> None:
     # The password goes to the device shell on stdin, so it is in no host process argv
     # (`ps` on the host shows only the fixed command). It is still an argument of
     # `input text` inside the emulator, which only this device's own shell can list.
-    if not pw.isalnum():
+    if not (pw.isascii() and pw.isalnum()):
         raise SystemExit("password has characters this typing path does not handle")
     ui.adb("shell", 'read -r p; input text "$p"', stdin=pw + "\n")
 

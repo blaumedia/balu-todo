@@ -10,6 +10,7 @@ import datetime
 import json
 import mimetypes
 import os
+import re
 import sys
 
 import balu_e2e as e
@@ -186,7 +187,7 @@ def cmd_attach(a) -> int:
     except OSError as err:
         raise SystemExit(f"cannot read {a.file}: {err.strerror}") from None
     boundary = "balu-e2e-" + e.new_uuid()
-    name = os.path.basename(a.file).replace('"', "")
+    name = re.sub(r'[\r\n"\\]', "_", os.path.basename(a.file))
     ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
     body = (
         (

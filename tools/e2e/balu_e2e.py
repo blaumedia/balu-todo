@@ -161,13 +161,13 @@ def req(
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as r:  # nosec B310
-            status, raw = r.status, r.read()
+            status, resp_body = r.status, r.read()
     except urllib.error.HTTPError as err:
-        status, raw = err.code, err.read()
+        status, resp_body = err.code, err.read()
     except urllib.error.URLError:
         raise SystemExit(f"{method} {path}: server unreachable at {BASE}") from None
     try:
-        parsed = json.loads(raw) if raw else {}
+        parsed = json.loads(resp_body) if resp_body else {}
     except ValueError:
         parsed = {}
     return status, parsed if isinstance(parsed, dict) else {}
