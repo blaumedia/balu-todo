@@ -204,7 +204,7 @@ other client. Tools: `list_workspaces`, `list_projects`, `list_tasks`, `get_task
 - Web: `pnpm install && pnpm --filter @balu/web dev` (proxies `/api` → `:8000`)
 - Mobile: `pnpm --filter @balu/mobile start` - see `apps/mobile/README.md`
 - Lint: `pnpm lint` (ESLint 9 in every JS/TS package; CI runs it).
-- Several checkouts or git worktrees: each additional one needs its own `COMPOSE_PROJECT_NAME` and `BALU_PORT` in its `.env` (see `.env.example`), and for server tests `make test TEST_DB_PORT=5434` (or export `BALU_TEST_DB_PORT`). If `make test` stops on a legacy `balu-test-db` container left by an older checkout, remove it once with `docker rm -f balu-test-db`.
+- Several checkouts or git worktrees: each additional one needs its own `COMPOSE_PROJECT_NAME` and `BALU_PORT` in its `.env` (see `.env.example`), and for server tests `make test TEST_DB_PORT=5434` (or export `BALU_TEST_DB_PORT`). If `make test` stops on a legacy `balu-test-db` container left by an older checkout, stop it only if no older checkout still uses it, otherwise use `TEST_DB_PORT=5434`.
 - E2E helpers (API, web, Android emulator): [`tools/e2e/README.md`](tools/e2e/README.md).
 
 ## Ideas

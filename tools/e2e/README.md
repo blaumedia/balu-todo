@@ -45,6 +45,9 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
   `tasks.json` at the state root are not migrated. Use a new `BALU_E2E_RUN` (or `stack.sh
   purge`), otherwise the freshly generated password no longer matches the account already
   registered for that run (login 401). The old root files can be deleted.
+- `stack.sh` unsets `BALU_SECRET_KEY`, `BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION` and
+  `BALU_CORS_ORIGINS` (shell values would beat the generated env file), and exports
+  `BALU_PORT` from `BALU_E2E_PORT`; a direnv-loaded root `.env` cannot change the stack.
 - The app container does **not** read the checkout's root `.env`: `stack.sh` adds an override
   (`env_file: !reset []`, compose >= 2.24) so real SMTP/Telegram/`BALU_DEV` values stay out.
 - **MCP toggle:** `stack.sh mcp on|off` (no argument prints the state) sets
@@ -135,7 +138,7 @@ page URL after the redirect, which contains the token: treat that output as sens
 - Android date and time pickers follow the **system** locale, not the app locale.
 - uiautomator dumps never contain password-field text (`ui.py` filters `password="true"`
   nodes). Do not bypass `ui.py` for dumps.
-- `android/dot.py` needs Pillow and the current header layout.
+- `android/dot.py` needs Pillow (`uv run --python 3.11 --with pillow python ...`) and the current header layout.
 
 Scripts: `android/ui.py` (list, tap, has, dump, swipe, state, type), `android/login.py ROLE`,
 `android/cold.sh`, `android/dot.py [--watch SECONDS]`.
