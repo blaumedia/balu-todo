@@ -87,6 +87,42 @@ def test_disabled_hides_every_endpoint(client, user):
     assert client.post("/api/v1/me/mcp/key", headers=user["headers"]).status_code == 404
     assert client.get("/api/v1/mcp").status_code == 404
     assert client.post("/api/v1/mcp", json=ping).status_code == 404
+    # the probe applies to the settings read only
+    assert client.post("/api/v1/me/mcp/key?probe=true", headers=user["headers"]).status_code == 404
+    assert client.post("/api/v1/mcp?probe=true", json=ping).status_code == 404
+
+
+def test_disabled_settings_probe_answers_enabled_false(client, user):
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+
+
+def test_disabled_probe_never_reveals_a_stored_key(client, user, mcp_on):
+    key = mcp_key(client, user)
+    get_settings().mcp_enabled = False
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"enabled": False}
+    get_settings().mcp_enabled = True
+    assert mcp_settings(client, user)["key"] == key
+
+
+def test_disabled_probe_still_requires_a_session(client):
+    assert client.get("/api/v1/me/mcp?probe=true").status_code == 401
+    # the gate runs before auth, as before
+    assert client.get("/api/v1/me/mcp").status_code == 404
+
+
+def test_probe_is_ignored_when_enabled(client, user, mcp_on):
+    resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["enabled"] is True
+    assert body["key"] is None
+    assert body["endpoint"].endswith("/api/v1/mcp")
+    assert "probe" not in body["endpoint"]
+    assert body == mcp_settings(client, user)
 
 
 def test_disabled_hides_the_endpoint_even_with_a_valid_key(client, user, mcp_on):

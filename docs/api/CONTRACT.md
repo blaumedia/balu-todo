@@ -598,12 +598,7 @@ from the command handlers (failures logged, never fail the command):
 
 ## 10. Remote MCP server - v1.3 (optional, off by default)
 
-Off unless the deployment sets `BALU_MCP_ENABLED=true`. While off, **every endpoint in
-this section 404s**, including the settings ones - which is also what an older server
-without the feature does, so clients treat "404" as "hide the MCP section" rather than
-special-casing a flag. None of these routes appear in `openapi.json`, enabled or not:
-`/mcp` is JSON-RPC rather than REST, and the document should not vary with runtime
-configuration.
+Off unless the deployment sets `BALU_MCP_ENABLED=true`. While off, every endpoint in this section 404s, with one exception **(v1.5.2)**: `GET /me/mcp?probe=true` answers `200 {"enabled": false}` and nothing else (no `endpoint`, never a stored `key`). Clients that send `probe=true` hide the MCP section on `enabled: false` **or** on a 404, because an older server ignores the parameter and still 404s. Without `probe` the endpoint keeps 404ing while off, because released clients (mobile <= 1.3.2, web before 1.5.2) render any 200 body as the section. `probe` is ignored while MCP is on. Auth still applies: an unauthenticated `probe=true` call is `401`. None of these routes appear in `openapi.json`, enabled or not: `/mcp` is JSON-RPC rather than REST, and the document should not vary with runtime configuration.
 
 **Per-user key.** Each user may hold one MCP bearer key, `balu_mcp_` + 256 bit urlsafe
 random, stored in plaintext on `users.mcp_key` (unique, indexed). Plaintext is
@@ -615,7 +610,7 @@ previous key stops authenticating immediately.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /me/mcp` | access token | `{enabled, endpoint, key, claude_code_command}`; `key` is `null` until one is generated, and `claude_code_command` with it. Never writes. |
+| `GET /me/mcp` | access token | `{enabled, endpoint, key, claude_code_command}`; `key` is `null` until one is generated, and `claude_code_command` with it. Never writes. `?probe=true`: see above; while off the body is `{"enabled": false}`. |
 | `POST /me/mcp/key` | access token | generates/replaces the key, same response shape with `key` set |
 | `POST /mcp` | `Authorization: Bearer <mcp key>` | the MCP endpoint (see below) |
 | `GET /mcp` | - | `405` (no server-initiated SSE stream) |

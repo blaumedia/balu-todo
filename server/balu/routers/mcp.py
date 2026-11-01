@@ -1,9 +1,10 @@
 """Remote MCP endpoints (§10): the JSON-RPC transport plus key management.
 
-Everything here 404s when ``BALU_MCP_ENABLED`` is off, including the key
-endpoints - the settings UIs read that 404 as "this server has no MCP support"
-and hide the section, which is also what an older server without the feature
-does.
+Everything here 404s when ``BALU_MCP_ENABLED`` is off, except
+``GET /me/mcp?probe=true``, which answers ``200 {"enabled": false}`` for clients
+that understand it. Without ``probe``, old clients keep getting the 404 they read
+as "this server has no MCP support" and hide the section, which is also what an
+older server without the feature does.
 
 None of it appears in the OpenAPI schema: `/mcp` is JSON-RPC rather than REST and
 has nothing useful to say there, and keeping the document independent of runtime
@@ -30,7 +31,7 @@ from ..mcp.protocol import JsonRpcError, dispatch, error_response, parse_message
 from ..mcp.tools import ToolContext
 from ..models import User
 from ..ratelimit import MCP_AUTH_PER_IP, MCP_KEY_PER_IP, client_ip, limiter
-from ..schemas.mcp import McpSettings
+from ..schemas.mcp import McpDisabled, McpSettings
 
 logger = logging.getLogger("balu.mcp")
 
@@ -44,6 +45,21 @@ _KEY_PATH = "/me/mcp/key"
 def require_mcp_enabled() -> None:
     if not get_settings().mcp_enabled:
         raise not_found("Not found")
+
+
+def _settings_gate(probe: bool = False) -> bool:
+    """Feature gate for GET /me/mcp only.
+
+    Clients that understand `{"enabled": false}` ask with `?probe=true` and get a
+    200 instead of a 404 (no red console line). Everyone else - mobile <= 1.3.2,
+    old web bundles - keeps the 404 they read as "hide the section", because they
+    render any 200 body. Runs before auth, so an unauthenticated non-probe call
+    still 404s exactly as before.
+    """
+    enabled = get_settings().mcp_enabled
+    if not enabled and not probe:
+        raise not_found("Not found")
+    return enabled
 
 
 def _unauthorized() -> ApiError:
@@ -108,11 +124,14 @@ def _settings_payload(request: Request, own_path: str, key: str | None) -> McpSe
 # ---------------------------------------------------------------------------
 # Key management (session-authenticated, for the settings UIs)
 # ---------------------------------------------------------------------------
-@router.get(_SETTINGS_PATH, response_model=McpSettings, dependencies=[Depends(require_mcp_enabled)])
+@router.get(_SETTINGS_PATH, response_model=McpSettings | McpDisabled)
 def get_mcp_settings(
     request: Request,
+    enabled: bool = Depends(_settings_gate),
     user: User = Depends(get_current_user),
-) -> McpSettings:
+) -> McpSettings | McpDisabled:
+    if not enabled:
+        return McpDisabled()
     # Read-only on purpose: both settings screens call this on mount just to
     # decide whether to render the section, and that is not a request for a
     # non-expiring full-access credential. `key` stays null until POST /me/mcp/key.
