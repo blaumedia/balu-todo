@@ -984,19 +984,90 @@ def test_failed_commit_on_project_delete_keeps_blob(client, user, data_dir, db, 
 
 
 
-def test_download_blob_vanishing_after_the_check_is_not_found(client, user, data_dir, monkeypatch):
-    from pathlib import Path
+def test_download_blob_vanishing_before_the_open_is_not_found(client, user, data_dir, monkeypatch):
+    import os
 
     task_id = _add_task(client, user)
     meta = _upload(client, user, task_id).json()
     (_blob_dir(data_dir, user["workspace_id"]) / meta["id"]).unlink()
-    # the is_file check passes, the file is gone by the time it is opened
-    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    real_open = os.open
+
+    def racing_open(path, *args, **kwargs):
+        if str(path).endswith(meta["id"]):
+            raise FileNotFoundError(path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr("balu.routers.attachments.os.open", racing_open)
     got = client.get(
         f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
         headers=user["headers"],
     )
     assert got.status_code == 404
+
+
+def test_download_of_a_non_regular_file_is_not_found(client, user, data_dir):
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id).json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    blob.unlink()
+    blob.mkdir()
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 404
+
+
+def test_download_unlinked_after_the_open_still_streams_the_whole_file(
+    client, user, data_dir, monkeypatch
+):
+    import os
+
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id).json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    real_fstat = os.fstat
+
+    def unlink_then_fstat(fd):
+        result = real_fstat(fd)
+        blob.unlink()  # a concurrent delete lands right after the open
+        return result
+
+    monkeypatch.setattr("balu.routers.attachments.os.fstat", unlink_then_fstat)
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 200
+    assert got.content == PNG
+
+
+def test_download_headers_match_a_plain_file_response(client, user, data_dir):
+    from starlette.responses import FileResponse
+
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id, filename="sh\u00f6t.png").json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 200
+    expected = FileResponse(
+        str(blob),
+        media_type="image/png",
+        filename="sh\u00f6t.png",
+        stat_result=blob.stat(),
+        headers={"X-Content-Type-Options": "nosniff"},
+    ).headers
+    for name in (
+        "content-type", "content-length", "content-disposition", "etag",
+        "last-modified", "accept-ranges", "x-content-type-options",
+    ):
+        assert got.headers[name] == expected[name], name
+    assert got.headers["content-length"] == str(len(PNG))
+    assert got.headers["content-disposition"].startswith("attachment;")
+    assert got.headers["x-content-type-options"] == "nosniff"
 
 
 def _age(path, seconds: int) -> None:
