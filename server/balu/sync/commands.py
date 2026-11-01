@@ -622,6 +622,8 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     if "parent_task_id" in args:
         new_parent_id = _check_parent(ctx, args.get("parent_task_id"))
+        if new_parent_id is not None and new_parent_id == task.id:
+            raise CommandError("invalid_args", "a task cannot be its own parent")
         if new_parent_id is not None and ctx.session.execute(
             select(Task.id).where(
                 Task.parent_task_id == task.id, Task.is_deleted.is_(False)

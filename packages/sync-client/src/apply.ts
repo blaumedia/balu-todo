@@ -216,6 +216,9 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
     case "task_move": {
       const t = replica.tasks.get(id);
       if (!t) break;
+      // A task cannot be its own parent: the server rejects it (invalid_args), so
+      // skip it here too instead of hiding the task as a subtask of itself.
+      if (a.parent_task_id != null && str(a.parent_task_id) === t.id) break;
       patch(t, a, ["project_id", "section_id", "parent_task_id", "sort_order"]);
       // A section always belongs to one project, so moving between projects
       // without naming a new section clears it — same as the server (I4).

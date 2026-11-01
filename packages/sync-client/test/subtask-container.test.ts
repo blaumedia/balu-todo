@@ -64,6 +64,13 @@ describe("subtask container follows its parent", () => {
     const s = r.tasks.get("s1")!;
     expect([s.project_id, s.section_id]).toEqual(["pb", "sb"]);
   });
+
+  it("ignores a task_move that would make a task its own parent", () => {
+    const r = setup();
+    run(r, "task_move", { id: "par", parent_task_id: "par", project_id: "pb" });
+    const p = r.tasks.get("par")!;
+    expect([p.parent_task_id, p.project_id]).toEqual([null, "pa"]);
+  });
 });
 
 describe("task_reorder", () => {
