@@ -1,7 +1,8 @@
-// Ambient sync status (contract §6.3 / DESIGN §1) — a quiet dot + label.
+// Ambient sync status (contract §6.3 / DESIGN §1): a quiet dot + label.
 import type { SyncStatus } from '@balu/domain';
 import { StyleSheet, Text, View } from 'react-native';
 import { useT } from '../i18n';
+import { syncLabelKey } from '../lib/syncLabel';
 import { useTheme } from '../theme/ThemeProvider';
 import { font } from '../theme/tokens';
 
@@ -16,16 +17,10 @@ export function SyncIndicator({ status, showLabel = false }: { status: SyncStatu
         : status === 'error'
           ? theme.danger
           : theme.textTertiary;
-  const label =
-    status === 'synced'
-      ? t('sync.synced')
-      : status === 'syncing'
-        ? t('sync.syncing')
-        : status === 'error'
-          ? t('sync.error')
-          : t('sync.offline');
+  // Read out by screen readers even when the text is not shown (the header shows the dot only).
+  const label = t(syncLabelKey(status));
   return (
-    <View style={styles.row}>
+    <View style={styles.row} accessible accessibilityRole="text" accessibilityLabel={label}>
       <View style={[styles.dot, { backgroundColor: color }]} />
       {showLabel ? <Text style={[styles.label, { color: theme.textTertiary }]}>{label}</Text> : null}
     </View>
