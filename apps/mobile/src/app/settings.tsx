@@ -46,7 +46,7 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
-  const keyboardReveal = useKeyboardReveal(insets);
+  const keyboardReveal = useKeyboardReveal();
   const user = useApp((s) => s.user);
   const workspace = useApp((s) => s.workspace);
   const memberships = useApp((s) => s.memberships);
@@ -257,6 +257,7 @@ export default function SettingsScreen() {
         onScroll={keyboardReveal.onScroll}
         onTouchStart={keyboardReveal.onTouchStart}
         onTouchEnd={keyboardReveal.onTouchEnd}
+        onTouchCancel={keyboardReveal.onTouchCancel}
         scrollEventThrottle={keyboardReveal.scrollEventThrottle}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"

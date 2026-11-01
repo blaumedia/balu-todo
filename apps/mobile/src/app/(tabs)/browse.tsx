@@ -23,7 +23,7 @@ export default function BrowseScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
-  const keyboardReveal = useKeyboardReveal(insets);
+  const keyboardReveal = useKeyboardReveal();
   const snap = useSnapshot();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
@@ -195,6 +195,7 @@ export default function BrowseScreen() {
         onScrollOffsetChange={keyboardReveal.setOffset}
         onTouchStart={keyboardReveal.onTouchStart}
         onTouchEnd={keyboardReveal.onTouchEnd}
+        onTouchCancel={keyboardReveal.onTouchCancel}
         data={projects}
         keyExtractor={(p) => p.id}
         renderItem={renderProject}

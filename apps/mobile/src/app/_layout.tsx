@@ -5,10 +5,11 @@ import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { AppState, Platform } from 'react-native';
+import { AppState, Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BootNotice } from '../components/BootNotice';
+import { rootViewRef } from '../lib/rootViewRef';
 import { ProjectActionsSheet } from '../features/ProjectActionsSheet';
 import { QuickAddSheet } from '../features/QuickAddSheet';
 import { ScheduleSheet } from '../features/ScheduleSheet';
@@ -70,11 +71,13 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <ThemeProvider>
-          <Chrome />
-        </ThemeProvider>
-      </SafeAreaProvider>
+      <View ref={rootViewRef} collapsable={false} style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <ThemeProvider>
+            <Chrome />
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </View>
     </GestureHandlerRootView>
   );
 }

@@ -29,7 +29,7 @@ export default function Onboarding() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
-  const keyboardReveal = useKeyboardReveal(insets);
+  const keyboardReveal = useKeyboardReveal();
   const serverUrl = useApp((s) => s.serverUrl);
   const setServerUrl = useApp((s) => s.setServerUrl);
   // "Change server" clears the stored URL; keep the last value so the input
@@ -39,7 +39,7 @@ export default function Onboarding() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} onTouchCancel={keyboardReveal.onTouchCancel} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.brand}>
           <LinearGradient colors={[theme.gradientFrom, theme.gradientTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logo}>
             <Icon name="check" size={34} color="#fff" strokeWidth={3} />

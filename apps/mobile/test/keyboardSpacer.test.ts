@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { keyboardSpacerHeight, revealScrollDelta, settledKeyboardHeight } from '../src/lib/keyboardSpacer';
+import {
+  keyboardSpacerHeight,
+  pendingAfter,
+  revealScrollDelta,
+  settleAction,
+  settledKeyboardHeight,
+  touchingAfter,
+} from '../src/lib/keyboardSpacer';
 
 describe('keyboardSpacerHeight', () => {
   it('is zero without a keyboard', () => {
     expect(keyboardSpacerHeight(0, 48)).toBe(0);
   });
-  it('subtracts the bottom inset the keyboard already covers', () => {
+  it('subtracts the bottom inset the (full-IME-inset) keyboard height already covers', () => {
     expect(keyboardSpacerHeight(900, 48)).toBe(852);
   });
   it('never goes negative when the inset exceeds the keyboard height', () => {
@@ -14,28 +21,24 @@ describe('keyboardSpacerHeight', () => {
 });
 
 describe('revealScrollDelta', () => {
-  // screen 2400px-equivalent 900dp, keyboard 300dp -> visible bottom at 600
+  // window bottom 900dp, keyboard 300dp -> keyboard top at 600
   it('is zero when the input and its reserve are above the keyboard', () => {
-    expect(revealScrollDelta(300, 40, 100, 900, 300, 0, 0)).toBe(0);
+    expect(revealScrollDelta(300, 40, 100, 900, 300)).toBe(0);
   });
   it('is zero without a keyboard', () => {
-    expect(revealScrollDelta(700, 40, 100, 900, 0, 0, 0)).toBe(0);
+    expect(revealScrollDelta(700, 40, 100, 900, 0)).toBe(0);
   });
   it('scrolls by the part of input plus reserve below the keyboard top', () => {
-    expect(revealScrollDelta(550, 40, 100, 900, 300, 0, 0)).toBe(90);
+    expect(revealScrollDelta(550, 40, 100, 900, 300)).toBe(90);
   });
   it('scrolls an input that sits fully under the keyboard', () => {
-    expect(revealScrollDelta(800, 40, 100, 900, 300, 0, 0)).toBe(340);
+    expect(revealScrollDelta(800, 40, 100, 900, 300)).toBe(340);
   });
-  it('treats the keyboard top as bottomInset higher than screen minus keyboard', () => {
-    // without the inset this input is exactly visible (delta 0); with a 48 inset it is 48 under
-    expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 0)).toBe(0);
-    expect(revealScrollDelta(460, 40, 100, 900, 300, 48, 0)).toBe(48);
-  });
-  it('adds the status bar height that measureInWindow leaves out of the input position', () => {
-    expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 0)).toBe(0);
-    expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 24)).toBe(24);
-    expect(revealScrollDelta(460, 40, 100, 900, 300, 24, 24)).toBe(48);
+  it('takes the keyboard top as windowBottom minus the full IME height', () => {
+    // measured: root at y -24 with height 914.29 -> windowBottom 890.29, IME 336
+    // -> keyboard top 554.29, identical on gesture and 3-button navigation
+    expect(revealScrollDelta(374.29, 40, 140, 890.29, 336)).toBeCloseTo(0, 5);
+    expect(revealScrollDelta(384.29, 40, 140, 890.29, 336)).toBeCloseTo(10, 5);
   });
 });
 
@@ -51,5 +54,38 @@ describe('settledKeyboardHeight', () => {
   it('reports -1 while opening or closing', () => {
     expect(settledKeyboardHeight(1, 120, OPEN, CLOSED)).toBe(-1);
     expect(settledKeyboardHeight(3, 120, OPEN, CLOSED)).toBe(-1);
+  });
+});
+
+describe('touch tracking', () => {
+  it('has a finger down only between start and end or cancel', () => {
+    expect(touchingAfter('start')).toBe(true);
+    expect(touchingAfter('end')).toBe(false);
+    expect(touchingAfter('cancel')).toBe(false);
+  });
+  it('reveals on a settle after a cancelled touch instead of deferring it', () => {
+    expect(settleAction(310, touchingAfter('start'))).toBe('defer');
+    expect(settleAction(310, touchingAfter('cancel'))).toBe('reveal');
+  });
+  it('resets when the keyboard is closed, touching or not', () => {
+    expect(settleAction(0, true)).toBe('reset');
+    expect(settleAction(0, false)).toBe('reset');
+  });
+});
+
+describe('pendingAfter', () => {
+  it('a settle during a touch, then a cancel (the user scrolled): no reveal is owed for a later tap', () => {
+    let pending = settleAction(310, touchingAfter('start')) === 'defer';
+    expect(pending).toBe(true);
+    pending = pendingAfter('cancel', pending);
+    expect(pending).toBe(false);
+    // the next tap starts and ends without a pending reveal
+    pending = pendingAfter('start', pending);
+    expect(pending).toBe(false);
+  });
+
+  it('keeps a deferred reveal through a start and consumes it on the end', () => {
+    expect(pendingAfter('start', true)).toBe(true);
+    expect(pendingAfter('end', true)).toBe(false);
   });
 });
