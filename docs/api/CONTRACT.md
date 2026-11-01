@@ -476,6 +476,8 @@ whenever any command in a flush was rejected, then reports the failures to the a
   not lose the task. Known limitation: a `parent_task_id` that cannot be resolved (for
   example the temp id of a parent `task_add` that was rejected for another reason) is
   still `not_found`.
+  With a live parent the sent `project_id`/`section_id` are ignored entirely (not
+  looked up, so they neither relocate nor reject; §3.3).
 - Concurrent `task_move` + `task_complete` → both apply (orthogonal fields).
 - Reorder races: `task_reorder` is bulk LWW; a stale reorder may interleave orders -
   acceptable, next reorder heals it. No exotic merging in v1. For the same reason a
