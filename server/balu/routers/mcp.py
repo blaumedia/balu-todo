@@ -56,8 +56,9 @@ def _settings_gate(probe: str | None = None) -> bool:
     render any 200 body. Runs before auth, so an unauthenticated non-probe call
     still 404s exactly as before.
 
-    `probe` is read leniently: only "true"/"1" count, any other value is
-    ignored like before (no 422 for a value an old server never validated).
+    `probe` is read leniently: only "true"/"1" count (case-insensitive,
+    surrounding spaces ignored), any other value is ignored like before (no 422
+    for a value an old server never validated).
     """
     enabled = get_settings().mcp_enabled
     probing = probe is not None and probe.strip().lower() in ("true", "1")

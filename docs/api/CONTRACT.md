@@ -606,10 +606,9 @@ an older server ignores the parameter and still 404s. Without `probe` the endpoi
 404ing while off, because released clients (mobile <= 1.3.2, web before 1.5.2) render
 any 200 body as the section. Only `probe=true` or `probe=1` counts (case-insensitive,
 surrounding spaces ignored); any other value is ignored, and `probe` is ignored while
-MCP is on. Auth still applies: an unauthenticated
-`probe=true` call is `401`. None of these routes appear in `openapi.json`, enabled or
-not: `/mcp` is JSON-RPC rather than REST, and the document should not vary with runtime
-configuration.
+MCP is on. Auth still applies: an unauthenticated `probe=true` call is `401`. None of
+these routes appear in `openapi.json`, enabled or not: `/mcp` is JSON-RPC rather than
+REST, and the document should not vary with runtime configuration.
 
 **Per-user key.** Each user may hold one MCP bearer key, `balu_mcp_` + 256 bit urlsafe
 random, stored in plaintext on `users.mcp_key` (unique, indexed). Plaintext is
