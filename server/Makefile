@@ -14,6 +14,7 @@ install:
 dev:
 	uv run uvicorn balu.main:app --reload --host 0.0.0.0 --port 8000
 
+# publish= matches the host-side port (verified), so a legacy 5433:5432 container is found by 5433.
 test-db-up:
 	@if [ -n "$$(docker ps -q -f name='^balu-test-db$$' -f publish=$(TEST_DB_PORT))" ]; then \
 		echo "a running legacy container balu-test-db publishes port $(TEST_DB_PORT): stop it if no older checkout is using it, or pick another TEST_DB_PORT" >&2; exit 1; fi
@@ -32,7 +33,7 @@ test: test-db-up
 	TEST_DATABASE_URL=$(TEST_DATABASE_URL) uv run pytest
 
 lint:
-	uv run ruff check .
+	uv run ruff check . ../tools/e2e
 
 fmt:
 	uv run ruff check --fix .

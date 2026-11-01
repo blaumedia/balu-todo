@@ -8,7 +8,7 @@ import time
 import uuid
 
 # Configure the environment BEFORE importing the app (settings are cached).
-_TEST_DB_PORT = os.environ.get("BALU_TEST_DB_PORT") or os.environ.get("TEST_DB_PORT") or "5433"
+_TEST_DB_PORT = os.environ.get("TEST_DB_PORT") or os.environ.get("BALU_TEST_DB_PORT") or "5433"
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", f"postgresql+psycopg://balu:balu@localhost:{_TEST_DB_PORT}/balu_test"
 )
