@@ -4,33 +4,33 @@ A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 **The self-hostable todo app that feels like Things and syncs like Todoist.**
 
 - Offline-first everywhere: every client keeps a full local replica and a durable
-  command queue — no spinners, airplane mode just works.
+  command queue - no spinners, airplane mode just works.
 - Natural-language quick-add in German and English ("Wäsche waschen jeden zweiten
   Dienstag #Haushalt bis Freitag"), with live token highlighting.
 - Start dates and deadlines are separate things, like they should be.
 - Workspaces, roles (incl. read-only viewers), invite links, task assignment,
   per-task comments.
-- Notifications where self-hosters live: **ntfy, email, Telegram** — reminders,
+- Notifications where self-hosters live: **ntfy, email, Telegram** - reminders,
   assignments, and comments reach you without app-store push relays.
 
 | Light | Dark |
 |---|---|
 | ![Today, light](docs/screenshots/web-today-light.png) | ![Today, dark](docs/screenshots/web-today-dark.png) |
 
-The same data, on the phone — the mobile apps are full clients, not a web view:
+The same data, on the phone - the mobile apps are full clients, not a web view:
 
 | Today | Today, dark | Task detail |
 |---|---|---|
 | ![iOS Today, light](docs/screenshots/ios-today-light.png) | ![iOS Today, dark](docs/screenshots/ios-today-dark.png) | ![iOS task detail](docs/screenshots/ios-detail.png) |
 
-Point them at your own server on first launch — there is no account with us.
+Point them at your own server on first launch - there is no account with us.
 [App Store](https://apps.apple.com/app/balu-private-todo-tasks/id6794310209) ·
 [Google Play](https://play.google.com/store/apps/details?id=com.blaumedia.balutodo) ·
 or build `apps/mobile/` yourself.
 
 ## Run it
 
-Releases are published as multi-arch images (`linux/amd64`, `linux/arm64`) — no
+Releases are published as multi-arch images (`linux/amd64`, `linux/arm64`) - no
 build step, no toolchain:
 
 ```sh
@@ -38,7 +38,7 @@ docker pull ghcr.io/blaumedia/balu-todo:latest
 ```
 
 `:latest` follows the newest release; every release also gets an immutable `:X.Y.Z`
-tag — pin that one in production. Put this in a `docker-compose.yml`:
+tag - pin that one in production. Put this in a `docker-compose.yml`:
 
 ```yaml
 name: balu
@@ -96,14 +96,14 @@ printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(
 docker compose up -d
 ```
 
-Open http://localhost:8080, register, done. One app container + Postgres — that's the
+Open http://localhost:8080, register, done. One app container + Postgres - that's the
 whole deployment; the schema migrates itself on startup. Configuration via env:
 `BALU_PORT`, `BALU_SECRET_KEY`, `BALU_DB_PASSWORD`, `BALU_ALLOW_REGISTRATION`,
 `BALU_CORS_ORIGINS`, `BALU_MCP_ENABLED`, plus the optional notification transports - the
 full list with comments is [`.env.example`](.env.example), and every one of them reaches
 the container through `env_file`. Upgrading is `docker compose pull && docker compose up -d`.
 
-`BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** — compose refuses to
+`BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** - compose refuses to
 start without them, and the server refuses to boot on a weak (<32 char) or
 placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to
 bypass the key check.
@@ -141,8 +141,8 @@ docker compose up --build
 - Put a TLS-terminating reverse proxy (Caddy/Traefik/nginx) in front, and set
   `BALU_ALLOW_REGISTRATION=false` once **everyone who needs an account has one**.
   Read that literally: registration is the only way an account is created. A
-  workspace invite adds an *existing* user to a workspace — `POST /invites/accept`
-  authenticates first — so it cannot get a new person onto a closed server. To add
+  workspace invite adds an *existing* user to a workspace - `POST /invites/accept`
+  authenticates first - so it cannot get a new person onto a closed server. To add
   someone later, flip the setting back to `true` while they sign up, then close it
   again.
 - Notification transports are optional: `BALU_SMTP_HOST/PORT/USER/PASSWORD/FROM`
@@ -153,14 +153,14 @@ docker compose up --build
   of them downloadable. `BALU_MAX_ATTACHMENT_MB` (default 25) caps each upload.
 - Behind a reverse proxy, set `BALU_TRUSTED_PROXY_HOPS` to the number of proxies
   in front of Balu (usually `1`) so rate limiting keys on the real client address
-  from `X-Forwarded-For`. Leave it at `0` when Balu is exposed directly —
+  from `X-Forwarded-For`. Leave it at `0` when Balu is exposed directly -
   otherwise anyone can spoof that header and sidestep the limiter. The value is
   counted from the right, because proxies *append*, so it has to match your
   actual chain depth.
 - Changing `BALU_DB_PASSWORD` after the first run does **not** re-key the database:
   Postgres only applies it when initialising an empty volume. Rotate the role
-  instead — `docker compose exec db psql -U balu -d balu -c "ALTER USER balu WITH
-  PASSWORD '…';"` — or start from a fresh volume.
+  instead - `docker compose exec db psql -U balu -d balu -c "ALTER USER balu WITH
+  PASSWORD '…';"` - or start from a fresh volume.
 
 ## Claude Code (MCP)
 
@@ -200,30 +200,33 @@ other client. Tools: `list_workspaces`, `list_projects`, `list_tasks`, `get_task
 
 ## Development
 
-- Backend: `cd server && make dev` (needs the test/dev Postgres: `make db`)
+- Backend: `cd server && make dev` needs a Postgres at `DATABASE_URL` (default `postgresql+psycopg://balu:balu@localhost:5432/balu`) and either a real `SECRET_KEY` or `BALU_DEV=1`. The quickest throwaway database is the test one: `make test-db-up`, then `DATABASE_URL=postgresql+psycopg://balu:balu@localhost:5433/balu_test BALU_DEV=1 make dev` (port = your `TEST_DB_PORT`; tmpfs: gone after `make test-db-down`, and shared with `make test`).
 - Web: `pnpm install && pnpm --filter @balu/web dev` (proxies `/api` → `:8000`)
-- Mobile: `pnpm --filter @balu/mobile start` — see `apps/mobile/README.md`
+- Mobile: `pnpm --filter @balu/mobile start` - see `apps/mobile/README.md`
+- Lint: `pnpm lint` (ESLint 9 in every JS/TS package; CI runs it).
+- Several checkouts or git worktrees: each additional one needs its own `COMPOSE_PROJECT_NAME` and `BALU_PORT` in its `.env` (see `.env.example`), and for server tests `make test TEST_DB_PORT=5434` (or export `BALU_TEST_DB_PORT`). If `make test` stops on a legacy `balu-test-db` container left by an older checkout, stop it only if no older checkout still uses it, otherwise use `TEST_DB_PORT=5434`.
+- E2E helpers (API, web, Android emulator): [`tools/e2e/README.md`](tools/e2e/README.md).
 
 ## Ideas
 
-Things that might land later. No dates attached — this is a self-hosted project, and
+Things that might land later. No dates attached - this is a self-hosted project, and
 the order will follow what people actually run into.
 
-- **Shared-group mechanics** — fair rotation for recurring chores (round-robin /
+- **Shared-group mechanics** - fair rotation for recurring chores (round-robin /
   least-busy) and opt-in group points, for households sharing a workspace.
 - **Kanban and calendar views** alongside the existing lists.
 - **Grocery-mode lists** with aisle auto-grouping.
-- **Capture polish** — share-sheet and intent capture on mobile, natural-language
+- **Capture polish** - share-sheet and intent capture on mobile, natural-language
   completion inside the date picker.
 
 Explicit non-goals: no Gantt charts, no time tracking, no docs-and-notes platform.
-Feature restraint is deliberate — capture friction is what makes a todo app stop
+Feature restraint is deliberate - capture friction is what makes a todo app stop
 getting used, and every added surface is a chance to introduce some. There are also
 no paid tiers to design around; self-hosted means everything is on.
 
 ## Docs
 
-- [docs/api/CONTRACT.md](docs/api/CONTRACT.md) — API + sync-protocol contract (source of
+- [docs/api/CONTRACT.md](docs/api/CONTRACT.md) - API + sync-protocol contract (source of
   truth; start here to write your own client)
 
 ## License

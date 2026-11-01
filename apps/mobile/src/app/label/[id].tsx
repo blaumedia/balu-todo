@@ -26,7 +26,7 @@ export default function LabelScreen() {
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <StackHeader title={label ? `@${label.name}` : ''} colorDot={projectHex(label?.color)} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {tasks.length === 0 ? <EmptyState text="—" icon="tag" /> : <TaskItems tasks={tasks} maps={maps} today={today} />}
+        {tasks.length === 0 ? <EmptyState text="-" icon="tag" /> : <TaskItems tasks={tasks} maps={maps} today={today} />}
       </ScrollView>
     </View>
   );

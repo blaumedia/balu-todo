@@ -59,9 +59,12 @@ export function FullscreenTask() {
   // unscrollable (fixed backdrop, Shell root and body both overflow:hidden), so
   // focusing the box left a long description unreadable by keyboard and screen
   // reader. Escape is handled by Shell's window-level key map either way.
+  // Keyed on the id: focus once per opened task, not on every edit that
+  // replaces the task object.
+  const taskId = task?.id;
   useEffect(() => {
-    if (fullscreenTaskId && task) scrollRef.current?.focus();
-  }, [fullscreenTaskId, task?.id]);
+    if (fullscreenTaskId && taskId) scrollRef.current?.focus();
+  }, [fullscreenTaskId, taskId]);
 
   if (!task) return null;
 

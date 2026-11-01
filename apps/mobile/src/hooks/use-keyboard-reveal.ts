@@ -3,10 +3,17 @@ import {
   Platform,
   TextInput,
   type NativeScrollEvent,
+  type LayoutChangeEvent,
   type NativeSyntheticEvent,
   type View,
 } from 'react-native';
-import { pendingAfter, revealScrollDeltaWithTarget, settleAction, touchingAfter } from '../lib/keyboardSpacer';
+import {
+  pendingAfter,
+  revealScrollDeltaWithTarget,
+  settleAction,
+  targetResizeAction,
+  touchingAfter,
+} from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
 
 // dp of content below a focused input (submit / Cancel / Delete buttons) that
@@ -46,7 +53,9 @@ function contentNode(scrollable: RevealScrollable): unknown {
 // it scrolls the focused input (plus REVEAL_RESERVE) above the IME, only if it
 // (or the reveal target) is covered and only if it is inside this scroll view.
 // Attach `targetRef` to a view (e.g. a short form) whose bottom must also end
-// up above the IME while typing in any of its inputs; the focused input stays
+// up above the IME while typing in any of its inputs, and `onTargetLayout` to
+// the same view's onLayout, so it is revealed again when it grows while the
+// keyboard is open; the focused input stays
 // visible, below `topInset` (the status bar on an edge-to-edge screen), even if
 // both cannot fit.
 export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) {
@@ -61,6 +70,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
   const pending = useRef(false);
   const lastRevealed = useRef<unknown>(null);
   const targetRef = useRef<View>(null);
+  const targetHeight = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const android = Platform.OS === 'android';
 
@@ -135,7 +145,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
         120,
       );
     },
-    [],
+    [topInset],
   );
 
   const onKeyboardSettled = useCallback(
@@ -150,6 +160,20 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
       } else {
         reveal(kh, false);
       }
+    },
+    [reveal],
+  );
+  // Attach to the reveal target's onLayout: when it grows while the IME is open
+  // (a confirmation card or error line appeared under the focused input), its
+  // buttons may now sit under the IME, and no keyboard event announces that.
+  const onTargetLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const next = e.nativeEvent.layout.height;
+      const action = targetResizeAction(targetHeight.current, next, keyboardHeight.current, touching.current);
+      targetHeight.current = next;
+      // 'defer': the pending branch of onTouchEnd reveals it (a drag drops it).
+      if (action === 'defer') pending.current = true;
+      else if (action === 'reveal') reveal(keyboardHeight.current, false);
     },
     [reveal],
   );
@@ -182,6 +206,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
   return {
     ref,
     targetRef,
+    onTargetLayout,
     // JS scroll events only where the hook uses them.
     onScroll: android ? onScroll : undefined,
     scrollEventThrottle: android ? 16 : undefined,

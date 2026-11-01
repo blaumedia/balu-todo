@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { initApi, initSync, teardownSync, teardownSyncSettled, getSync } from '../src/lib/clients';
+
 // The real clients.ts (retired set, retire(), teardownSyncSettled()) with a fake
 // sync client whose storage write and request are separately controllable.
 const fakes = vi.hoisted(() => ({
-  made: [] as Array<{
+  made: [] as {
     workspaceId: string;
     closed: boolean;
     stopped: boolean;
@@ -11,7 +13,7 @@ const fakes = vi.hoisted(() => ({
     releaseRequest: () => void;
     writesSettledCalls: number;
     idleCalls: number;
-  }>,
+  }[],
 }));
 
 vi.mock('react-native', () => ({ Alert: { alert: () => {} } }));
@@ -65,8 +67,6 @@ vi.mock('@balu/sync-client', () => ({
     };
   },
 }));
-
-import { initApi, initSync, teardownSync, teardownSyncSettled, getSync } from '../src/lib/clients';
 
 const URL = 'https://balu.example';
 

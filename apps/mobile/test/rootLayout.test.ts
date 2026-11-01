@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { unstable_settings } from '../src/app/_layout';
+
 // Only the exported route settings are under test; every import of the layout is stubbed.
 vi.mock('../src/lib/polyfills', () => ({}));
 vi.mock('expo-notifications', () => ({ useLastNotificationResponse: () => null }));
@@ -34,8 +36,6 @@ vi.mock('../src/theme/ThemeProvider', () => ({
   useScheme: () => 'light',
   useTheme: () => ({}),
 }));
-
-import { unstable_settings } from '../src/app/_layout';
 
 describe('root layout', () => {
   it('anchors the root Stack on (tabs) so deep links get a tab below them', () => {

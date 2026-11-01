@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { purgeUserData, SETTINGS } from '../src/lib/kv';
+
 // purgeUserData's SQL is the only thing under test: sqlite is replaced by a recorder.
 const db = vi.hoisted(() => ({ calls: [] as unknown[][] }));
 vi.mock('expo-sqlite', () => ({
@@ -8,8 +10,6 @@ vi.mock('expo-sqlite', () => ({
     runAsync: async (...a: unknown[]) => void db.calls.push(a),
   }),
 }));
-
-import { purgeUserData, SETTINGS } from '../src/lib/kv';
 
 describe('purgeUserData', () => {
   it('keeps device preferences only: the pending language mark belongs to the account and goes', async () => {

@@ -288,7 +288,7 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.field}>
             <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>{t('settings.email')}</Text>
-            <Text style={[styles.fieldValue, { color: theme.textTertiary }]}>{user?.email ?? '—'}</Text>
+            <Text style={[styles.fieldValue, { color: theme.textTertiary }]}>{user?.email ?? '-'}</Text>
           </View>
         </View>
         {/* Workspace */}
@@ -539,7 +539,7 @@ export default function SettingsScreen() {
           <View style={styles.field}>
             <Icon name="server" size={18} color={theme.textTertiary} strokeWidth={2} />
             <Text style={[styles.fieldValue, { color: theme.textPrimary, marginLeft: space.s2 }]} numberOfLines={1}>
-              {serverUrl ?? '—'}
+              {serverUrl ?? '-'}
             </Text>
           </View>
         </View>

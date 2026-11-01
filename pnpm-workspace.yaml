@@ -3,6 +3,7 @@ packages:
   - "packages/*"
 allowBuilds:
   esbuild: true
+  unrs-resolver: false
 minimumReleaseAgeExclude:
   - '@expo/cli@56.1.21 || 57.0.10'
   - '@expo/config-plugins@56.0.14 || 57.0.6'

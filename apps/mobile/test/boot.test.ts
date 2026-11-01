@@ -1,5 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@balu/api-client';
+import {
+  bootApp,
+  discardLostWorkspaces,
+  establishSession,
+  expireSession,
+  fallBackToKnownWorkspace,
+  handleAccessLost,
+  holdForWorkspace,
+  landAfterDelete,
+  logout,
+  moveOffLostWorkspace,
+  navigateToOnboarding,
+  switchWorkspace,
+  resetBootStateForTests,
+} from '../src/lib/boot';
+import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale, watchLocaleRetries } from '../src/lib/localeChoice';
+import { useApp } from '../src/store/app';
+
 // boot.ts owns the recovery from a lost workspace; the sync wiring, sqlite and
 // the React Native modules are replaced by fakes so the flows run in node.
 const fake = vi.hoisted(() => ({
@@ -12,7 +31,7 @@ const fake = vi.hoisted(() => ({
   cleared: [] as string[],
   reasons: new Map<string, 'removed' | 'deleted'>(),
   kv: new Map<string, string>(),
-  alerts: [] as Array<[string, string]>,
+  alerts: [] as [string, string][],
   getMe: (async () => ({})) as () => Promise<any>,
   authed: true,
   pickNothing: false,
@@ -29,7 +48,7 @@ const fake = vi.hoisted(() => ({
   patched: [] as string[],
   patchFails: false,
   noApi: false,
-  patchHolds: [] as Array<Promise<void>>,
+  patchHolds: [] as Promise<void>[],
   syncCreated: 0,
   routerThrows: false,
   permGate: null as Promise<void> | null,
@@ -139,25 +158,6 @@ vi.mock('../src/lib/clients', () => ({
   setAccessLostHandler: () => {},
   setSessionExpiredHandler: () => {},
 }));
-
-import { ApiError } from '@balu/api-client';
-import {
-  bootApp,
-  discardLostWorkspaces,
-  establishSession,
-  expireSession,
-  fallBackToKnownWorkspace,
-  handleAccessLost,
-  holdForWorkspace,
-  landAfterDelete,
-  logout,
-  moveOffLostWorkspace,
-  navigateToOnboarding,
-  switchWorkspace,
-  resetBootStateForTests,
-} from '../src/lib/boot';
-import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale, watchLocaleRetries } from '../src/lib/localeChoice';
-import { useApp } from '../src/store/app';
 
 const user = { id: 'u1', name: 'U', email: 'u@x', locale: 'en' } as any;
 const ws = (id: string) => ({ id, name: `WS ${id}` }) as any;
@@ -549,7 +549,7 @@ describe('language choice details (review cb533720)', () => {
       let appState: (s: string) => void = () => {};
       let swap: (c: any) => void = () => {};
       const log = { removed: 0, unsubscribed: 0 };
-      const clients: Array<ReturnType<typeof fakeSync> & { unsubscribed: number }> = [];
+      const clients: (ReturnType<typeof fakeSync> & { unsubscribed: number })[] = [];
       const mk = () => {
         const f = fakeSync();
         const c = { ...f, unsubscribed: 0 };

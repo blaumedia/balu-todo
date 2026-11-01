@@ -21,7 +21,7 @@ const RELOCATED_KEY: Record<RelocationNotice, TranslationKey> = {
 };
 
 /** The alert for a flush's relocated task_adds, or null when there were none. */
-export function relocatedNotice(t: T, relocated: ReadonlyArray<RelocatedCommand>): Notice | null {
+export function relocatedNotice(t: T, relocated: readonly RelocatedCommand[]): Notice | null {
   const kind = relocationNotice(relocated.map((r) => r.reasons));
   if (!kind) return null;
   return {

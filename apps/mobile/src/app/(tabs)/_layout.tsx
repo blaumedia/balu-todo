@@ -1,5 +1,4 @@
-import { todayLocalISO } from '@balu/domain';
-import { selectList } from '@balu/domain';
+import { selectList, todayLocalISO } from '@balu/domain';
 import { Tabs } from 'expo-router';
 import { View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,9 +21,10 @@ export default function TabsLayout() {
   const snap = useSnapshot();
   const inboxCount = selectList(snap.tasks, snap.projects, 'inbox', todayLocalISO()).length;
 
-  const icon = (name: IconName) => ({ color, size }: { color: ColorValue; size: number }) => (
-    <Icon name={name} size={size} color={color as string} strokeWidth={2} />
-  );
+  const icon = (name: IconName) =>
+    function TabIcon({ color, size }: { color: ColorValue; size: number }) {
+      return <Icon name={name} size={size} color={color as string} strokeWidth={2} />;
+    };
 
   return (
     <View style={{ flex: 1 }}>

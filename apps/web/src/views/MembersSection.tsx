@@ -180,7 +180,7 @@ export function MembersSection({ snapshot }: { snapshot: Snapshot }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {members.length === 0 && (
-        <div style={{ fontSize: "var(--text-secondary-size)", color: "var(--text-tertiary)" }}>—</div>
+        <div style={{ fontSize: "var(--text-secondary-size)", color: "var(--text-tertiary)" }}>-</div>
       )}
       {members.map((m) => {
         const isSelf = m.id === user?.id;

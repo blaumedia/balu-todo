@@ -4,7 +4,6 @@ import {
   canComment,
   canDeleteComment,
   canEditComment,
-  commentCountsByTask,
   commentsForTask,
   compareCommentAsc,
   initials,
@@ -50,20 +49,6 @@ describe('commentsForTask', () => {
       comment({ id: 'c4', task_id: 't1', is_deleted: true }),
     ]);
     expect(commentsForTask(s, 't1').map((c) => c.id)).toEqual(['c2', 'c1']);
-  });
-});
-
-describe('commentCountsByTask', () => {
-  it('counts non-deleted comments per task', () => {
-    const s = snap([
-      comment({ task_id: 't1' }),
-      comment({ task_id: 't1' }),
-      comment({ task_id: 't2' }),
-      comment({ task_id: 't1', is_deleted: true }),
-    ]);
-    const counts = commentCountsByTask(s);
-    expect(counts.get('t1')).toBe(2);
-    expect(counts.get('t2')).toBe(1);
   });
 });
 

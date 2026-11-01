@@ -93,3 +93,19 @@ export function settleAction(keyboardHeight: number, touching: boolean): 'reset'
   if (keyboardHeight === 0) return 'reset';
   return touching ? 'defer' : 'reveal';
 }
+
+// What to do when a reveal target reports its height: it grew (an error line or
+// a confirmation card appeared under the focused input) while the IME is open,
+// so reveal it now, or on touch end if a finger is down ('defer', handled like a
+// deferred keyboard settle: a drag drops it). A first layout (`previous`
+// undefined), a shrink, or a layout while the keyboard is closed never moves the
+// content.
+export function targetResizeAction(
+  previous: number | undefined,
+  next: number,
+  keyboardHeight: number,
+  touching: boolean,
+): 'none' | 'defer' | 'reveal' {
+  if (previous === undefined || next <= previous || keyboardHeight <= 0) return 'none';
+  return touching ? 'defer' : 'reveal';
+}

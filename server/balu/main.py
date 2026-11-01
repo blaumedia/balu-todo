@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
             logger.error(
                 "Cannot reach the database with DATABASE_URL. If this volume was "
                 "initialised with a different password, changing BALU_DB_PASSWORD "
-                "does not re-key it — rotate the role (ALTER USER balu WITH "
+                "does not re-key it - rotate the role (ALTER USER balu WITH "
                 "PASSWORD '…') or start from a fresh volume. Original error: %s",
                 exc,
             )
