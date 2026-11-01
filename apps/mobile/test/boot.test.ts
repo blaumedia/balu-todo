@@ -1084,10 +1084,10 @@ describe('accounts without a workspace (what-if 6)', () => {
     let a: string | null = null;
     void older.then((o) => (a = o));
     await vi.advanceTimersByTimeAsync(10); // the older loop is asleep in its backoff
+    expect(a).toBeNull();
     // A 'reconnecting' notice ended the older hold's notice; a new trigger takes over.
     useApp.setState({ boot: 'reconnecting' } as any);
-    const newer = holdForWorkspace('https://x', fakeApi as any);
-    void newer;
+    void holdForWorkspace('https://x', fakeApi as any);
     await vi.advanceTimersByTimeAsync(10); // well under the first ~1 s backoff
     expect(a).toBe('left');
   });
