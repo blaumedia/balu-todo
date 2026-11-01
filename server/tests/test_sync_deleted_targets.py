@@ -718,3 +718,50 @@ def test_upload_waits_for_an_uncommitted_task_delete(client, user, tmp_path, mon
         assert [p for p in tmp_path.rglob("*") if p.is_file()] == []
     finally:
         get_settings.cache_clear()
+
+
+# task_reorder skips dead ids (contract §5.5)
+def _sort_orders(body):
+    return {t["id"]: t["sort_order"] for t in body["tasks"]}
+
+
+# ---------------------------------------------------------------------------
+# one soft-deleted / unknown id rejects the whole task_reorder
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("bad", ["deleted", "unknown"])
+def test_task_reorder_with_one_dead_id_still_reorders_the_rest(client, user, bad):
+    body = sync(client, user, "*", [
+        cmd("task_add", temp_id="a", title="A"),
+        cmd("task_add", temp_id="b", title="B"),
+        cmd("task_add", temp_id="c", title="C"),
+    ])
+    a, b, c = (body["temp_id_mapping"][k] for k in "abc")
+    token = body["sync_token"]
+    if bad == "deleted":
+        body = sync(client, user, token, [cmd("task_delete", id=c)])
+        token = body["sync_token"]
+        dead = c
+    else:
+        dead = str(uuid.uuid4())
+
+    reorder = cmd("task_reorder", items=[
+        {"id": b, "sort_order": 1000},
+        {"id": dead, "sort_order": 2000},
+        {"id": a, "sort_order": 3000},
+    ])
+    body = sync(client, user, token, [reorder])
+    assert body["sync_status"][reorder["uuid"]] == "ok", body["sync_status"][reorder["uuid"]]
+    orders = _sort_orders(sync(client, user, "*"))
+    assert orders[b] == 1000 and orders[a] == 3000
+
+
+def test_task_reorder_with_no_resolvable_item_is_a_noop_ok(client, user):
+    reorder = cmd("task_reorder", items=[{"id": str(uuid.uuid4()), "sort_order": 1000}])
+    body = sync(client, user, "*", [reorder])
+    assert body["sync_status"][reorder["uuid"]] == "ok"
+
+
+def test_task_reorder_malformed_item_is_still_invalid_args(client, user):
+    reorder = cmd("task_reorder", items=[{"id": str(uuid.uuid4())}])
+    body = sync(client, user, "*", [reorder])
+    assert body["sync_status"][reorder["uuid"]]["error_code"] == "invalid_args"

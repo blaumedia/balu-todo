@@ -7,11 +7,12 @@ import concurrent.futures
 import uuid
 
 import pytest
+from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect, Request
 
 from balu.attachments import sanitize_content_type, sanitize_filename
 from balu.config import get_settings
-from balu.models import Attachment
+from balu.models import Attachment, Task
 from tests.conftest import auth_headers, cmd, register_user, sync
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"pretend-pixels" * 4
@@ -922,3 +923,62 @@ def test_losing_worker_touches_neither_session_nor_blob_and_claim_is_exclusive(t
     won = attachments_router._Claim()
     assert won.start() is True
     assert won.abandon() is False
+
+
+# Blobs go after the commit, never inside the transaction
+def _fail_next_commit(monkeypatch):
+    real = Session.commit
+    state = {"armed": True}
+
+    def commit(self):
+        if state["armed"]:
+            state["armed"] = False
+            raise RuntimeError("simulated commit failure")
+        return real(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    return state
+
+
+def _task_with_attachment(client, user):
+    body = sync(client, user, commands=[cmd("task_add", temp_id="t1", title="Steuer")])
+    task_id = body["temp_id_mapping"]["t1"]
+    meta = _upload(client, user, task_id).json()
+    return task_id, meta["id"]
+
+
+@pytest.mark.parametrize("command_type", ["task_delete", "attachment_delete"])
+def test_failed_commit_keeps_blob_and_rows(client, user, data_dir, db, monkeypatch, command_type):
+    task_id, att_id = _task_with_attachment(client, user)
+    blob = _blob_dir(data_dir, user["workspace_id"]) / att_id
+    assert blob.is_file()
+
+    _fail_next_commit(monkeypatch)
+    target = task_id if command_type == "task_delete" else att_id
+    command = cmd(command_type, id=target)
+    body = sync(client, user, commands=[command])
+    assert body["sync_status"][command["uuid"]] != "ok"  # commit failed -> rejected
+
+    db.expire_all()
+    assert db.get(Task, uuid.UUID(task_id)).is_deleted is False
+    assert db.get(Attachment, uuid.UUID(att_id)).is_deleted is False
+    assert blob.is_file(), "blob was unlinked although the transaction never committed"
+
+
+def test_failed_commit_on_project_delete_keeps_blob(client, user, data_dir, db, monkeypatch):
+    body = sync(client, user, commands=[
+        cmd("project_add", temp_id="p", name="P"),
+        cmd("task_add", temp_id="t1", title="T", project_id="p"),
+    ])
+    task_id = body["temp_id_mapping"]["t1"]
+    meta = _upload(client, user, task_id).json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    assert blob.is_file()
+
+    _fail_next_commit(monkeypatch)
+    command = cmd("project_delete", id=body["temp_id_mapping"]["p"])
+    body = sync(client, user, commands=[command])
+    assert body["sync_status"][command["uuid"]] != "ok"
+    assert blob.is_file(), "blob was unlinked although the transaction never committed"
+
+

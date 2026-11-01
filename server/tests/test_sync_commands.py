@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from balu.models import Task
 from tests.conftest import cmd, sync
 
 
@@ -640,3 +641,98 @@ def test_computed_sort_order_is_capped_at_int32(client, user):
     assert body["sync_status"][second["uuid"]] == "ok"
     task = next(t for t in body["tasks"] if t["id"] == body["temp_id_mapping"]["b"])
     assert task["sort_order"] == 2**31 - 1
+
+
+# A subtask's project/section follow its parent (contract §3.3)
+def test_task_move_to_other_project_carries_subtasks(client, user):
+    body = sync(client, user, "*", [
+        cmd("project_add", temp_id="pa", name="A"),
+        cmd("project_add", temp_id="pb", name="B"),
+        cmd("section_add", temp_id="sa", project_id="pa", name="A-sec"),
+        cmd("task_add", temp_id="par", title="Parent", project_id="pa", section_id="sa"),
+    ])
+    m = body["temp_id_mapping"]
+    body = sync(client, user, body["sync_token"], [
+        cmd("task_add", temp_id="s1", title="Sub1", project_id=m["pa"], section_id=m["sa"],
+            parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s2", title="Sub2 (no project)", parent_task_id=m["par"]),
+    ])
+    m.update(body["temp_id_mapping"])
+
+    move = cmd("task_move", id=m["par"], project_id=m["pb"], section_id=None, sort_order=1000)
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+
+    tasks = {t["id"]: t for t in sync(client, user, "*")["tasks"]}
+    assert tasks[m["par"]]["project_id"] == m["pb"]
+    for key in ("s1", "s2"):
+        sub = tasks[m[key]]
+        assert sub["project_id"] == m["pb"], f"{key} stayed in {sub['project_id']!r}"
+        assert sub["section_id"] != m["sa"], f"{key} still points at the source project's section"
+
+
+def _tree(client, user):
+    body = sync(client, user, "*", [
+        cmd("project_add", temp_id="pa", name="A"),
+        cmd("project_add", temp_id="pb", name="B"),
+        cmd("section_add", temp_id="sa", project_id="pa", name="A-sec"),
+        cmd("section_add", temp_id="sb", project_id="pb", name="B-sec"),
+        cmd("task_add", temp_id="par", title="Parent", project_id="pa", section_id="sa"),
+        cmd("task_add", temp_id="par2", title="Parent2", project_id="pb", section_id="sb"),
+    ])
+    return body["temp_id_mapping"], body["sync_token"]
+
+
+def _sub_add(m):
+    return cmd("task_add", temp_id="s1", title="S", parent_task_id=m["par"])
+
+
+def _all(client, user):
+    return {t["id"]: t for t in sync(client, user, "*")["tasks"]}
+
+
+def test_task_move_cascade_follows_parent_section_and_bumps_subtask_version(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    assert _all(client, user)[m["s1"]]["project_id"] == m["pa"]  # task_add inherits
+    token = body["sync_token"]
+
+    move = cmd("task_move", id=m["par"], project_id=m["pb"], section_id=m["sb"])
+    body = sync(client, user, token, [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+    pulled = {t["id"]: t for t in body["tasks"]}
+    assert m["s1"] in pulled, "the subtask must be pulled by clients"
+    sub = _all(client, user)[m["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pb"], m["sb"])
+
+
+def test_task_move_cascade_leaves_deleted_subtasks_alone(client, user, db):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    body = sync(client, user, body["sync_token"], [cmd("task_delete", id=m["s1"])])
+    sync(client, user, body["sync_token"], [cmd("task_move", id=m["par"], project_id=m["pb"])])
+    db.expire_all()
+    assert str(db.get(Task, uuid.UUID(m["s1"])).project_id) == m["pa"]
+
+
+def test_reparenting_a_subtask_takes_the_new_parents_project_and_section(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    move = cmd("task_move", id=m["s1"], parent_task_id=m["par2"])
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+    sub = _all(client, user)[m["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pb"], m["sb"])
+
+
+def test_task_add_with_live_parent_ignores_the_sent_container(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [
+        cmd("task_add", temp_id="s1", title="S", parent_task_id=m["par"], project_id=m["pb"],
+            section_id=m["sb"]),
+    ])
+    sub = _all(client, user)[body["temp_id_mapping"]["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pa"], m["sa"])
