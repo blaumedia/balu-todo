@@ -11,7 +11,7 @@ import ReanimatedSwipeable, {
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { completeTask, uncompleteTask } from '../lib/actions';
 import { relativeDate } from '../lib/format';
-import { rowLabels } from '../lib/rowMeta';
+import { moreLabelsText, rowLabels } from '../lib/rowMeta';
 import { hapticComplete } from '../lib/haptics';
 import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
@@ -33,12 +33,14 @@ export interface TaskRowProps {
   commentCount?: number;
   /** Hide the project dot/name (e.g. inside a project view). */
   hideProject?: boolean;
+  /** Today list: a task due today needs no "Today" date chip. Overdue and future dates stay. */
+  hideTodayDate?: boolean;
   swipeable?: boolean;
   /** False for read-only members (viewers): the checkbox is inert and there are no swipe actions (§2). */
   writable: boolean;
 }
 
-export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, swipeable = true, writable }: TaskRowProps) {
+export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, hideTodayDate, swipeable = true, writable }: TaskRowProps) {
   const theme = useTheme();
   const { t, locale } = useT();
   const openDetail = useApp((s) => s.openDetail);
@@ -139,8 +141,9 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // ── metadata chips ──
   const project = task.project_id ? projects.get(task.project_id) : undefined;
   const primaryDate = task.start_date ?? task.deadline;
-  const dateInfo = primaryDate ? relativeDate(primaryDate, today, locale, t) : null;
-  // Like the web row, a due-today date stays visible (accent tone) in every view.
+  const rawDate = primaryDate ? relativeDate(primaryDate, today, locale, t) : null;
+  // Like the web row: hidden only in the Today list, where every row is due today.
+  const dateInfo = hideTodayDate && rawDate?.tone === 'today' ? null : rawDate;
   const dateColor =
     dateInfo?.tone === 'overdue' ? theme.danger : dateInfo?.tone === 'today' ? theme.accent : theme.textSecondary;
   const isDeadlineOnly = task.start_date == null && task.deadline != null;
@@ -184,12 +187,12 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
             {dateInfo && (
               <View style={[styles.metaItem, styles.noShrink]}>
                 {isDeadlineOnly && <Icon name="flag" size={12} color={dateColor} strokeWidth={2} />}
-                <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo!.text}</Text>
+                <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo.text}</Text>
               </View>
             )}
             {task.recurrence ? <Icon name="repeat" size={13} color={theme.textTertiary} strokeWidth={2} /> : null}
             {!hideProject && project && (
-              <View style={styles.metaItem}>
+              <View style={[styles.metaItem, styles.projectChip]}>
                 <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
                 <Text style={[styles.metaText, styles.shrink, { color: theme.textSecondary }]} numberOfLines={1}>
                   {project.name}
@@ -197,12 +200,17 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
               </View>
             )}
             {shownLabels.map((l) => (
-              <Text key={l.id} style={[styles.metaText, styles.shrink, { color: projectHex(l.color) }]} numberOfLines={1}>
+              <Text key={l.id} style={[styles.metaText, styles.labelChip, { color: projectHex(l.color) }]} numberOfLines={1}>
                 @{l.name}
               </Text>
             ))}
             {hiddenLabels > 0 ? (
-              <Text style={[styles.metaText, styles.noShrink, { color: theme.textTertiary }]}>+{hiddenLabels}</Text>
+              <Text
+                accessibilityLabel={moreLabelsText(hiddenLabels, t)}
+                style={[styles.metaText, styles.noShrink, { color: theme.textTertiary }]}
+              >
+                +{hiddenLabels}
+              </Text>
             ) : null}
             {task.priority === 1 || task.priority === 2 ? (
               <Icon
@@ -214,7 +222,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
               />
             ) : null}
             {hasComments ? (
-              <View style={styles.metaItem}>
+              <View style={[styles.metaItem, styles.noShrink]}>
                 <Icon name="message-square" size={12} color={theme.textTertiary} strokeWidth={2} />
                 <Text style={[styles.metaText, { color: theme.textTertiary }]}>{commentCount}</Text>
               </View>
@@ -293,8 +301,12 @@ const styles = StyleSheet.create({
   strike: { textDecorationLine: 'line-through' },
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, flexWrap: 'nowrap' },
   // Chips that may be long (project, labels) shrink with an ellipsis; the date,
-  // icons, count, comments and avatar never do. minWidth 0 lets a Text go below its content width.
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160, flexShrink: 1, minWidth: 0 },
+  // icons, count, comments and avatar never do. The project gives way first
+  // (large shrink factor, floor of 48dp), so short labels like "@home" stay whole
+  // while the project ellipsizes; labels shrink only once the project is at its floor.
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
+  projectChip: { flexShrink: 100, minWidth: 48 },
+  labelChip: { flexShrink: 1, minWidth: 0, maxWidth: 120 },
   shrink: { flexShrink: 1, minWidth: 0 },
   noShrink: { flexShrink: 0 },
   metaText: { fontSize: font.caption, fontVariant: ['tabular-nums'] },

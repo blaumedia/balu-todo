@@ -61,7 +61,7 @@ export default function ListScreen() {
             </View>
           ))
         ) : (
-          <TaskItems tasks={tasks} maps={maps} today={today} hideProject={list === 'anytime' ? false : undefined} />
+          <TaskItems tasks={tasks} maps={maps} today={today} hideProject={list === 'anytime' ? false : undefined} hideTodayDate={list === 'today'} />
         )}
       </ScrollView>
     </View>

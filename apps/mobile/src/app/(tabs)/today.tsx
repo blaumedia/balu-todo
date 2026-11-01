@@ -34,11 +34,11 @@ export default function TodayScreen() {
           <EmptyState text={t('empty.today')} icon="star" />
         ) : (
           <>
-            <TaskItems tasks={day} maps={maps} today={today} />
+            <TaskItems tasks={day} maps={maps} today={today} hideTodayDate />
             {evening.length > 0 ? (
               <>
                 <SectionHeader>{t('section.thisEvening')}</SectionHeader>
-                <TaskItems tasks={evening} maps={maps} today={today} />
+                <TaskItems tasks={evening} maps={maps} today={today} hideTodayDate />
               </>
             ) : null}
           </>

@@ -1,4 +1,5 @@
 import type { Label } from '@balu/domain';
+import type { TranslationKey } from '../i18n';
 
 /** Labels shown as chips on a row; the rest collapse into a "+N" chip. */
 const MAX_ROW_LABELS = 2;
@@ -15,4 +16,9 @@ export function rowLabels(
 ): { visible: Label[]; overflow: number } {
   const live = labelIds.map((id) => labels.get(id)).filter((l): l is Label => l != null && !l.is_deleted);
   return { visible: live.slice(0, max), overflow: Math.max(0, live.length - max) };
+}
+
+/** Screen-reader text for the "+N" chip, with the singular/plural form of the locale. */
+export function moreLabelsText(n: number, t: (k: TranslationKey) => string): string {
+  return t(n === 1 ? 'row.moreLabelsOne' : 'row.moreLabelsOther').replace('{n}', String(n));
 }
