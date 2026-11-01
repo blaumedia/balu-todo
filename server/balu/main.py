@@ -6,10 +6,10 @@ import asyncio
 import logging
 import os
 import re
-import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from alembic.script.revision import ResolutionError
 from alembic.util.exc import CommandError
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -52,19 +52,6 @@ def _error_shape(exc: RequestValidationError) -> list[tuple]:
     return [(e.get("loc"), e.get("type")) for e in exc.errors()]
 
 
-def _start_orphan_sweep() -> None:
-    """Run the orphan-blob sweep once in a daemon thread: never delays readiness."""
-    from .attachments import sweep_orphan_blobs
-
-    def _run() -> None:
-        try:
-            sweep_orphan_blobs()
-        except Exception:
-            logger.warning("orphan blob sweep failed", exc_info=True)
-
-    threading.Thread(target=_run, name="orphan-blob-sweep", daemon=True).start()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Before migrations, which read the URL too: a URL with an ambiguous '@' (see
@@ -91,21 +78,27 @@ async def lifespan(app: FastAPI):
             )
             raise
         except CommandError as exc:
-            if "Can't locate revision" not in str(exc):
+            # alembic words the unknown-revision error itself and chains the
+            # ResolutionError behind it: trust the type first, the text second.
+            if not (
+                isinstance(exc.__cause__, ResolutionError)
+                or "Can't locate revision" in str(exc)
+            ):
                 raise
+            from .migrate import image_head
+
             logger.error(
                 "The database is at a newer schema revision than this image knows "
-                "(%s). It was migrated by a newer release: run the newer image's "
-                "`python -m balu.migrate downgrade <revision>` (the revision this "
-                "release's own head is based on, see the release notes and the "
-                "README rollback section) before starting this older image, or "
-                "upgrade to the newer image again.",
+                "(%s). It was migrated by a newer release: run `python -m "
+                "balu.migrate downgrade %s` in the newer image (this image's own "
+                "head; see the README rollback section) before starting this "
+                "older image, or upgrade to the newer image again.",
                 exc,
+                image_head(),
             )
             raise
 
     settings = get_settings()
-    _start_orphan_sweep()
     stop_event: asyncio.Event | None = None
     reminder_task: asyncio.Task | None = None
     if settings.reminders_enabled:
