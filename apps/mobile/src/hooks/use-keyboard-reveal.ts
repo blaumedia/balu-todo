@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import {
   Dimensions,
   Platform,
+  StatusBar,
   TextInput,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -40,7 +41,10 @@ function contentNode(scrollable: RevealScrollable): unknown {
 // input (plus REVEAL_RESERVE) above the IME, only if it is covered and only if
 // it is inside this scroll view.
 export function useKeyboardReveal(insets: { top: number; bottom: number }) {
-  const { top: topInset, bottom: bottomInset } = insets;
+  const { bottom: bottomInset } = insets;
+  // measureInWindow lacks exactly the status bar height; the safe-area top can
+  // be larger (display cutout), so prefer the real status bar height.
+  const topInset = StatusBar.currentHeight ?? insets.top;
   // An object ref (not a callback ref): draggable-flatlist only auto-scrolls
   // while dragging if `"current" in ref` (review 76485a61 N1).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

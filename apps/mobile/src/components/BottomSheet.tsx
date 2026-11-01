@@ -131,7 +131,7 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
           </View>
         </GestureDetector>
         {children}
-        <AndroidKeyboardSpacer bottomInset={insets.bottom} />
+        <AndroidKeyboardSpacer bottomInset={insets.bottom} animated />
       </Animated.View>
     </View>
   );

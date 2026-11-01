@@ -8,13 +8,32 @@ export function keyboardSpacerHeight(keyboardHeight: number, bottomInset: number
   return Math.max(keyboardHeight - bottomInset, 0);
 }
 
+// The settled keyboard height from Reanimated's useAnimatedKeyboard values:
+// the IME height while fully open (it changes again when the suggestion strip
+// appears), 0 when fully closed, -1 while animating (callers ignore it).
+// `openState` / `closedState` are KeyboardState.OPEN / KeyboardState.CLOSED.
+export function settledKeyboardHeight(
+  state: number,
+  height: number,
+  openState: number,
+  closedState: number,
+): number {
+  'worklet';
+  return state === openState ? height : state === closedState ? 0 : -1;
+}
+
 // How far (dp) a scroll view must scroll forward so that a focused input, plus
 // `reserve` dp of content below it (submit / cancel buttons), ends up above the
 // keyboard. All values are dp. `inputWindowY` comes from measureInWindow, which
 // on Android is relative to the visible window frame, i.e. it lacks the status
-// bar height (`topInset`). The keyboard top sits `bottomInset` (navigation bar)
-// higher than screenHeight - keyboardHeight (review 76485a61 N3: both measured
-// 24dp on device, 48dp together). Zero when already visible, so inputs that
+// bar height (`topInset`; pass StatusBar.currentHeight, the exact amount, not a
+// cutout-inflated safe-area inset). `keyboardHeight` is Reanimated's
+// useAnimatedKeyboard height, which is the IME inset MINUS the system-bars
+// bottom inset (Keyboard.java updateHeight, isNavigationBarTranslucent unset),
+// so the real keyboard top is screenHeight - keyboardHeight - bottomInset. The
+// window is edge-to-edge (full display), so `screen` height is its bottom, and
+// `bottomInset` is the same systemBars bottom inset Reanimated subtracted, which
+// makes this independent of the device's cutouts (they only affect top/sides). Zero when already visible, so inputs that
 // are not covered never move.
 export function revealScrollDelta(
   inputWindowY: number,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keyboardSpacerHeight, revealScrollDelta } from '../src/lib/keyboardSpacer';
+import { keyboardSpacerHeight, revealScrollDelta, settledKeyboardHeight } from '../src/lib/keyboardSpacer';
 
 describe('keyboardSpacerHeight', () => {
   it('is zero without a keyboard', () => {
@@ -36,5 +36,20 @@ describe('revealScrollDelta', () => {
     expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 0)).toBe(0);
     expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 24)).toBe(24);
     expect(revealScrollDelta(460, 40, 100, 900, 300, 24, 24)).toBe(48);
+  });
+});
+
+describe('settledKeyboardHeight', () => {
+  const OPEN = 2;
+  const CLOSED = 4;
+  it('reports the IME height while fully open', () => {
+    expect(settledKeyboardHeight(OPEN, 310, OPEN, CLOSED)).toBe(310);
+  });
+  it('reports 0 when fully closed, whatever the last height was', () => {
+    expect(settledKeyboardHeight(CLOSED, 310, OPEN, CLOSED)).toBe(0);
+  });
+  it('reports -1 while opening or closing', () => {
+    expect(settledKeyboardHeight(1, 120, OPEN, CLOSED)).toBe(-1);
+    expect(settledKeyboardHeight(3, 120, OPEN, CLOSED)).toBe(-1);
   });
 });
