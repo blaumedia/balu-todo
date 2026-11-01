@@ -96,6 +96,85 @@ describe("useUrlSync - reader history wiring", () => {
     expect(globalThis.location.pathname).toBe("/upcoming");
   });
 
+  it("a lost back() is repaired by a fallback timer, so the next Back is not swallowed", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    back.mockImplementation(() => {});
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    expect(globalThis.location.pathname).toBe("/task/t1"); // stale reader URL until the timer fires
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+    expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
+    expect(globalThis.history.state).toBeNull();
+    // The user switches view, then Backs onto the old entry: it must be user navigation.
+    act(() => useApp.setState({ view: upcoming, selectedTaskId: null }));
+    act(() => {
+      globalThis.history.replaceState(null, "", "/today?task=t1");
+      globalThis.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(useApp.getState().view).toEqual(today);
+    expect(useApp.getState().selectedTaskId).toBe("t1");
+  });
+
+  it("a pop that arrives in time cancels the fallback timer", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    await act(tick);
+    replace.mockClear();
+    await act(() => new Promise((r) => setTimeout(r, 650)));
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("unmount cancels the fallback timer", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    back.mockImplementation(() => {});
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    cleanup();
+    replace.mockClear();
+    await new Promise((r) => setTimeout(r, 650));
+    expect(replace).not.toHaveBeenCalled();
+    expect(globalThis.location.pathname).toBe("/task/t1");
+  });
+
+  it("does not back() on top of a traversal already in flight; replaces instead", () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    (globalThis as { navigation?: unknown }).navigation = { transition: {} };
+    try {
+      act(() => useApp.setState({ fullscreenTaskId: null }));
+    } finally {
+      delete (globalThis as { navigation?: unknown }).navigation;
+    }
+    expect(back).not.toHaveBeenCalled();
+    expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
+  });
+
+  it("a view change between our back() and its pop pushes instead of overwriting the landed entry", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    act(() => useApp.setState({ view: upcoming, selectedTaskId: null })); // before the popstate
+    push.mockClear();
+    replace.mockClear();
+    await act(tick);
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(globalThis.location.pathname).toBe("/upcoming");
+    act(() => globalThis.history.back());
+    await act(tick);
+    expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
+  });
+
   it("a reader reopened before our pop lands keeps the entry below it", async () => {
     mount("/upcoming");
     act(() => useApp.setState({ view: today }));

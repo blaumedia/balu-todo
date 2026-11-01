@@ -17,6 +17,36 @@ let replaceNext = false;
  * when the hook unmounts, so it cannot swallow a later Back.
  */
 let expectReaderPop: string | null = null;
+/** How long our own back() may take before it is considered lost. */
+const LOST_POP_MS = 500;
+let lostPopTimer: ReturnType<typeof setTimeout> | null = null;
+function cancelLostPopTimer(): void {
+  if (lostPopTimer !== null) clearTimeout(lostPopTimer);
+  lostPopTimer = null;
+}
+/**
+ * A back() that never pops (a host ignoring it) would leave the reader URL in
+ * the address bar and the expectation armed, so the user's next Back would be
+ * swallowed. If no popstate came, drop the expectation and replace the stale
+ * reader URL with the one the state wants. A reader reopened meanwhile owns
+ * the URL again, so that case is left alone.
+ */
+function armLostPopTimer(): void {
+  cancelLostPopTimer();
+  lostPopTimer = setTimeout(() => {
+    lostPopTimer = null;
+    const loc = globalThis.location;
+    if (expectReaderPop === null || !loc) return;
+    const cur = useApp.getState();
+    if (cur.fullscreenTaskId || !parseAppUrl(loc.pathname, loc.search)?.fullscreenTaskId) return;
+    expectReaderPop = null;
+    globalThis.history.replaceState(null, "", buildAppUrl(cur.view, cur.selectedTaskId, null));
+  }, LOST_POP_MS);
+}
+/** True while a history traversal (e.g. the user's own Back) is already in flight, where the Navigation API exists. */
+function traversalInFlight(): boolean {
+  return (globalThis as { navigation?: { transition?: unknown } }).navigation?.transition != null;
+}
 export function markReplaceNext(): void {
   replaceNext = true;
 }
@@ -55,9 +85,13 @@ export function useUrlSync(): void {
     });
     // "back" pops the reader entry we pushed; the popstate handler below
     // recognises it via expectReaderPop and leaves the state alone.
-    if (op === "back") {
+    // A back() on top of a traversal the user already started would go one
+    // entry too far, so replace instead.
+    if (op === "back" && traversalInFlight()) hist.replaceState(null, "", next);
+    else if (op === "back") {
       expectReaderPop = readerUnder(hist.state);
       hist.back();
+      armLostPopTimer();
     } else if (op === "push") hist.pushState(fullscreenTaskId ? readerState(loc.pathname + loc.search) : null, "", next);
     else if (op === "replace-reader") hist.replaceState(readerState(readerUnder(hist.state) ?? ""), "", next);
     else if (op === "replace") hist.replaceState(null, "", next);
@@ -68,6 +102,7 @@ export function useUrlSync(): void {
   // what the effect above would build, so it writes nothing: no echo loop.
   useEffect(() => {
     function onPop(): void {
+      cancelLostPopTimer();
       const expected = expectReaderPop;
       expectReaderPop = null;
       const here = globalThis.location ? globalThis.location.pathname + globalThis.location.search : null;
@@ -82,7 +117,12 @@ export function useUrlSync(): void {
         const cur = useApp.getState();
         const want = buildAppUrl(cur.view, cur.selectedTaskId, cur.fullscreenTaskId);
         if (here !== want) {
+          // Push when the view path differs (decideHistoryOp's rule), so the
+          // landed entry is kept; replace only within the same path.
+          const here0 = parseAppUrl(globalThis.location.pathname, globalThis.location.search);
+          const pathChanged = here0 !== null && buildAppUrl(here0.view, null, null) !== buildAppUrl(cur.view, null, null);
           if (cur.fullscreenTaskId) globalThis.history.pushState(readerState(here), "", want);
+          else if (pathChanged) globalThis.history.pushState(null, "", want);
           else globalThis.history.replaceState(null, "", want);
         }
         return;
@@ -107,6 +147,7 @@ export function useUrlSync(): void {
     globalThis.addEventListener("popstate", onPop);
     return () => {
       globalThis.removeEventListener("popstate", onPop);
+      cancelLostPopTimer();
       expectReaderPop = null;
     };
   }, []);
