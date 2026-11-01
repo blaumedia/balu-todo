@@ -28,12 +28,16 @@ const fake = vi.hoisted(() => ({
   logoutGate: null as Promise<void> | null,
   patched: [] as string[],
   patchFails: false,
+  patchHolds: [] as Array<Promise<void>>,
+  syncCreated: 0,
 }));
 
 const fakeApi = {
   getMe: () => fake.getMe(),
   patchMe: async (body: { locale: string }) => {
     fake.patched.push(body.locale);
+    const hold = fake.patchHolds.shift();
+    if (hold) await hold;
     if (fake.patchFails) throw new Error('offline');
     return {};
   },
@@ -134,7 +138,7 @@ import {
   logout,
   moveOffLostWorkspace,
 } from '../src/lib/boot';
-import { chooseLocale } from '../src/lib/localeChoice';
+import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale } from '../src/lib/localeChoice';
 import { useApp } from '../src/store/app';
 
 const user = { id: 'u1', name: 'U', email: 'u@x', locale: 'en' } as any;
@@ -168,6 +172,7 @@ beforeEach(() => {
   fake.logoutGate = null;
   fake.patched = [];
   fake.patchFails = false;
+  fake.patchHolds = [];
   fake.getMe = async () => me('a', 'b');
   useApp.setState({
     user,
@@ -353,6 +358,124 @@ describe('language across cold starts (Android e2e f07a2ce3)', () => {
     };
     await bootApp();
     expect(useApp.getState().locale).toBe('en');
+  });
+});
+
+describe('language choice details (review cb533720)', () => {
+  const api = fakeApi as any;
+  const serverDe = { ...user, locale: 'de' };
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const gate = () => {
+    let release!: () => void;
+    const p = new Promise<void>((r) => (release = r));
+    return { p, release };
+  };
+
+  it('a newer choice made while a request is in flight stays pending', async () => {
+    const [h1, h2] = [gate(), gate()];
+    fake.patchHolds = [h1.p, h2.p];
+    chooseLocale('de');
+    chooseLocale('en');
+    h1.release();
+    await flush();
+    expect(fake.kv.get('localePending')).toBe('1');
+    h2.release();
+    await flush();
+    expect(fake.patched).toEqual(['de', 'en']);
+    expect(fake.kv.has('localePending')).toBe(false);
+  });
+
+  it('sends the PATCHes one at a time, so an older one cannot land last', async () => {
+    const h1 = gate();
+    fake.patchHolds = [h1.p];
+    chooseLocale('en');
+    chooseLocale('de');
+    await flush();
+    expect(fake.patched).toEqual(['en']);
+    h1.release();
+    await flush();
+    expect(fake.patched).toEqual(['en', 'de']);
+    expect(fake.kv.has('localePending')).toBe(false);
+  });
+
+  it('a pending choice equal to the server value clears the mark without a PATCH', async () => {
+    fake.kv.set('locale', 'de');
+    fake.kv.set('localePending', '1');
+    fake.getMe = async () => ({ user: serverDe, memberships: [mem('a')] });
+    await establishSession('https://x', api);
+    await flush();
+    expect(useApp.getState().locale).toBe('de');
+    expect(fake.patched).toEqual([]);
+    expect(fake.kv.has('localePending')).toBe(false);
+  });
+
+  it('the session is set with the chosen language, and no await separates it from initSync', async () => {
+    fake.kv.set('locale', 'en');
+    fake.kv.set('localePending', '1');
+    fake.getMe = async () => ({ user: serverDe, memberships: [mem('a')] });
+    const seen: string[] = [];
+    const unsub = useApp.subscribe((s) => {
+      if (s.boot === 'ready') seen.push(s.locale);
+    });
+    await establishSession('https://x', api);
+    unsub();
+    expect(seen[0]).toBe('en');
+    expect(fake.inited).toEqual(['a']);
+  });
+
+  it('a logout during the locale read does not bring back a sync client', async () => {
+    fake.kv.set('locale', 'en');
+    let wanted = true;
+    fake.getMe = async () => ({ user: serverDe, memberships: [mem('a')] });
+    const p = establishSession('https://x', api, null, false, () => wanted);
+    wanted = false;
+    expect(await p).toBe(false);
+    expect(fake.inited).toEqual([]);
+    expect(open()).toBe('lost');
+  });
+
+  it('setLocale keeps the cached session in step', () => {
+    useApp.getState().setLocale('de');
+    expect(JSON.parse(fake.kv.get('session')!).user.locale).toBe('de');
+  });
+
+  it('retryPendingLocale sends a pending choice again, and nothing otherwise', async () => {
+    await retryPendingLocale();
+    await flush();
+    expect(fake.patched).toEqual([]);
+    fake.kv.set('locale', 'de');
+    fake.kv.set('localePending', '1');
+    useApp.setState({ locale: 'de' } as any);
+    await retryPendingLocale();
+    await flush();
+    expect(fake.patched).toEqual(['de']);
+    expect(fake.kv.has('localePending')).toBe(false);
+  });
+
+  it('retries when sync comes back online, not on other status changes', async () => {
+    fake.kv.set('locale', 'de');
+    fake.kv.set('localePending', '1');
+    let status = 'offline';
+    let notify = () => {};
+    retryLocaleOnReconnect({
+      getStatus: () => status as any,
+      subscribe: (cb: () => void) => {
+        notify = cb;
+        return () => {};
+      },
+    });
+    status = 'error';
+    notify();
+    await flush();
+    expect(fake.patched).toEqual([]);
+    status = 'synced';
+    notify();
+    await flush();
+    expect(fake.patched).toEqual(['de']);
+    status = 'syncing';
+    notify();
+    await flush();
+    expect(fake.patched).toEqual(['de']);
   });
 });
 

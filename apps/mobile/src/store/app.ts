@@ -60,7 +60,7 @@ export interface AppState {
   reset(): void;
 }
 
-export const useApp = create<AppState>((set) => ({
+export const useApp = create<AppState>((set, get) => ({
   boot: 'loading',
   serverUrl: null,
   user: null,
@@ -97,9 +97,12 @@ export const useApp = create<AppState>((set) => ({
   },
   setLocale: (locale) => {
     void sqliteKV.setItem(SETTINGS.locale, locale);
-    // Keep user.locale in step: setUser({ ...user, name }) and the session cache
-    // would otherwise carry the old value and switch the language back.
+    // Keep user.locale in step: setUser({ ...user, name }) would otherwise carry
+    // the old value and switch the language back. The cached session (offline boot)
+    // is rewritten from the new state for the same reason.
     set((s) => ({ locale, user: s.user ? { ...s.user, locale } : s.user }));
+    const { user, workspace } = get();
+    if (user && workspace) void sqliteKV.setItem(SETTINGS.session, JSON.stringify({ user, workspace }));
   },
   setRemindersEnabled: (remindersEnabled) => {
     void sqliteKV.setItem(SETTINGS.remindersEnabled, remindersEnabled ? '1' : '0');

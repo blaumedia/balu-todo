@@ -19,7 +19,7 @@ import {
   teardownSync,
   teardownSyncSettled,
 } from './clients';
-import { reconcileLocale } from './localeChoice';
+import { applyLocaleDecision, decideLocale } from './localeChoice';
 import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { isForeignLocalData } from './localData';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
@@ -88,9 +88,13 @@ export async function establishSession(
   // Read the cached name of the last-used workspace before setSession overwrites
   // the cache: if it is missing from /me, the alert can name it.
   const lastUsedName = lastUsed ? await cachedWorkspaceName(lastUsed) : null;
+  // Decided before the last stillWanted check so that nothing awaits between
+  // setSession and initSync: the store never shows a workspace the sync client
+  // has not been switched to, and a logout cannot slip in between.
+  const localeDecision = await decideLocale(me.user);
   if (!stillWanted()) return false;
-  useApp.getState().setSession(me.user, me.memberships, membership.workspace);
-  await reconcileLocale(me.user);
+  useApp.getState().setSession({ ...me.user, locale: localeDecision.locale }, me.memberships, membership.workspace);
+  applyLocaleDecision(localeDecision);
   initSync(serverUrl, membership.workspace.id, me.user.id);
   void resumeReminders();
   void discardLostWorkspaces(
@@ -213,7 +217,7 @@ function pastColdStartGate(): boolean {
 }
 
 /** Take every pushed screen down and land on the login step (what the index gate does on a cold start). */
-function navigateToOnboarding(): void {
+export function navigateToOnboarding(): void {
   try {
     if (router.canDismiss()) router.dismissAll();
     router.replace('/onboarding');
