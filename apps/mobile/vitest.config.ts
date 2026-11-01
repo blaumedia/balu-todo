@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config';
 // unit-tested — they need the Metro/RN runtime and are exercised via expo
 // export + on-device (see README).
 export default defineConfig({
+  // Component tests call a .tsx component as a function; the automatic runtime needs no React global.
+  esbuild: { jsx: 'automatic' },
   test: {
     include: ['test/**/*.test.ts'],
     environment: 'node',
