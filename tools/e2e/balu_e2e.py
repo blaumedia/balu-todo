@@ -29,18 +29,21 @@ MARKER = ".balu-e2e-state"
 _SAFE = re.compile(r"[A-Za-z0-9_-]+")
 if not _SAFE.fullmatch(RUN):
     raise SystemExit("BALU_E2E_RUN must match [A-Za-z0-9_-]+ (it is used in paths and emails)")
-if os.environ.get("BALU_E2E_PROJECT") and not _SAFE.fullmatch(PROJECT):
-    raise SystemExit("BALU_E2E_PROJECT must match [A-Za-z0-9_-]+ (it is used in paths)")
+if os.environ.get("BALU_E2E_PROJECT") and not re.fullmatch(r"[a-z0-9_-]+", PROJECT):
+    raise SystemExit(
+        "BALU_E2E_PROJECT must match [a-z0-9_-]+ (compose needs lowercase; it is used in paths)"
+    )
 TOKEN_MAX_AGE = 25 * 60  # server access tokens live 30 min (config.access_token_expire_minutes)
 
 
 def state_dir() -> Path:
+    marker = STATE / MARKER
+    # same rule as stack.sh ensure_env: adopt only a new, empty or already marked dir
+    if not marker.exists() and STATE.is_dir() and any(STATE.iterdir()):
+        raise SystemExit(f"refusing to use {STATE}: not empty and not created by stack.sh")
     STATE.mkdir(parents=True, exist_ok=True)
     STATE.chmod(0o700)
-    marker = STATE / MARKER
-    if not marker.exists() and not any(STATE.iterdir()):
-        # new or empty dir: adopt it, exactly like stack.sh ensure_env
-        os.close(os.open(marker, os.O_WRONLY | os.O_CREAT, 0o600))
+    os.close(os.open(marker, os.O_WRONLY | os.O_CREAT, 0o600))
     return STATE
 
 

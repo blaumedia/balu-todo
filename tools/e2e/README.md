@@ -8,15 +8,15 @@ runbook. Python is stdlib only (3.11+), shell is POSIX `sh`.
 
 State lives in `~/.cache/balu-e2e/<project>/<run>/` (mode 700; `stack.env` and the other
 stack files sit one level up). It holds the generated passwords, tokens, ids and `stack.env`.
-**Never cat it.** No script here prints a
-password, an access or refresh token, an invite token or a request/response body.
+**Never cat it.** No script here prints a password, an access or refresh token, an invite
+token or a request/response body.
 
 The default project is `balu-e2e-<checkout dir>`. Environment variables:
 
 | Variable | Meaning |
 |---|---|
 | `BALU_PORT` | host port of the stack (default 8090) |
-| `BALU_E2E_PROJECT` | compose project name |
+| `BALU_E2E_PROJECT` | compose project name (`[a-z0-9_-]+`, lowercase because compose requires it; `stack.sh` and the Python helpers both reject anything else) |
 | `BALU_E2E_STATE` | state directory |
 | `BALU_E2E_RUN` | run id (`[A-Za-z0-9_-]+`), default today; used in emails `e2e-<run>-<role>@example.com` |
 | `BALU_E2E_BASE` | API base URL override |
@@ -32,11 +32,12 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 - Health is `GET /healthz`, not `/api/v1/health`.
 - The image is built, not live-mounted. Run `up` again after code changes.
 - Never use the project `balu` (the dev data); `stack.sh` refuses it.
-- Cleanup is `stack.sh purge` (removes containers, volumes and the state dir). Every
-  `stack.sh` command (default path too) refuses a state dir that is non-empty and lacks the
-  `.balu-e2e-state` marker; the Python helpers and `stack.sh` both write it when they create
-  the dir or find it empty. `purge` always runs `down -v` and deletes the dir only when it
-  is marked, empty or absent.
+- Cleanup is `stack.sh purge` (removes containers, volumes and the state dir). Every other
+  `stack.sh` command (default path too) and the Python helpers refuse a state dir that is
+  non-empty and lacks the `.balu-e2e-state` marker; both write the marker when they create
+  the dir or find it empty. On such an unmarked dir `purge` writes nothing: it only runs
+  `docker compose -p <project> down -v` (found by project label), keeps the dir and says
+  so. A marked, empty or absent dir is removed as usual.
 - **State dirs from before the marker:** check what is in the dir, then
   `touch <state dir>/.balu-e2e-state`; after that `stack.sh` works again.
 - **After upgrading to the per-run layout** (`<state>/<run>/`): old `*.pw`, `*.tok`, ids and
@@ -99,7 +100,8 @@ page URL after the redirect, which contains the token: treat that output as sens
 ## 6. Android emulator runbook
 
 - **Clone an AVD, never reuse one another agent runs.** The base `BaluE2EMobile` AVD is
-  assumed to exist; create it with e.g. `avdmanager create avd -n BaluE2EMobile -k "system-images;android-34;google_apis;arm64-v8a"`.
+  assumed to exist; create it with e.g.
+  `avdmanager create avd -n BaluE2EMobile -k "system-images;android-34;google_apis;arm64-v8a"`.
   `cp -cR` is macOS/APFS only (use `cp -R` elsewhere):
 
   ```sh
@@ -142,13 +144,17 @@ Scripts: `android/ui.py` (list, tap, has, dump, swipe, state, type), `android/lo
 Earlier ad-hoc helpers were dropped:
 
 - `web2/api.py`: hardcoded password literal. Superseded by `balu_e2e.py`.
-- `web2/watch.py`: hardcoded container name, SQL built by string interpolation, one-scenario timing.
-- `web4/seed.py`, `web4/s12_setup.py`, `web5/seed5.py`, `web5/s5api.py`: scenario-specific, depend on the old password, reuse a hardcoded `temp_id`.
-- `android2/setup2.py`, `setup3.py`, `solo_project_delete.py`, `android5/setup5.py`: one-off fixtures.
+- `web2/watch.py`: hardcoded container name, SQL built by string interpolation,
+  one-scenario timing.
+- `web4/seed.py`, `web4/s12_setup.py`, `web5/seed5.py`, `web5/s5api.py`: scenario-specific,
+  depend on the old password, reuse a hardcoded `temp_id`.
+- `android2/setup2.py`, `setup3.py`, `solo_project_delete.py`, `android5/setup5.py`: one-off
+  fixtures.
 - `android5/scroll_check.py`: one-scenario check; its password-skip idea is now in `ui.py`.
 - `android3/t.sh`, `cold2.sh`, `back1.sh`: logcat debugging for a fixed bug, hardcoded serial.
 - `focus.sh`: now `ui.py state`.
 - `android6/drag.sh`: absolute coordinates for one screen.
 - `helpers/login.sh`, `android6/login.py`, `ui_login.py`: duplicates of `android/login.py`.
-- `helpers/taskstate.sh`, `tokens.sh`: hardcoded container name and SQL injection. Now `stack.sh task|tokens`.
+- `helpers/taskstate.sh`, `tokens.sh`: hardcoded container name and SQL injection. Now
+  `stack.sh task|tokens`.
 - All logs, PNGs and `onboarding.good`.

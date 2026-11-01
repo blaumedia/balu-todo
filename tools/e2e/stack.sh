@@ -7,6 +7,14 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 PROJECT=${BALU_E2E_PROJECT:-balu-e2e-$(basename "$ROOT")}
+if [ -n "${BALU_E2E_PROJECT:-}" ]; then
+  case "$PROJECT" in
+    *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*)
+      echo "BALU_E2E_PROJECT must match [a-z0-9_-]+ (compose needs lowercase; it is used in paths)" >&2
+      exit 2
+      ;;
+  esac
+fi
 PORT=${BALU_PORT:-8090}
 export BALU_PORT="$PORT"
 STATE=${BALU_E2E_STATE:-$HOME/.cache/balu-e2e/$PROJECT}
@@ -51,11 +59,13 @@ dc() {
 
 cmd=${1:-}
 [ $# -gt 0 ] && shift
-# purge always tears the compose project down; the state dir is deleted only when it
-# is ours (marker present) or already gone, decided before ensure_env adopts it.
-rm_state=0
-if [ ! -d "$STATE" ] || [ -f "$MARKER" ] || [ -z "$(ls -A "$STATE")" ]; then
-  rm_state=1
+# An unmarked non-empty state dir is never adopted, written to or deleted. `purge` still
+# tears the compose project down by its labels (no -f/--env-file, so nothing is read from
+# or written into the dir) and keeps the dir.
+if [ "$cmd" = purge ] && [ ! -f "$MARKER" ] && [ -d "$STATE" ] && [ -n "$(ls -A "$STATE")" ]; then
+  docker compose -p "$PROJECT" down -v
+  echo "purged containers and volumes; kept $STATE (not created by stack.sh, delete it yourself)"
+  exit 0
 fi
 ensure_env
 
@@ -82,10 +92,8 @@ case "$cmd" in
     ;;
   purge)
     dc down -v
-    # Only a directory this tooling created (it holds the .balu-e2e-state marker) is removed.
-    if [ "$rm_state" = 1 ]; then
-      rm -rf "$STATE"
-    fi
+    # ensure_env has just adopted the dir (new, empty or marked), so it is ours to remove.
+    rm -rf "$STATE"
     echo "purged"
     ;;
   ps)
