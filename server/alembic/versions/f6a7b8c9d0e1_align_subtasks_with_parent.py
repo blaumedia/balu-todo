@@ -51,8 +51,9 @@ def upgrade() -> None:
     # so the alignment below sees one level only. A deleted row ends the walk:
     # live rows below it were hidden before and stay as they are. Starting from
     # the roots keeps the walk finite on any data (a parent cycle has no root).
-    # `path` carries the sort_order values from the root down, so ordering by it
-    # is depth-first and keeps each former parent's rows together.
+    # `path` carries each level's rank among its live siblings (sort_order, then
+    # id) from the root down, so ordering by it is depth-first and keeps each
+    # former parent's rows together, even with tied sort_orders.
     op.execute(
         """
         WITH RECURSIVE ranked AS (

@@ -111,9 +111,9 @@ error names the revision to use). In order:
    downgrade <revision>`, where `<revision>` is the revision the release notes name
    (for the release that added `f6a7b8c9d0e1`: `e5f6a7b8c9d0`). The command prints the
    current and the target revision and refuses, without `--yes`, any target other than
-   the image's head or its previous head (`base`, `-2`, a typo, an abbreviated id; `-1` counts from the database's
-   current revision, so it passes only while the database is at the image's head): those
-   walks can drop tables such as `attachments`.
+   the image's head or its previous head (`base`, `-2`, a typo, an abbreviated id; `-1`
+   counts from the database's current revision, so it passes only while the database is
+   at the image's head): those walks can drop tables such as `attachments`.
 2. Pin the older image tag in `docker-compose.yml`, then `docker compose pull` and
    `docker compose up -d`.
 

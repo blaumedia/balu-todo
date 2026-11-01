@@ -196,8 +196,9 @@ def purge_quarantine(
 ) -> tuple[int, int, int]:
     """Delete quarantine batches older than N days; return (files, bytes, left_over).
 
-    Only files that are really gone are counted; `left_over` is how many files
-    of the selected batches could not be removed.
+    Only files that are really gone are counted; `left_over` is how many entries
+    could not be removed: a file still there, or a batch directory that survived
+    without any counted file (os.walk could not list it).
     """
     qdir = _quarantine_root()
     if not qdir.is_dir():
@@ -250,7 +251,10 @@ def _sweep(args: argparse.Namespace) -> int:
             return 1
         print(f"purged {files} quarantined file(s), {size} byte(s)")
         if left:
-            print(f"{left} file(s) could not be removed and are still there", file=sys.stderr)
+            print(
+                f"{left} file(s) or batch(es) could not be removed and are still there",
+                file=sys.stderr,
+            )
             return 1
         return 0
     if args.older_than_days is not None:

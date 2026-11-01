@@ -208,7 +208,7 @@ def test_purge_counts_only_removed_files_and_fails_when_some_remain(
     assert blobs.main(["sweep", "--purge-quarantine", "--older-than-days", "30"]) == 1
     captured = capsys.readouterr()
     assert "purged 0 quarantined file(s), 0 byte(s)" in captured.out
-    assert "1 file(s) could not be removed" in captured.err
+    assert "1 file(s) or batch(es) could not be removed" in captured.err
     assert (old / "f").exists()
 
 
