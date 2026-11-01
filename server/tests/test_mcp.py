@@ -925,3 +925,24 @@ def test_disabled_probe_response_is_never_cacheable(client, user):
     resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
     assert resp.json() == {"enabled": False}
     assert resp.headers["cache-control"] == "no-store"
+
+
+def test_update_task_refuses_placement_on_a_subtask(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    first = sync(client, user, "*", [
+        cmd("project_add", temp_id="p1", name="Haushalt"),
+        cmd("task_add", temp_id="par", title="Parent"),
+    ])
+    m = first["temp_id_mapping"]
+    second = sync(client, user, first["sync_token"], [
+        cmd("task_add", temp_id="s1", title="Sub", parent_task_id=m["par"]),
+    ])
+    sub = second["temp_id_mapping"]["s1"]
+    res = call(client, key, "update_task", {
+        "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
+    })
+    assert res["isError"] is True
+    assert "parent" in payload(res)
+    ok = call(client, key, "update_task", {"workspace_id": ws, "task_id": sub, "notes": "n"})
+    assert ok["isError"] is False
