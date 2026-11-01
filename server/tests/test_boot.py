@@ -120,6 +120,18 @@ def test_migrate_cli_allows_the_one_step_targets_without_yes(downgrade_calls):
     assert downgrade_calls == ["-1"]
 
 
+def test_migrate_cli_refuses_minus_one_when_the_database_is_already_one_step_back(
+    downgrade_calls, monkeypatch, capsys
+):
+    # a repeated run: -1 would now walk from the previous head down to d4e5..., past
+    # the migration that creates `attachments`
+    monkeypatch.setattr(migrate, "current_revision", lambda: "e5f6a7b8c9d0")
+    assert migrate.main(["downgrade", "-1"]) == 2
+    assert downgrade_calls == []
+    assert "--yes" in capsys.readouterr().err
+    assert migrate.main(["downgrade", "-1", "--yes"]) == 0
+
+
 def test_migrate_cli_rejects_malformed_downgrade_arguments(downgrade_calls):
     assert migrate.main(["downgrade"]) == 2
     assert migrate.main(["downgrade", "a", "b"]) == 2
