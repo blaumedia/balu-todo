@@ -19,7 +19,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-if sys.version_info < (3, 11):
+# ruff targets the server's Python; these helpers run under whatever python3 is on PATH.
+if sys.version_info < (3, 11):  # noqa: UP036
     raise SystemExit("tools/e2e needs Python 3.11+")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -39,8 +40,11 @@ BASE = os.environ.get("BALU_E2E_BASE", f"http://127.0.0.1:{PORT}")
 if urllib.parse.urlsplit(BASE).scheme not in {"http", "https"}:
     raise SystemExit("BALU_E2E_BASE must be an http(s) URL")
 _HOST = urllib.parse.urlsplit(BASE).hostname or ""
-if _HOST not in {"127.0.0.1", "localhost", "::1"} and os.environ.get("BALU_E2E_ALLOW_REMOTE") != "1":
-    raise SystemExit(f"refusing non-local BALU_E2E_BASE host {_HOST!r} (set BALU_E2E_ALLOW_REMOTE=1)")
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+if _HOST not in _LOCAL_HOSTS and os.environ.get("BALU_E2E_ALLOW_REMOTE") != "1":
+    raise SystemExit(
+        f"refusing non-local BALU_E2E_BASE host {_HOST!r} (set BALU_E2E_ALLOW_REMOTE=1)"
+    )
 API = BASE + "/api/v1"
 STATE = Path(os.environ.get("BALU_E2E_STATE") or Path.home() / ".cache" / "balu-e2e" / PROJECT)
 RUN = os.environ.get("BALU_E2E_RUN") or time.strftime("%Y%m%d")
