@@ -50,8 +50,9 @@ jobs:
         run: corepack enable
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Build, typecheck, test
+      - name: Build, typecheck, lint, test
         run: |
           pnpm -r build
           pnpm -r typecheck
+          pnpm -r lint
           pnpm -r test
