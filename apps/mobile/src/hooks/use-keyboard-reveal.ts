@@ -135,7 +135,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
         120,
       );
     },
-    [],
+    [topInset],
   );
 
   const onKeyboardSettled = useCallback(

@@ -60,6 +60,7 @@ export function useMaps(snapshot: Snapshot): ReplicaMaps {
       members: new Map(snapshot.members.map((m) => [m.id, m])),
       commentCounts: commentCountsByTask(snapshot),
     }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the maps depend only on these slices; `snapshot` changes on every task edit and would rebuild them all
     [snapshot.projects, snapshot.labels, snapshot.sections, snapshot.members, snapshot.comments],
   );
 }

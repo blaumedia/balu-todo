@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { canDismissState, gateTarget, goBackOr, leaveForOnboarding, leaveGate, needsOnboardingRedirect } from '../src/lib/goBack';
+
 const router = vi.hoisted(() => ({
   back: vi.fn(),
   replace: vi.fn(),
@@ -8,8 +10,6 @@ const router = vi.hoisted(() => ({
   dismissAll: vi.fn(),
 }));
 vi.mock('expo-router', () => ({ router }));
-
-import { canDismissState, gateTarget, goBackOr, leaveForOnboarding, leaveGate, needsOnboardingRedirect } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
