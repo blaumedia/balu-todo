@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const router = vi.hoisted(() => ({ back: vi.fn(), replace: vi.fn(), canGoBack: vi.fn() }));
 vi.mock('expo-router', () => ({ router }));
 
-import { goBackOr, shouldLeaveAssigned } from '../src/lib/goBack';
+import { goBackOr } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -39,25 +39,5 @@ describe('goBackOr', () => {
     goBackOr('/browse', nav);
     expect(router.replace).toHaveBeenCalledWith('/browse');
     expect(nav.goBack).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('shouldLeaveAssigned', () => {
-  const ready = { boot: 'ready', status: 'synced', hasUser: true, memberCount: 2 };
-  it('does not bounce a cold deep link while boot is loading', () => {
-    expect(shouldLeaveAssigned({ boot: 'loading', status: 'offline', hasUser: false, memberCount: 0 })).toBe(false);
-  });
-  it('does not bounce before the data is synced', () => {
-    expect(shouldLeaveAssigned({ ...ready, status: 'syncing', memberCount: 0 })).toBe(false);
-  });
-  it('stays in a shared workspace', () => {
-    expect(shouldLeaveAssigned(ready)).toBe(false);
-  });
-  it('leaves a solo workspace or a missing user once confirmed', () => {
-    expect(shouldLeaveAssigned({ ...ready, memberCount: 1 })).toBe(true);
-    expect(shouldLeaveAssigned({ ...ready, hasUser: false })).toBe(true);
-  });
-  it('leaves when boot resolves to logged out', () => {
-    expect(shouldLeaveAssigned({ boot: 'onboarding', status: 'offline', hasUser: false, memberCount: 0 })).toBe(true);
   });
 });

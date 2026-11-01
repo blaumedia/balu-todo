@@ -22,16 +22,3 @@ export function goBackOr(fallback: Href = '/browse', nav?: BackNav): void {
   if (target.canGoBack()) target.goBack();
   else router.replace(fallback);
 }
-
-/**
- * Whether the Assigned screen should leave: only once the data is confirmed
- * (boot ready and synced), because before that `user` is null and the member
- * list is empty, which would bounce a cold deep link. A logged-out boot
- * (`onboarding`) leaves at once; the caller falls back to `/` so the index
- * gate picks onboarding or `/today`.
- */
-export function shouldLeaveAssigned(s: { boot: string; status: string; hasUser: boolean; memberCount: number }): boolean {
-  if (s.boot === 'onboarding') return true;
-  if (s.boot !== 'ready' || s.status !== 'synced') return false;
-  return !s.hasUser || s.memberCount <= 1;
-}

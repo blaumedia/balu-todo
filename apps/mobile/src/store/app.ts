@@ -7,7 +7,7 @@ import { sqliteKV, SETTINGS } from '../lib/kv';
  * lost. `noWorkspace`: /me answered with an account that has no workspace. Both
  * show a full-screen notice (components/BootNotice) while lib/boot.ts keeps asking.
  */
-type Boot = 'loading' | 'onboarding' | 'reconnecting' | 'noWorkspace' | 'ready';
+export type Boot = 'loading' | 'onboarding' | 'reconnecting' | 'noWorkspace' | 'ready';
 
 export type LoginNotice = 'sessionExpired';
 
