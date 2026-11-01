@@ -31,6 +31,7 @@ const fake = vi.hoisted(() => ({
   noApi: false,
   patchHolds: [] as Array<Promise<void>>,
   syncCreated: 0,
+  routerThrows: false,
 }));
 
 const fakeApi = {
@@ -62,7 +63,10 @@ vi.mock('react-native', () => ({
 vi.mock('expo-router', () => ({
   router: {
     canDismiss: () => fake.canDismiss,
-    dismissAll: () => void fake.nav.push('dismissAll'),
+    dismissAll: () => {
+      if (fake.routerThrows) throw new Error('not ready');
+      fake.nav.push('dismissAll');
+    },
     replace: (to: string) => void fake.nav.push(`replace:${to}`),
   },
 }));
@@ -135,9 +139,11 @@ import {
   discardLostWorkspaces,
   establishSession,
   expireSession,
+  fallBackToKnownWorkspace,
   handleAccessLost,
   logout,
   moveOffLostWorkspace,
+  navigateToOnboarding,
 } from '../src/lib/boot';
 import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale, watchLocaleRetries } from '../src/lib/localeChoice';
 import { useApp } from '../src/store/app';
@@ -168,6 +174,7 @@ beforeEach(() => {
   fake.purgeFails = false;
   fake.nav = [];
   fake.canDismiss = false;
+  fake.routerThrows = false;
   fake.inited = [];
   fake.events = [];
   fake.logoutGate = null;
@@ -627,14 +634,7 @@ describe('logout', () => {
     expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
   });
 
-  it('does not navigate when there is nothing to dismiss either', async () => {
-    fake.canDismiss = false;
-    useApp.setState({ boot: 'ready' } as any);
-    await logout();
-    expect(fake.nav).toEqual([]); // state only: the root layout's effect navigates
-  });
-
-  it('still resets the session and leaves the screen when the purge fails', async () => {
+  it('still resets the session when the purge fails', async () => {
     fake.purgeFails = true;
     fake.canDismiss = true;
     useApp.setState({ boot: 'ready' } as any);
@@ -644,8 +644,50 @@ describe('logout', () => {
   });
 });
 
+describe('navigateToOnboarding', () => {
+  it('takes the pushed screens down first, then replaces with onboarding', () => {
+    fake.canDismiss = true;
+    navigateToOnboarding();
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('only replaces when there is nothing to dismiss', () => {
+    fake.canDismiss = false;
+    navigateToOnboarding();
+    expect(fake.nav).toEqual(['replace:/onboarding']);
+  });
+
+  it('does not throw when the router is not ready', () => {
+    fake.canDismiss = true;
+    fake.routerThrows = true;
+    expect(() => navigateToOnboarding()).not.toThrow();
+  });
+});
+
+describe('fallBackToKnownWorkspace', () => {
+  it('opens the first surviving workspace on a live session', () => {
+    useApp.setState({ boot: 'ready' } as any);
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe(true);
+    expect(useApp.getState().workspace?.id).toBe('a');
+    expect(fake.inited).toEqual(['a']);
+  });
+
+  it('does not revive a session that a 401 expired meanwhile', () => {
+    useApp.setState({ boot: 'onboarding' } as any); // user and memberships still set
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe(false);
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('returns false when no other workspace is known', () => {
+    useApp.setState({ boot: 'ready', memberships: [mem('lost')] } as any);
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe(false);
+    expect(fake.inited).toEqual([]);
+  });
+});
+
 describe('logout during an outage (what-if 3)', () => {
-  it('purges and leaves the screen before the revoke request has finished', async () => {
+  it('purges and ends the session before the revoke request has finished', async () => {
     let release!: () => void;
     fake.logoutGate = new Promise<void>((r) => (release = r));
     fake.canDismiss = true;

@@ -84,8 +84,9 @@ function Chrome() {
   const theme = useTheme();
   const boot = useApp((s) => s.boot);
   const segments = useSegments();
-  // Logged out with a pushed screen in front (cold deep link, or /me answering 401):
-  // the index gate is not in that stack, so nothing else would leave it.
+  // The single owner of leaving for onboarding once past the index gate (logout,
+  // change server, expiry, a lost workspace, a cold deep link): those paths only set
+  // boot 'onboarding'. The index gate owns the same step for segments [].
   useEffect(() => {
     leaveForOnboarding(boot, segments, navigateToOnboarding);
   }, [boot, segments]);

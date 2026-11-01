@@ -226,6 +226,23 @@ export function navigateToOnboarding(): void {
 }
 
 /**
+ * Last resort after the workspace `goneId` was deleted and /me stays unreachable:
+ * switch locally to a workspace the store already knows. Reads the store now, not
+ * a copy taken when the caller rendered: a 401 in between has expired the session
+ * (user cleared, boot 'onboarding'), and setSession would revive boot 'ready'
+ * with no tokens. Returns whether a workspace was opened.
+ */
+export function fallBackToKnownWorkspace(serverUrl: string, goneId: string): boolean {
+  const st = useApp.getState();
+  if (st.boot !== 'ready' || !st.user) return false;
+  const survivors = st.memberships.filter((m) => m.workspace.id !== goneId);
+  if (!survivors[0]) return false;
+  st.setSession(st.user, survivors, survivors[0].workspace);
+  initSync(serverUrl, survivors[0].workspace.id, st.user.id);
+  return true;
+}
+
+/**
  * /me answered with no workspace: show the notice and keep asking with a backoff
  * until it lists one, the user logs out, or the session is refused. Runs on its
  * own so the caller (and the splash screen) does not wait for it.

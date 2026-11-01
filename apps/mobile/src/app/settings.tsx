@@ -21,8 +21,8 @@ import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
-import { clearExpectedAccessLoss, expectAccessLoss, getApi, initSync, purgeWorkspaceStorage } from '../lib/clients';
-import { establishSession, logout, switchWorkspace } from '../lib/boot';
+import { clearExpectedAccessLoss, expectAccessLoss, getApi, purgeWorkspaceStorage } from '../lib/clients';
+import { establishSession, fallBackToKnownWorkspace, logout, switchWorkspace } from '../lib/boot';
 import { chooseLocale } from '../lib/localeChoice';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
@@ -196,14 +196,9 @@ export default function SettingsScreen() {
       // Last resort when the server stays unreachable: switch locally to a
       // workspace we already know about, so the app is never left syncing
       // against the deleted one until the next cold start.
-      if (!ok && user) {
-        const survivors = memberships.filter((m) => m.workspace.id !== doomedId);
-        if (survivors[0]) {
-          useApp.getState().setSession(user, survivors, survivors[0].workspace);
-          initSync(serverUrl, survivors[0].workspace.id, user.id);
-          ok = true;
-        }
-      }
+      // Decided on the live store (not this render's user/memberships): a 401 on
+      // the way has already expired the session.
+      if (!ok) ok = fallBackToKnownWorkspace(serverUrl, doomedId);
       void purgeWorkspaceStorage(doomedId);
       if (!ok) Alert.alert(t('workspace.deleteError'));
       cancelDelete();
@@ -249,7 +244,7 @@ export default function SettingsScreen() {
       try {
         await logout();
       } catch {
-        /* logout() already ended the session and left the screen; a failed purge has no UI to report to */
+        /* logout() already ended the session (the root layout leaves the screen); a failed purge has no UI to report to */
       }
       afterLogout?.();
     } finally {
