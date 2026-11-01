@@ -32,7 +32,7 @@ export const de: Record<TranslationKey, string> = {
 
   'sync.synced': 'Synchron',
   'sync.syncing': 'Synchronisiere…',
-  'sync.offline': 'Offline — lokal gespeichert',
+  'sync.offline': 'Offline - lokal gespeichert',
   'sync.error': 'Sync fehlgeschlagen',
   'sync.rejected': '{n} Änderung(en) wurden vom Server abgelehnt und zurückgenommen.',
   'sync.relocatedInbox': '{n} Aufgabe(n) im Eingang abgelegt - ihr Projekt wurde gelöscht.',
@@ -51,7 +51,7 @@ export const de: Record<TranslationKey, string> = {
   'boot.reconnectingTitle': 'Verbindung wird wiederhergestellt…',
   'boot.reconnectingBody': 'Du hast keinen Zugriff mehr auf den geöffneten Arbeitsbereich, und der Server ist nicht erreichbar, um einen anderen zu öffnen. Du bleibst angemeldet und Balu versucht es weiter. Unten kannst du dich abmelden.',
 
-  'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
+  'quickadd.placeholder': 'Aufgabe hinzufügen - Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',
   'quickadd.add': 'Hinzufügen',
   'quickadd.inboxTitle': 'Im Eingang abgelegt',
@@ -182,7 +182,7 @@ export const de: Record<TranslationKey, string> = {
   'onboarding.badUrl': 'Das sieht nicht nach einer gültigen URL aus.',
   'onboarding.unreachable': 'Server nicht erreichbar. Adresse prüfen und erneut versuchen.',
   'onboarding.unreachableHttps':
-    '{url} nicht erreichbar. Adressen ohne Schema werden über https versucht — läuft dein Server über einfaches http, stell es voran.',
+    '{url} nicht erreichbar. Adressen ohne Schema werden über https versucht. Läuft dein Server über einfaches http, stell es voran.',
   'onboarding.tryHttp': 'Stattdessen {url} versuchen',
 
   'auth.loginTitle': 'Willkommen zurück',

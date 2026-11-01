@@ -21,7 +21,7 @@ export const en = {
 
   "sync.synced": "Synced",
   "sync.syncing": "Syncing…",
-  "sync.offline": "Offline — saved locally",
+  "sync.offline": "Offline - saved locally",
   "sync.error": "Sync failed",
   "sync.rejected": "{n} change(s) were rejected by the server and have been undone.",
   "sync.relocatedInbox": "{n} task(s) added to the Inbox - their project was deleted.",
@@ -34,7 +34,7 @@ export const en = {
   "sync.workspaceGoneUnnamed": "This workspace has been deleted.",
   "sync.changesDiscarded": "{n} unsynced change(s) could not be saved.",
 
-  "quickadd.placeholder": "Add a task — try dates, #project, @label, !p1",
+  "quickadd.placeholder": "Add a task - try dates, #project, @label, !p1",
   "quickadd.hint": "Enter to add · Esc to close",
   "quickadd.add": "Add task",
   "quickadd.archivedNotice": "Archived project - unarchive it to add tasks",
@@ -151,7 +151,7 @@ export const en = {
   "members.copyLink": "Copy link",
   "members.copied": "Link copied",
   "members.expires": "Expires {date}",
-  "members.readonlyHint": "You have viewer access — changes are read-only.",
+  "members.readonlyHint": "You have viewer access - changes are read-only.",
 
   "invite.title": "You're invited",
   "invite.body": "Join this workspace on Balu.",

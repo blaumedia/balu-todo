@@ -29,7 +29,7 @@ export const en = {
 
   'sync.synced': 'Synced',
   'sync.syncing': 'Syncing…',
-  'sync.offline': 'Offline — saved locally',
+  'sync.offline': 'Offline - saved locally',
   'sync.error': 'Sync failed',
   'sync.rejected': '{n} change(s) were rejected by the server and have been undone.',
   'sync.relocatedInbox': '{n} task(s) added to the Inbox - their project was deleted.',
@@ -48,7 +48,7 @@ export const en = {
   'boot.reconnectingTitle': 'Reconnecting…',
   'boot.reconnectingBody': 'You no longer have access to the workspace you had open, and the server cannot be reached to open another one. You stay signed in and Balu keeps trying. You can sign out below.',
 
-  'quickadd.placeholder': 'Add a task — try dates, #project, @label, !p1',
+  'quickadd.placeholder': 'Add a task - try dates, #project, @label, !p1',
   'quickadd.hint': 'Return to add · another stays open',
   'quickadd.add': 'Add task',
   'quickadd.inboxTitle': 'Added to Inbox',
@@ -177,7 +177,7 @@ export const en = {
   'onboarding.badUrl': "That doesn't look like a valid URL.",
   'onboarding.unreachable': "Couldn't reach that server. Check the address and try again.",
   'onboarding.unreachableHttps':
-    "Couldn't reach {url}. Addresses without a scheme are tried over https — if your server runs on plain http, add it in front.",
+    "Couldn't reach {url}. Addresses without a scheme are tried over https. If your server runs on plain http, add it in front.",
   'onboarding.tryHttp': 'Try {url} instead',
 
   'auth.loginTitle': 'Welcome back',

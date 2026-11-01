@@ -24,7 +24,7 @@ export const de: Record<TranslationKey, string> = {
 
   "sync.synced": "Synchron",
   "sync.syncing": "Synchronisiere…",
-  "sync.offline": "Offline — lokal gespeichert",
+  "sync.offline": "Offline - lokal gespeichert",
   "sync.error": "Sync fehlgeschlagen",
   "sync.rejected": "{n} Änderung(en) wurden vom Server abgelehnt und zurückgenommen.",
   "sync.relocatedInbox": "{n} Aufgabe(n) im Eingang abgelegt - ihr Projekt wurde gelöscht.",
@@ -37,7 +37,7 @@ export const de: Record<TranslationKey, string> = {
   "sync.workspaceGoneUnnamed": "Dieser Workspace wurde gelöscht.",
   "sync.changesDiscarded": "{n} nicht synchronisierte Änderung(en) konnten nicht gespeichert werden.",
 
-  "quickadd.placeholder": "Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1",
+  "quickadd.placeholder": "Aufgabe hinzufügen - Datum, #Projekt, @Label, !p1",
   "quickadd.hint": "Enter zum Hinzufügen · Esc zum Schließen",
   "quickadd.add": "Hinzufügen",
   "quickadd.archivedNotice": "Archiviertes Projekt - Archivierung aufheben, um Aufgaben hinzuzufügen",
@@ -154,7 +154,7 @@ export const de: Record<TranslationKey, string> = {
   "members.copyLink": "Link kopieren",
   "members.copied": "Link kopiert",
   "members.expires": "Läuft ab am {date}",
-  "members.readonlyHint": "Du hast Betrachter-Zugriff — Änderungen sind schreibgeschützt.",
+  "members.readonlyHint": "Du hast Betrachter-Zugriff - Änderungen sind schreibgeschützt.",
 
   "invite.title": "Du bist eingeladen",
   "invite.body": "Tritt diesem Workspace auf Balu bei.",

@@ -34,7 +34,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { font, projectHex, radius, space } from '../theme/tokens';
 
 const RECURRENCE_OPTIONS: { label: string; value: string | null }[] = [
-  { label: '—', value: null },
+  { label: '-', value: null },
   { label: 'FREQ=DAILY', value: 'FREQ=DAILY' },
   { label: 'FREQ=WEEKLY', value: 'FREQ=WEEKLY' },
   { label: 'FREQ=MONTHLY', value: 'FREQ=MONTHLY' },
