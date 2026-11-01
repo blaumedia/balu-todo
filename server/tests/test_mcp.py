@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from starlette.requests import ClientDisconnect, Request
 
@@ -958,3 +960,13 @@ def test_update_task_refuses_placement_on_a_subtask(client, user, mcp_on):
         "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
     })
     assert echo_only["isError"] is False, payload(echo_only)
+    view = json.loads(payload(echo_only))["updated"]
+    assert view["id"] == sub
+    assert view["project_id"] == m["p1"]
+    # a viewer's echo-only call is refused like any other write
+    viewer = _join(client, user, role="viewer")
+    denied = call(client, mcp_key(client, viewer), "update_task", {
+        "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
+    })
+    assert denied["isError"] is True
+    assert "viewer role is read-only" in payload(denied)

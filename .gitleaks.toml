@@ -5,6 +5,10 @@ useDefault = true
 
 [[allowlists]]
 description = "Fixed, non-secret signing keys used only by the server test suite"
+# AND: a finding is allowlisted only if BOTH a path and a regex match. gitleaks
+# defaults to OR, which would hide every finding in these files and the fixture
+# pattern in any file.
+condition = "AND"
 paths = [
   '''^server/tests/conftest\.py$''',
   '''^server/tests/test_config\.py$''',
