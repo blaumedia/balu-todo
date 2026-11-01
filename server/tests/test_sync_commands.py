@@ -838,6 +838,10 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     body = sync(client, user, "*", [
         cmd("task_add", temp_id="g1", title="Grandchild"),
         cmd("task_add", temp_id="g2", title="Great-grandchild"),
+        cmd("task_add", temp_id="d1", title="DeletedMiddle", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="d2", title="HiddenBelowDeleted"),
+        cmd("task_add", temp_id="c1", title="CycleA"),
+        cmd("task_add", temp_id="c2", title="CycleB"),
     ])
     m.update(body["temp_id_mapping"])
     # a second workspace holding only matching subtasks must not be bumped
@@ -860,6 +864,30 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
                      {"par": m["s2"], "g": m["g1"]})
         conn.execute(text("UPDATE tasks SET parent_task_id = :par WHERE id = :g"),
                      {"par": m["g1"], "g": m["g2"]})
+        conn.execute(text("UPDATE tasks SET sort_order = 10 WHERE id = :g"), {"g": m["g1"]})
+        conn.execute(text("UPDATE tasks SET sort_order = 20 WHERE id = :g"), {"g": m["g2"]})
+        # a live row below a deleted intermediate (deleted by a one-level cascade only)
+        conn.execute(text("UPDATE tasks SET is_deleted = true WHERE id = :d"), {"d": m["d1"]})
+        conn.execute(text(
+            "UPDATE tasks SET parent_task_id = :par, project_id = :p, section_id = :sec"
+            " WHERE id = :d"
+        ), {"par": m["d1"], "p": m["pb"], "sec": m["sb"], "d": m["d2"]})
+        # a parent cycle: unreachable from any top-level task
+        conn.execute(text("UPDATE tasks SET parent_task_id = :o, project_id = :p WHERE id = :t"),
+                     {"o": m["c2"], "p": m["pb"], "t": m["c1"]})
+        conn.execute(text("UPDATE tasks SET parent_task_id = :o, project_id = :p WHERE id = :t"),
+                     {"o": m["c1"], "p": m["pb"], "t": m["c2"]})
+        max_sort = conn.execute(text(
+            "SELECT MAX(sort_order) FROM tasks WHERE parent_task_id = :par AND is_deleted = false"
+            " AND id NOT IN (:g1, :g2)"
+        ), {"par": m["par"], "g1": m["g1"], "g2": m["g2"]}).scalar_one()
+        before = {
+            str(r.id): tuple(r)[1:]
+            for r in conn.execute(text(
+                "SELECT id, parent_task_id, project_id, section_id, sort_order, version"
+                " FROM tasks WHERE id IN (:d2, :c1, :c2)"
+            ), {"d2": m["d2"], "c1": m["c1"], "c2": m["c2"]})
+        }
         other_version = conn.execute(
             text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
         ).scalar_one()
@@ -881,13 +909,14 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     with get_engine().begin() as conn:
         mod.op = SimpleNamespace(execute=lambda sql: conn.execute(text(str(sql))))
         mod.upgrade()
-        mod.upgrade()  # idempotent: the second run changes nothing
+        mod.upgrade()  # idempotent: the second run changes nothing (and terminates on the cycle)
 
     with get_engine().begin() as conn:
         rows = {
             str(r.id): r
             for r in conn.execute(text(
-                "SELECT id, project_id, section_id, version, parent_task_id FROM tasks"
+                "SELECT id, project_id, section_id, version, parent_task_id, sort_order,"
+                " is_deleted FROM tasks"
             ))
         }
         new_ws_version = conn.execute(
@@ -911,7 +940,17 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         assert str(row.parent_task_id) == m["par"]
         assert (str(row.project_id), str(row.section_id)) == (m["pa"], m["sa"])
         assert row.version == new_ws_version
+    # appended after the root's own subtasks, in their old relative order
+    assert rows[m["g1"]].sort_order == max_sort + 1000
+    assert rows[m["g2"]].sort_order == max_sort + 2000
     assert str(rows[m["s3"]].project_id) == m["pb"]  # deleted: untouched
+    # a live row under a deleted intermediate is not resurrected; a cycle is left alone
+    for key in ("d2", "c1", "c2"):
+        row = rows[m[key]]
+        assert (
+            row.parent_task_id, row.project_id, row.section_id, row.sort_order, row.version
+        ) == before[m[key]]
+    assert rows[m["d1"]].is_deleted
 
 
 def test_task_reorder_skips_a_task_of_another_workspace(client, user):
