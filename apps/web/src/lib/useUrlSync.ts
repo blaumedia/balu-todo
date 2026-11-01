@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useApp } from "../store/app.js";
 import { buildAppUrl, parseAppUrl } from "./url.js";
+import { decideHistoryOp, READER_STATE } from "./historyOp.js";
 
 /**
  * One-shot escape hatch: the next state->URL write uses replaceState even if
@@ -33,16 +34,21 @@ export function useUrlSync(): void {
       return;
     }
     const next = buildAppUrl(view, selectedTaskId, fullscreenTaskId);
-    if (next === loc.pathname + loc.search) {
-      replaceNext = false;
-      return;
-    }
-    const current = parseAppUrl(loc.pathname, loc.search);
-    const pathChanged =
-      current === null ||
-      buildAppUrl(current.view, null, current.fullscreenTaskId) !== buildAppUrl(view, null, fullscreenTaskId);
-    if (pathChanged && current !== null && !replaceNext) hist.pushState(null, "", next);
-    else hist.replaceState(null, "", next);
+    const op = decideHistoryOp({
+      current: parseAppUrl(loc.pathname, loc.search),
+      currentUrl: loc.pathname + loc.search,
+      currentState: hist.state,
+      view,
+      selectedTaskId,
+      fullscreenTaskId,
+      replaceNext,
+    });
+    // "back" pops the reader entry we pushed; the popstate handler below then
+    // re-derives state from the entry underneath (same view, so no echo).
+    if (op === "back") hist.back();
+    else if (op === "push") hist.pushState(fullscreenTaskId ? READER_STATE : null, "", next);
+    else if (op === "replace-reader") hist.replaceState(READER_STATE, "", next);
+    else if (op === "replace") hist.replaceState(null, "", next);
     replaceNext = false;
   }, [view, selectedTaskId, fullscreenTaskId]);
 
