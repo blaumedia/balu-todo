@@ -297,14 +297,16 @@ const styles = StyleSheet.create({
   body: { flex: 1, gap: 2 },
   title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: font.body * 1.25 },
   strike: { textDecorationLine: 'line-through' },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, flexWrap: 'nowrap' },
+  // Wraps so the fixed items (comments, avatar) never leave the screen on a
+  // 320dp phone or with large text; a row that fits stays on one line.
+  meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, rowGap: 2, flexWrap: 'wrap' },
   // Chips that may be long (project, labels) shrink with an ellipsis; the date,
   // icons, count, comments and avatar never do. The project gives way first
   // (large shrink factor, floor of 48dp), so short labels like "@home" stay whole
   // while the project ellipsizes; labels shrink only once the project is at its floor.
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
   projectChip: { flexShrink: 100, minWidth: 48 },
-  labelChip: { flexShrink: 1, minWidth: 0, maxWidth: 120 },
+  labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120 },
   shrink: { flexShrink: 1, minWidth: 0 },
   noShrink: { flexShrink: 0 },
   metaText: { fontSize: font.caption, fontVariant: ['tabular-nums'] },
