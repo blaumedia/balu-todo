@@ -795,6 +795,14 @@ def test_cascade_leaves_unchanged_subtasks_versions_alone(client, user, db):
     assert final["par"] > after["par"]
 
 
+def test_task_move_rejects_a_task_as_its_own_parent(client, user):
+    m, token = _tree(client, user)
+    mv = cmd("task_move", id=m["par"], parent_task_id=m["par"])
+    body = sync(client, user, token, [mv])
+    assert body["sync_status"][mv["uuid"]]["error_code"] == "invalid_args"
+    assert _all(client, user)[m["par"]]["parent_task_id"] is None
+
+
 def test_task_add_with_live_parent_is_not_relocated_by_a_deleted_sent_project(client, user):
     m, token = _tree(client, user)
     body = sync(client, user, token, [cmd("project_delete", id=m["pb"])])
@@ -821,15 +829,30 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         cmd("task_add", temp_id="s1", title="Mismatched", parent_task_id=m["par"]),
         cmd("task_add", temp_id="s2", title="Matching", parent_task_id=m["par"]),
         cmd("task_add", temp_id="s3", title="Deleted", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s4", title="Mismatched too", parent_task_id=m["par"]),
     ])
     m.update(body["temp_id_mapping"])
     sync(client, user, body["sync_token"], [cmd("task_delete", id=m["s3"])])
     ws = user["workspace_id"]
+    # a second workspace holding only matching subtasks must not be bumped
+    other = _second_workspace(client, user)
+    resp = client.post(
+        f"/api/v1/workspaces/{other}/sync",
+        headers=user["headers"],
+        json={"sync_token": "*", "commands": [
+            cmd("task_add", temp_id="op", title="OtherParent"),
+            cmd("task_add", temp_id="os", title="OtherSub", parent_task_id="op"),
+        ]},
+    )
+    assert resp.status_code == 200, resp.text
     with get_engine().begin() as conn:
         # the pre-fix state: s1 and the deleted s3 diverged from the parent
         conn.execute(text(
-            "UPDATE tasks SET project_id = :p, section_id = :sec WHERE id IN (:a, :b)"
-        ), {"p": m["pb"], "sec": m["sb"], "a": m["s1"], "b": m["s3"]})
+            "UPDATE tasks SET project_id = :p, section_id = :sec WHERE id IN (:a, :b, :c)"
+        ), {"p": m["pb"], "sec": m["sb"], "a": m["s1"], "b": m["s3"], "c": m["s4"]})
+        other_version = conn.execute(
+            text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
+        ).scalar_one()
         ws_version = conn.execute(
             text("SELECT version FROM workspaces WHERE id = :w"), {"w": ws}
         ).scalar_one()
@@ -860,7 +883,15 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         new_ws_version = conn.execute(
             text("SELECT version FROM workspaces WHERE id = :w"), {"w": ws}
         ).scalar_one()
+        new_other_version = conn.execute(
+            text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
+        ).scalar_one()
+    # two mismatched subtasks, one bump for the workspace, the same version on both
     assert new_ws_version == ws_version + 1
+    assert new_other_version == other_version
+    s4 = rows[m["s4"]]
+    assert (str(s4.project_id), str(s4.section_id)) == (m["pa"], m["sa"])
+    assert s4.version == new_ws_version
     s1 = rows[m["s1"]]
     assert (str(s1.project_id), str(s1.section_id)) == (m["pa"], m["sa"])
     assert s1.version == new_ws_version
