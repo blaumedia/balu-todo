@@ -1,6 +1,6 @@
 # @balu/mobile
 
-Balu's mobile app — Expo (SDK 57) + expo-router, sharing the exact contract and
+Balu's mobile app — Expo (SDK 54) + expo-router, sharing the exact contract and
 domain logic of the web client via the workspace packages `@balu/domain`,
 `@balu/nl-parser`, `@balu/sync-client`, and `@balu/api-client`.
 
@@ -150,7 +150,8 @@ Notes & limits:
 ## Verify locally
 
 ```bash
-pnpm --filter @balu/mobile typecheck        # tsc --noEmit — clean
+pnpm --filter @balu/mobile typecheck        # tsc --noEmit - clean
+pnpm --filter @balu/mobile lint             # eslint (expo config) - clean
 pnpm --filter @balu/mobile test             # vitest — reminder + search logic
 npx expo export --platform ios              # full Metro bundle
 npx expo-doctor                             # project health
@@ -185,7 +186,8 @@ src/
   store/                   zustand app store + replica snapshot hooks
   theme/                   design tokens (TS) + ThemeProvider
   i18n/                    de / en dictionaries
-test/                      vitest — reminderPlan + search (pure logic)
+test/                      vitest - pure logic and hooks-free helpers (reminders,
+                           search, sync notices, roles, serverUrl, quick-add, boot, ...)
 ```
 
 ## Troubleshooting
