@@ -3,10 +3,17 @@ import {
   Platform,
   TextInput,
   type NativeScrollEvent,
+  type LayoutChangeEvent,
   type NativeSyntheticEvent,
   type View,
 } from 'react-native';
-import { pendingAfter, revealScrollDeltaWithTarget, settleAction, touchingAfter } from '../lib/keyboardSpacer';
+import {
+  pendingAfter,
+  revealScrollDeltaWithTarget,
+  settleAction,
+  shouldRevealOnTargetResize,
+  touchingAfter,
+} from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
 
 // dp of content below a focused input (submit / Cancel / Delete buttons) that
@@ -61,6 +68,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
   const pending = useRef(false);
   const lastRevealed = useRef<unknown>(null);
   const targetRef = useRef<View>(null);
+  const targetHeight = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const android = Platform.OS === 'android';
 
@@ -153,6 +161,18 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
     },
     [reveal],
   );
+  // Attach to the reveal target's onLayout: when it grows while the IME is open
+  // (a confirmation card or error line appeared under the focused input), its
+  // buttons may now sit under the IME, and no keyboard event announces that.
+  const onTargetLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const next = e.nativeEvent.layout.height;
+      const grew = shouldRevealOnTargetResize(targetHeight.current, next, keyboardHeight.current, touching.current);
+      targetHeight.current = next;
+      if (grew) reveal(keyboardHeight.current, false);
+    },
+    [reveal],
+  );
   // Touches bubble up from the inputs: a tap on another input while the IME is
   // already open changes focus without any keyboard event.
   // A drag that scrolled the content is not a tap: never fight the user's scroll.
@@ -182,6 +202,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
   return {
     ref,
     targetRef,
+    onTargetLayout,
     // JS scroll events only where the hook uses them.
     onScroll: android ? onScroll : undefined,
     scrollEventThrottle: android ? 16 : undefined,

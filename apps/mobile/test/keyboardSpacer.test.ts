@@ -6,6 +6,7 @@ import {
   revealScrollDeltaWithTarget,
   settleAction,
   settledKeyboardHeight,
+  shouldRevealOnTargetResize,
   touchingAfter,
 } from '../src/lib/keyboardSpacer';
 
@@ -123,5 +124,22 @@ describe('revealScrollDeltaWithTarget', () => {
     expect(revealScrollDeltaWithTarget(1500, 40, 100, 2000, 600, 1500)).toBe(
       revealScrollDelta(1500, 40, 100, 2000, 600),
     );
+  });
+});
+
+describe('shouldRevealOnTargetResize', () => {
+  it('reveals when the target grew under an open keyboard', () => {
+    expect(shouldRevealOnTargetResize(300, 420, 800, false)).toBe(true);
+  });
+
+  it('ignores the first layout, a shrink and an unchanged height', () => {
+    expect(shouldRevealOnTargetResize(undefined, 420, 800, false)).toBe(false);
+    expect(shouldRevealOnTargetResize(420, 300, 800, false)).toBe(false);
+    expect(shouldRevealOnTargetResize(420, 420, 800, false)).toBe(false);
+  });
+
+  it('never moves the content with the keyboard closed or a finger down', () => {
+    expect(shouldRevealOnTargetResize(300, 420, 0, false)).toBe(false);
+    expect(shouldRevealOnTargetResize(300, 420, 800, true)).toBe(false);
   });
 });

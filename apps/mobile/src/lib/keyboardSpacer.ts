@@ -93,3 +93,17 @@ export function settleAction(keyboardHeight: number, touching: boolean): 'reset'
   if (keyboardHeight === 0) return 'reset';
   return touching ? 'defer' : 'reveal';
 }
+
+// Whether a reveal target that just reported its height must be revealed again:
+// it grew (an error line or a confirmation card appeared under the focused input
+// while the IME is open) and no finger is down. A first layout (`previous`
+// undefined), a shrink, or a layout while the keyboard is closed never moves the
+// content, and a layout during a touch is left to the touch end.
+export function shouldRevealOnTargetResize(
+  previous: number | undefined,
+  next: number,
+  keyboardHeight: number,
+  touching: boolean,
+): boolean {
+  return previous !== undefined && next > previous && keyboardHeight > 0 && !touching;
+}

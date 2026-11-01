@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -24,6 +25,12 @@ import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '.
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
+
+// The form view whose bottom (its lowest button) must end up above the IME.
+interface RevealTarget {
+  ref: React.Ref<View>;
+  onLayout: (e: LayoutChangeEvent) => void;
+}
 
 export default function Onboarding() {
   const theme = useTheme();
@@ -49,9 +56,9 @@ export default function Onboarding() {
         </View>
 
         {serverUrl ? (
-          <AuthStep revealTarget={keyboardReveal.targetRef} serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
+          <AuthStep revealTarget={{ ref: keyboardReveal.targetRef, onLayout: keyboardReveal.onTargetLayout }} serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
         ) : (
-          <ServerStep revealTarget={keyboardReveal.targetRef} initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
+          <ServerStep revealTarget={{ ref: keyboardReveal.targetRef, onLayout: keyboardReveal.onTargetLayout }} initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
         )}
         <AndroidKeyboardSpacer bottomInset={insets.bottom} onKeyboardSettled={keyboardReveal.onKeyboardSettled} />
       </ScrollView>
@@ -59,7 +66,7 @@ export default function Onboarding() {
   );
 }
 
-function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: string; onConfirm: (url: string) => void; revealTarget: React.Ref<View> }) {
+function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: string; onConfirm: (url: string) => void; revealTarget: RevealTarget }) {
   const theme = useTheme();
   const { t } = useT();
   const [value, setValue] = useState(initialValue);
@@ -109,7 +116,7 @@ function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: s
   };
 
   return (
-    <View ref={revealTarget} collapsable={false} style={styles.form}>
+    <View ref={revealTarget.ref} onLayout={revealTarget.onLayout} collapsable={false} style={styles.form}>
       <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>{t('onboarding.serverTitle')}</Text>
       <Text style={[styles.hint, { color: theme.textSecondary }]}>{t('onboarding.serverHint')}</Text>
       <Field
@@ -164,7 +171,7 @@ function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: s
   );
 }
 
-function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: string; onChangeServer: () => void; revealTarget: React.Ref<View> }) {
+function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: string; onChangeServer: () => void; revealTarget: RevealTarget }) {
   const theme = useTheme();
   const { t } = useT();
   const loginNotice = useApp((s) => s.loginNotice);
@@ -222,7 +229,7 @@ function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: stri
   };
 
   return (
-    <View ref={revealTarget} collapsable={false} style={styles.form}>
+    <View ref={revealTarget.ref} onLayout={revealTarget.onLayout} collapsable={false} style={styles.form}>
       <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>
         {mode === 'login' ? t('auth.loginTitle') : t('auth.registerTitle')}
       </Text>
