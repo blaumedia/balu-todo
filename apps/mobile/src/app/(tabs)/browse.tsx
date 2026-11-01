@@ -23,7 +23,7 @@ export default function BrowseScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
-  const keyboardReveal = useKeyboardReveal();
+  const keyboardReveal = useKeyboardReveal(insets);
   const snap = useSnapshot();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);

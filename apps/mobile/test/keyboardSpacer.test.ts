@@ -16,15 +16,25 @@ describe('keyboardSpacerHeight', () => {
 describe('revealScrollDelta', () => {
   // screen 2400px-equivalent 900dp, keyboard 300dp -> visible bottom at 600
   it('is zero when the input and its reserve are above the keyboard', () => {
-    expect(revealScrollDelta(300, 40, 100, 900, 300)).toBe(0);
+    expect(revealScrollDelta(300, 40, 100, 900, 300, 0, 0)).toBe(0);
   });
   it('is zero without a keyboard', () => {
-    expect(revealScrollDelta(700, 40, 100, 900, 0)).toBe(0);
+    expect(revealScrollDelta(700, 40, 100, 900, 0, 0, 0)).toBe(0);
   });
   it('scrolls by the part of input plus reserve below the keyboard top', () => {
-    expect(revealScrollDelta(550, 40, 100, 900, 300)).toBe(90);
+    expect(revealScrollDelta(550, 40, 100, 900, 300, 0, 0)).toBe(90);
   });
   it('scrolls an input that sits fully under the keyboard', () => {
-    expect(revealScrollDelta(800, 40, 100, 900, 300)).toBe(340);
+    expect(revealScrollDelta(800, 40, 100, 900, 300, 0, 0)).toBe(340);
+  });
+  it('treats the keyboard top as bottomInset higher than screen minus keyboard', () => {
+    // without the inset this input is exactly visible (delta 0); with a 48 inset it is 48 under
+    expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 0)).toBe(0);
+    expect(revealScrollDelta(460, 40, 100, 900, 300, 48, 0)).toBe(48);
+  });
+  it('adds the status bar height that measureInWindow leaves out of the input position', () => {
+    expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 0)).toBe(0);
+    expect(revealScrollDelta(460, 40, 100, 900, 300, 0, 24)).toBe(24);
+    expect(revealScrollDelta(460, 40, 100, 900, 300, 24, 24)).toBe(48);
   });
 });
