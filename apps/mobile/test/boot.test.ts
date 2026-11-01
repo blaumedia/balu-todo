@@ -26,10 +26,17 @@ const fake = vi.hoisted(() => ({
   inited: [] as string[],
   events: [] as string[],
   logoutGate: null as Promise<void> | null,
+  patched: [] as string[],
+  patchFails: false,
 }));
 
 const fakeApi = {
   getMe: () => fake.getMe(),
+  patchMe: async (body: { locale: string }) => {
+    fake.patched.push(body.locale);
+    if (fake.patchFails) throw new Error('offline');
+    return {};
+  },
   hydrate: async () => {},
   isAuthenticated: () => fake.authed,
   logout: async () => {
@@ -66,6 +73,7 @@ vi.mock('../src/lib/kv', () => ({
     serverUrl: 'serverUrl',
     theme: 'theme',
     locale: 'locale',
+    localePending: 'localePending',
     remindersEnabled: 'remindersEnabled',
     lastWorkspaceId: 'last',
     session: 'session',
@@ -126,6 +134,7 @@ import {
   logout,
   moveOffLostWorkspace,
 } from '../src/lib/boot';
+import { chooseLocale } from '../src/lib/localeChoice';
 import { useApp } from '../src/store/app';
 
 const user = { id: 'u1', name: 'U', email: 'u@x', locale: 'en' } as any;
@@ -157,6 +166,8 @@ beforeEach(() => {
   fake.inited = [];
   fake.events = [];
   fake.logoutGate = null;
+  fake.patched = [];
+  fake.patchFails = false;
   fake.getMe = async () => me('a', 'b');
   useApp.setState({
     user,
@@ -290,6 +301,58 @@ describe('bootApp', () => {
     expect(st.workspace?.id).toBe('a');
     expect(fake.inited).toEqual(['a']);
     expect(st.loginNotice).toBeNull();
+  });
+});
+
+describe('language across cold starts (Android e2e f07a2ce3)', () => {
+  const api = fakeApi as any;
+  const serverDe = { ...user, locale: 'de' };
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  it('an unconfirmed local choice wins over the stale server value and is sent again', async () => {
+    fake.kv.set('locale', 'en');
+    fake.kv.set('localePending', '1');
+    fake.getMe = async () => ({ user: serverDe, memberships: [mem('a')] });
+    await establishSession('https://x', api);
+    await flush();
+    expect(useApp.getState().locale).toBe('en');
+    expect(useApp.getState().user?.locale).toBe('en');
+    expect(fake.patched).toEqual(['en']);
+    expect(fake.kv.has('localePending')).toBe(false);
+  });
+
+  it('a confirmed value follows the server (changed on another device) and is stored', async () => {
+    fake.kv.set('locale', 'en');
+    fake.getMe = async () => ({ user: serverDe, memberships: [mem('a')] });
+    await establishSession('https://x', api);
+    expect(useApp.getState().locale).toBe('de');
+    expect(fake.kv.get('locale')).toBe('de');
+    expect(fake.patched).toEqual([]);
+  });
+
+  it('a failed PATCH leaves the choice pending for the next boot', async () => {
+    fake.patchFails = true;
+    chooseLocale('en');
+    await flush();
+    expect(fake.kv.get('localePending')).toBe('1');
+    expect(fake.kv.get('locale')).toBe('en');
+  });
+
+  it('a confirmed PATCH clears the pending mark', async () => {
+    chooseLocale('de');
+    await flush();
+    expect(fake.kv.has('localePending')).toBe(false);
+  });
+
+  it('the offline boot applies the saved choice over the cached user', async () => {
+    fake.kv.set('locale', 'en');
+    fake.kv.set('serverUrl', 'https://x');
+    fake.kv.set('session', JSON.stringify({ user: serverDe, workspace: ws('a') }));
+    fake.getMe = async () => {
+      throw new TypeError('network');
+    };
+    await bootApp();
+    expect(useApp.getState().locale).toBe('en');
   });
 });
 

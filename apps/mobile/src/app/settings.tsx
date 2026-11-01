@@ -23,6 +23,7 @@ import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
 import { clearExpectedAccessLoss, expectAccessLoss, getApi, initSync, purgeWorkspaceStorage } from '../lib/clients';
 import { establishSession, logout, switchWorkspace } from '../lib/boot';
+import { chooseLocale } from '../lib/localeChoice';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -50,7 +51,6 @@ export default function SettingsScreen() {
   const themeSetting = useApp((s) => s.theme);
   const locale = useApp((s) => s.locale);
   const setTheme = useApp((s) => s.setTheme);
-  const setLocale = useApp((s) => s.setLocale);
   const setUser = useApp((s) => s.setUser);
   const setServerUrl = useApp((s) => s.setServerUrl);
   const setContext = useApp((s) => s.setContext);
@@ -234,8 +234,7 @@ export default function SettingsScreen() {
     bestEffortPatch({ theme: value });
   };
   const changeLocale = (value: Locale) => {
-    setLocale(value);
-    bestEffortPatch({ locale: value });
+    chooseLocale(value);
   };
 
   // Re-entry guard: a second tap while the first logout runs would post and

@@ -75,6 +75,7 @@ export const SETTINGS = {
   serverUrl: 'balu:settings:serverUrl',
   theme: 'balu:settings:theme',
   locale: 'balu:settings:locale',
+  localePending: 'balu:settings:localePending', // '1' while the chosen locale is not yet confirmed by the server
   session: 'balu:settings:session', // cached {user, workspace} for offline boot
   lastWorkspaceId: 'balu:settings:lastWorkspaceId', // boot preference (§7)
   remindersEnabled: 'balu:settings:remindersEnabled', // '1' | '0' — local reminders

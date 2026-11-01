@@ -97,7 +97,9 @@ export const useApp = create<AppState>((set) => ({
   },
   setLocale: (locale) => {
     void sqliteKV.setItem(SETTINGS.locale, locale);
-    set({ locale });
+    // Keep user.locale in step: setUser({ ...user, name }) and the session cache
+    // would otherwise carry the old value and switch the language back.
+    set((s) => ({ locale, user: s.user ? { ...s.user, locale } : s.user }));
   },
   setRemindersEnabled: (remindersEnabled) => {
     void sqliteKV.setItem(SETTINGS.remindersEnabled, remindersEnabled ? '1' : '0');

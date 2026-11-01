@@ -19,6 +19,7 @@ import {
   teardownSync,
   teardownSyncSettled,
 } from './clients';
+import { reconcileLocale } from './localeChoice';
 import { SETTINGS, purgeUserData, sqliteKV } from './kv';
 import { isForeignLocalData } from './localData';
 import { getReminderPermissionGranted, startReminderScheduler, stopReminderScheduler } from './notifications';
@@ -89,6 +90,7 @@ export async function establishSession(
   const lastUsedName = lastUsed ? await cachedWorkspaceName(lastUsed) : null;
   if (!stillWanted()) return false;
   useApp.getState().setSession(me.user, me.memberships, membership.workspace);
+  await reconcileLocale(me.user);
   initSync(serverUrl, membership.workspace.id, me.user.id);
   void resumeReminders();
   void discardLostWorkspaces(
@@ -402,6 +404,9 @@ export async function bootApp(): Promise<void> {
       try {
         const cached = JSON.parse(sessionRaw) as { user: User; workspace: Workspace };
         store.setSession(cached.user, [], cached.workspace);
+        // The cached user carries the language of the last /me, not the user's
+        // latest choice (made offline, or confirmed after the cache was written).
+        if (localeRaw === 'de' || localeRaw === 'en') store.setLocale(localeRaw as Locale);
         initSync(serverUrl, cached.workspace.id, cached.user.id);
         void resumeReminders();
         return;
