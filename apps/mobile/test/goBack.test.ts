@@ -9,7 +9,7 @@ const router = vi.hoisted(() => ({
 }));
 vi.mock('expo-router', () => ({ router }));
 
-import { goBackOr, replaceWithGate } from '../src/lib/goBack';
+import { goBackOr, leaveGate, replaceWithGate } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -64,5 +64,24 @@ describe('replaceWithGate', () => {
     replaceWithGate();
     expect(router.dismissAll).not.toHaveBeenCalled();
     expect(router.replace).toHaveBeenCalledWith('/');
+  });
+});
+
+describe('leaveGate', () => {
+  it('clears the anchor stack before replacing, so one root screen is left', () => {
+    router.canDismiss.mockReturnValue(true);
+    leaveGate('/onboarding');
+    expect(router.dismissAll).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith('/onboarding');
+    expect(router.dismissAll.mock.invocationCallOrder[0]).toBeLessThan(
+      router.replace.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('only replaces when there is nothing to dismiss', () => {
+    router.canDismiss.mockReturnValue(false);
+    leaveGate('/today');
+    expect(router.dismissAll).not.toHaveBeenCalled();
+    expect(router.replace).toHaveBeenCalledWith('/today');
   });
 });

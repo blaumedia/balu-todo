@@ -18,6 +18,14 @@ import { getSync } from '../lib/clients';
 import { configureNotifications, openTaskFromNotification, taskIdFromResponse } from '../lib/notifications';
 import { ThemeProvider, useScheme, useTheme } from '../theme/ThemeProvider';
 
+/**
+ * Anchor of the root Stack: a deep link into a pushed screen (balu://settings,
+ * balu://assigned, balu://project/<id>) gets (tabs) beneath it, so hardware Back
+ * and the in-app arrow both land on Today instead of exiting the app. The index
+ * gate (index.tsx) clears that anchor before it hands over, see leaveGate.
+ */
+export const unstable_settings = { anchor: '(tabs)' };
+
 SplashScreen.preventAutoHideAsync().catch(() => {});
 configureNotifications();
 

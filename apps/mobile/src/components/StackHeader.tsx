@@ -17,7 +17,7 @@ export function StackHeader({
   title: string;
   right?: ReactNode;
   colorDot?: string;
-  /** Where Back lands when there is no history (default: Browse). */
+  /** Where Back lands when there is no history (default: Browse; a safety net, the root anchor normally supplies history). */
   backFallback?: Href;
 }) {
   const theme = useTheme();

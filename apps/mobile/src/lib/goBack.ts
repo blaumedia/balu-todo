@@ -11,9 +11,11 @@ export interface BackNav {
  *
  * A pushed screen opened by a deep link or notification is the first screen of
  * its stack, so a bare `back()` has nothing to pop and does nothing (dev:
- * "GO_BACK was not handled"). `/browse` is the default fallback: it is the tab
- * that lists the lists, projects and labels most of these screens are pushed
- * from. Screens with another origin (Settings: `/today`) pass their own.
+ * "GO_BACK was not handled"). The root layout's `(tabs)` anchor normally gives
+ * those screens a tab below them (Back then lands on Today, like hardware Back),
+ * so this fallback is a safety net. `/browse` is the default: it lists the lists,
+ * projects and labels most of these screens are pushed from. Screens with another
+ * origin (Settings: `/today`) pass their own.
  *
  * Pass `nav` to pop that screen's own stack instead of the global router.
  */
@@ -34,4 +36,16 @@ export function goBackOr(fallback: Href = '/browse', nav?: BackNav): void {
 export function replaceWithGate(): void {
   if (router.canDismiss()) router.dismissAll();
   router.replace('/');
+}
+
+/**
+ * Leave the index gate for its destination with exactly one root screen left.
+ *
+ * The root anchor makes the cold-start stack `[(tabs), index]`. A plain replace
+ * would give `[(tabs), onboarding]` (Back reveals a tab with no session) or
+ * `[(tabs), (tabs)]`. Dismissing first leaves `[(tabs)]`, which the replace swaps.
+ */
+export function leaveGate(href: Href): void {
+  if (router.canDismiss()) router.dismissAll();
+  router.replace(href);
 }
