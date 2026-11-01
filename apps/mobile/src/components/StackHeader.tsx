@@ -1,16 +1,30 @@
-import { router } from 'expo-router';
+import type { Href } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useT } from '../i18n';
+import { goBackOr } from '../lib/goBack';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, space } from '../theme/tokens';
 import { Icon } from './Icon';
 
 /** Header for pushed screens (list / project / label / settings): back + title. */
-export function StackHeader({ title, right, colorDot }: { title: string; right?: ReactNode; colorDot?: string }) {
+export function StackHeader({
+  title,
+  right,
+  colorDot,
+  backFallback,
+}: {
+  title: string;
+  right?: ReactNode;
+  colorDot?: string;
+  /** Where Back lands when there is no history (default: Browse; a safety net, the root anchor normally supplies history). */
+  backFallback?: Href;
+}) {
   const theme = useTheme();
+  const { t } = useT();
   return (
     <View style={styles.row}>
-      <Pressable onPress={() => router.back()} hitSlop={10} accessibilityLabel="Back">
+      <Pressable onPress={() => goBackOr(backFallback)} hitSlop={10} accessibilityLabel={t('common.back')}>
         <Icon name="arrow-left" size={24} color={theme.textPrimary} strokeWidth={2} />
       </Pressable>
       {colorDot ? <View style={[styles.dot, { backgroundColor: colorDot }]} /> : null}

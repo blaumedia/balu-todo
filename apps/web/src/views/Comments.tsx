@@ -108,7 +108,7 @@ export function CommentsSection({ snapshot, taskId }: { snapshot: Snapshot; task
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontSize: "var(--text-secondary-size)", fontWeight: 500, color: "var(--text-primary)" }}>
-                    {author?.name ?? "—"}
+                    {author?.name ?? "-"}
                   </span>
                   <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
                     {relativeTime(c.created_at, nowMs, locale, t)}

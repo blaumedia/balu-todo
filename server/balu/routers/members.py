@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Response, status
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import ObjectDeletedError
 
@@ -18,6 +18,7 @@ from ..db import get_db
 from ..errors import forbidden, last_owner, not_found
 from ..models import Membership, User
 from ..schemas.invite import MemberRoleUpdate
+from ..services import lock_users, lock_workspace, rescue_if_workspaceless
 from ..sync.engine import ROLE_RANK, bump_version
 from ..sync.serialize import serialize_member
 from .workspaces import _parse_ws_id, get_membership
@@ -55,7 +56,7 @@ def _lock_workspace(db: Session, ws_id: uuid.UUID) -> None:
     conflicts — leaving a workspace with zero owners. Nobody can then grant
     `owner` (that requires being one), so it is permanently ungovernable.
     """
-    db.execute(text("SELECT id FROM workspaces WHERE id = :w FOR UPDATE"), {"w": ws_id})
+    lock_workspace(db, ws_id)
 
 
 def _owner_count(db: Session, ws_id: uuid.UUID) -> int:
@@ -183,5 +184,14 @@ def remove_member(
     version = bump_version(db, ws_id)
     target.is_deleted = True
     target.version = version
+    # §2: an account always keeps a workspace. A member whose only workspace was
+    # this one (they deleted their own, and leaving or being removed is allowed
+    # for non-owners) would otherwise boot into nothing. The user lock, taken
+    # after the workspace lock, orders this against a concurrent delete or leave
+    # of the target's other workspaces, each of which would count this
+    # membership as still live.
+    lock_users(db, [target_id])
+    db.flush()
+    rescue_if_workspaceless(db, target_id)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

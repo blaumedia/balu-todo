@@ -24,7 +24,7 @@ from ..models import Comment, Label, Membership, Project, Section, Task, User, W
 from ..projects import archived_project_ids, outside_archived_projects
 from ..routers.workspaces import get_membership
 from ..schemas.sync import Command
-from ..sync.commands import process_commands
+from ..sync.commands import TransientDbError, process_commands
 from ..sync.serialize import iso_date, iso_dt
 
 #: Cap on rows a single ``list_tasks`` call may return, so a model that omits
@@ -170,10 +170,21 @@ def _apply(ctx: ToolContext, ws_id: uuid.UUID, role: str, commands: list[Command
     time makes "stop here" real, and the raised error names what did commit.
     """
     temp_id_mapping: dict[str, str] = {}
+    user_id = ctx.user.id
+    # Release this call's connection (authentication and the lookups before the
+    # write left a transaction open): each command checks out one of its own.
+    ctx.db.rollback()
     for index, command in enumerate(commands):
-        sync_status, mapping = process_commands(
-            ctx.sm, ws_id, ctx.user.id, role, [command], event_sender=ctx.event_sender
-        )
+        try:
+            sync_status, mapping = process_commands(
+                ctx.sm, ws_id, user_id, role, [command], event_sender=ctx.event_sender
+            )
+        except TransientDbError:
+            raise ToolError(
+                "Database temporarily unavailable; the last step may or may not have "
+                "been applied, re-read before retrying",
+                applied=[c.type for c in commands[:index]],
+            ) from None
         temp_id_mapping.update(mapping)
         status = sync_status.get(command.uuid)
         if isinstance(status, dict):

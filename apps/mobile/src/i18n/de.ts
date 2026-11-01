@@ -32,11 +32,26 @@ export const de: Record<TranslationKey, string> = {
 
   'sync.synced': 'Synchron',
   'sync.syncing': 'Synchronisiere…',
-  'sync.offline': 'Offline — lokal gespeichert',
+  'sync.offline': 'Offline - lokal gespeichert',
   'sync.error': 'Sync fehlgeschlagen',
   'sync.rejected': '{n} Änderung(en) wurden vom Server abgelehnt und zurückgenommen.',
+  'sync.relocatedInbox': '{n} Aufgabe(n) im Eingang abgelegt - ihr Projekt wurde gelöscht.',
+  'sync.relocatedProject': '{n} Aufgabe(n) ohne Abschnitt abgelegt - ihr Abschnitt wurde gelöscht.',
+  'sync.relocatedTopLevel': '{n} Unteraufgabe(n) als eigenständige Aufgaben abgelegt - die übergeordnete Aufgabe wurde gelöscht.',
+  'sync.relocatedMixed': '{n} Aufgabe(n) woanders abgelegt - ihr Projekt, Abschnitt oder ihre übergeordnete Aufgabe wurde gelöscht.',
+  'sync.accessRemoved': 'Du hast keinen Zugriff mehr auf {workspace}.',
+  'sync.accessRemovedUnnamed': 'Du hast keinen Zugriff mehr auf diesen Arbeitsbereich.',
+  'sync.workspaceGone': 'Der Arbeitsbereich {workspace} wurde gelöscht.',
+  'sync.workspaceGoneUnnamed': 'Dieser Arbeitsbereich wurde gelöscht.',
+  'sync.changesDiscarded': '{n} nicht synchronisierte Änderung(en) konnten nicht gespeichert werden.',
+  'sync.relocatedTitle': 'Aufgaben woanders abgelegt',
+  'sync.accessLostTitle': 'Arbeitsbereich nicht verfügbar',
+  'boot.noWorkspaceTitle': 'Kein Arbeitsbereich gefunden',
+  'boot.noWorkspaceBody': 'Dein Konto gehört noch zu keinem Arbeitsbereich. Du bleibst angemeldet und Balu fragt den Server weiter an. Unten kannst du dich abmelden.',
+  'boot.reconnectingTitle': 'Verbindung wird wiederhergestellt…',
+  'boot.reconnectingBody': 'Du hast keinen Zugriff mehr auf den geöffneten Arbeitsbereich, und der Server ist nicht erreichbar, um einen anderen zu öffnen. Du bleibst angemeldet und Balu versucht es weiter. Unten kannst du dich abmelden.',
 
-  'quickadd.placeholder': 'Aufgabe hinzufügen — Datum, #Projekt, @Label, !p1',
+  'quickadd.placeholder': 'Aufgabe hinzufügen - Datum, #Projekt, @Label, !p1',
   'quickadd.hint': 'Enter fügt hinzu · weitere bleibt offen',
   'quickadd.add': 'Hinzufügen',
   'quickadd.inboxTitle': 'Im Eingang abgelegt',
@@ -95,6 +110,8 @@ export const de: Record<TranslationKey, string> = {
   'priority.p2': 'P2',
   'priority.p3': 'P3',
 
+  'row.complete': 'Erledigen',
+
   'schedule.title': 'Planen',
   'schedule.today': 'Heute',
   'schedule.evening': 'Heute Abend',
@@ -130,6 +147,7 @@ export const de: Record<TranslationKey, string> = {
   'workspace.deletePrompt':
     'Das löscht den Arbeitsbereich mit allen Projekten, Aufgaben und Kommentaren unwiderruflich. Gib den Namen des Arbeitsbereichs zur Bestätigung ein.',
   'workspace.deleteError': 'Der Arbeitsbereich konnte nicht gelöscht werden.',
+  'workspace.deletedNoLanding': 'Der Arbeitsbereich wurde gelöscht, aber es konnte kein anderer geöffnet werden. Bitte prüfe die Verbindung und starte die App neu.',
 
   'mcp.subtitle':
     'Claude Code (oder einen anderen MCP-Client) mit diesem Server verbinden und Aufgaben verwalten lassen.',
@@ -164,7 +182,7 @@ export const de: Record<TranslationKey, string> = {
   'onboarding.badUrl': 'Das sieht nicht nach einer gültigen URL aus.',
   'onboarding.unreachable': 'Server nicht erreichbar. Adresse prüfen und erneut versuchen.',
   'onboarding.unreachableHttps':
-    '{url} nicht erreichbar. Adressen ohne Schema werden über https versucht — läuft dein Server über einfaches http, stell es voran.',
+    '{url} nicht erreichbar. Adressen ohne Schema werden über https versucht. Läuft dein Server über einfaches http, stell es voran.',
   'onboarding.tryHttp': 'Stattdessen {url} versuchen',
 
   'auth.loginTitle': 'Willkommen zurück',
@@ -181,6 +199,7 @@ export const de: Record<TranslationKey, string> = {
   'auth.invalid_credentials': 'E-Mail oder Passwort ist falsch.',
   'auth.email_taken': 'Diese E-Mail ist bereits registriert.',
   'auth.registration_disabled': 'Registrierung ist auf diesem Server deaktiviert.',
+  'auth.sessionExpired': 'Deine Sitzung ist abgelaufen, bitte melde dich erneut an.',
 
   'project.newProject': 'Neues Projekt',
   'project.newProjectName': 'Projektname',
@@ -205,7 +224,9 @@ export const de: Record<TranslationKey, string> = {
   'date.yesterday': 'Gestern',
   'date.overdue': 'Überfällig',
 
+  'common.back': 'Zurück',
   'common.cancel': 'Abbrechen',
+  'common.ok': 'OK',
   'common.copy': 'Kopieren',
   'common.done': 'Fertig',
   'common.delete': 'Löschen',

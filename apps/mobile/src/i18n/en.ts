@@ -29,11 +29,26 @@ export const en = {
 
   'sync.synced': 'Synced',
   'sync.syncing': 'Syncing…',
-  'sync.offline': 'Offline — saved locally',
+  'sync.offline': 'Offline - saved locally',
   'sync.error': 'Sync failed',
   'sync.rejected': '{n} change(s) were rejected by the server and have been undone.',
+  'sync.relocatedInbox': '{n} task(s) added to the Inbox - their project was deleted.',
+  'sync.relocatedProject': '{n} task(s) added without a section - their section was deleted.',
+  'sync.relocatedTopLevel': '{n} subtask(s) added as regular tasks - their parent task was deleted.',
+  'sync.relocatedMixed': '{n} task(s) filed elsewhere - their project, section or parent task was deleted.',
+  'sync.accessRemoved': 'You no longer have access to {workspace}.',
+  'sync.accessRemovedUnnamed': 'You no longer have access to this workspace.',
+  'sync.workspaceGone': 'The workspace {workspace} has been deleted.',
+  'sync.workspaceGoneUnnamed': 'This workspace has been deleted.',
+  'sync.changesDiscarded': '{n} unsynced change(s) could not be saved.',
+  'sync.relocatedTitle': 'Tasks filed elsewhere',
+  'sync.accessLostTitle': 'Workspace unavailable',
+  'boot.noWorkspaceTitle': 'No workspace found',
+  'boot.noWorkspaceBody': 'Your account does not belong to a workspace yet. You stay signed in and Balu keeps asking the server. You can sign out below.',
+  'boot.reconnectingTitle': 'Reconnecting…',
+  'boot.reconnectingBody': 'You no longer have access to the workspace you had open, and the server cannot be reached to open another one. You stay signed in and Balu keeps trying. You can sign out below.',
 
-  'quickadd.placeholder': 'Add a task — try dates, #project, @label, !p1',
+  'quickadd.placeholder': 'Add a task - try dates, #project, @label, !p1',
   'quickadd.hint': 'Return to add · another stays open',
   'quickadd.add': 'Add task',
   'quickadd.inboxTitle': 'Added to Inbox',
@@ -92,6 +107,8 @@ export const en = {
   'priority.p2': 'P2',
   'priority.p3': 'P3',
 
+  'row.complete': 'Complete',
+
   'schedule.title': 'Schedule',
   'schedule.today': 'Today',
   'schedule.evening': 'This evening',
@@ -126,6 +143,7 @@ export const en = {
   'workspace.deletePrompt':
     'This permanently deletes the workspace with all its projects, tasks and comments. Type the workspace name to confirm.',
   'workspace.deleteError': 'Could not delete the workspace.',
+  'workspace.deletedNoLanding': 'The workspace was deleted, but no other one could be opened. Check your connection and restart the app.',
 
   'mcp.subtitle': 'Connect Claude Code (or any MCP client) to this server and let it manage your tasks.',
   'mcp.endpoint': 'MCP endpoint',
@@ -159,7 +177,7 @@ export const en = {
   'onboarding.badUrl': "That doesn't look like a valid URL.",
   'onboarding.unreachable': "Couldn't reach that server. Check the address and try again.",
   'onboarding.unreachableHttps':
-    "Couldn't reach {url}. Addresses without a scheme are tried over https — if your server runs on plain http, add it in front.",
+    "Couldn't reach {url}. Addresses without a scheme are tried over https. If your server runs on plain http, add it in front.",
   'onboarding.tryHttp': 'Try {url} instead',
 
   'auth.loginTitle': 'Welcome back',
@@ -176,6 +194,7 @@ export const en = {
   'auth.invalid_credentials': 'Wrong email or password.',
   'auth.email_taken': 'That email is already registered.',
   'auth.registration_disabled': 'Registration is disabled on this server.',
+  'auth.sessionExpired': 'Your session expired, please log in again.',
 
   'project.newProject': 'New project',
   'project.newProjectName': 'Project name',
@@ -200,7 +219,9 @@ export const en = {
   'date.yesterday': 'Yesterday',
   'date.overdue': 'Overdue',
 
+  'common.back': 'Back',
   'common.cancel': 'Cancel',
+  'common.ok': 'OK',
   'common.copy': 'Copy',
   'common.done': 'Done',
   'common.delete': 'Delete',

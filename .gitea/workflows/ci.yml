@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
 
+# Keep the backend and clients gate jobs in sync with the copies in release.yml
+# (enforced by server/tests/test_workflow_parity.py).
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -35,7 +37,7 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://balu:balu@postgres:5432/balu_test
         run: |
           uv sync --frozen
-          uv run ruff check .
+          uv run ruff check . ../tools/e2e
           uv run pytest -q
 
   clients:
@@ -49,8 +51,9 @@ jobs:
         run: corepack enable
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Build, typecheck, test
+      - name: Build, typecheck, lint, test
         run: |
           pnpm -r build
           pnpm -r typecheck
+          pnpm -r lint
           pnpm -r test

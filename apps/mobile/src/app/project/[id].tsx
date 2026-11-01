@@ -1,5 +1,5 @@
 import { isOpen, nextProjectSortOrder, todayLocalISO, type Task } from '@balu/domain';
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,7 @@ import { EmptyState, SectionHeader } from '../../components/ui';
 import { useWritable } from '../../hooks/use-my-role';
 import { useT } from '../../i18n';
 import { deleteSection, updateProject } from '../../lib/actions';
+import { goBackOr } from '../../lib/goBack';
 import { canQuickAddInto, resolveProjectId } from '../../lib/quickadd';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
@@ -89,8 +90,7 @@ export default function ProjectScreen() {
     healed.current = true;
     // The screen's own navigation, not the global router: back must pop this
     // screen, never whatever happens to be on top of it.
-    if (navigation.canGoBack()) navigation.goBack();
-    else router.replace('/browse');
+    goBackOr('/browse', navigation);
   }, [project, snap.status, focused, quickAddOpen, id, navigation]);
 
   const confirmDeleteSection = (sectionId: string) =>

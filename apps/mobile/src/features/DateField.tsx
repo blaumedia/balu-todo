@@ -1,8 +1,8 @@
 import { todayLocalISO, type IsoDate } from '@balu/domain';
 import { parseQuickAdd } from '@balu/nl-parser';
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { relativeDate } from '../lib/format';
 import { useT } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
@@ -26,13 +26,19 @@ export interface DateFieldProps {
   label: string;
   value: IsoDate | null;
   onChange: (value: IsoDate | null) => void;
+  /** Read-only viewer: every control disabled for touch and assistive tech. */
+  disabled?: boolean;
 }
 
 /** A detail-sheet row: NL text entry ("tomorrow", "next tue") + native picker. */
-export function DateField({ icon, label, value, onChange }: DateFieldProps) {
+export function DateField({ icon, label, value, onChange, disabled = false }: DateFieldProps) {
   const theme = useTheme();
   const { t, locale } = useT();
-  const [showPicker, setShowPicker] = useState(false);
+  // Non-null while the picker is open; holds the date captured at open. Android renders this
+  // frozen seed, because `isoToDate(null)` yields a fresh timestamp each render and the Android
+  // wrapper re-opens its dialog on a changed timestamp. iOS renders an inline picker (no dialog
+  // to re-open), so it reads `value` live.
+  const [pickerSeed, setPickerSeed] = useState<Date | null>(null);
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
 
@@ -40,6 +46,11 @@ export function DateField({ icon, label, value, onChange }: DateFieldProps) {
   const valueColor = rel?.tone === 'overdue' ? theme.danger : rel?.tone === 'today' ? theme.accent : theme.textPrimary;
 
   const submitText = () => {
+    if (disabled) {
+      setText('');
+      setEditing(false);
+      return;
+    }
     const trimmed = text.trim();
     if (!trimmed) {
       setEditing(false);
@@ -52,10 +63,22 @@ export function DateField({ icon, label, value, onChange }: DateFieldProps) {
     setEditing(false);
   };
 
-  const onPickerChange = (e: DateTimePickerEvent, d?: Date) => {
-    setShowPicker(false);
-    if (e.type === 'set' && d) onChange(dateToIso(d));
-  };
+  // Stable identity: the Android wrapper re-opens the dialog whenever the `onChange`
+  // identity or the `value` timestamp changes, so both must stay stable while it is open.
+  const latestOnChange = useRef(onChange);
+  latestOnChange.current = onChange;
+  const onPickerChange = useCallback((e: DateTimePickerEvent, d?: Date) => {
+    setPickerSeed(null);
+    if (e.type === 'set' && d) latestOnChange.current(dateToIso(d));
+  }, []);
+
+  // A role drop to viewer mid-edit must not leave a stale picker or input behind.
+  useEffect(() => {
+    if (disabled) {
+      setPickerSeed(null);
+      setEditing(false);
+    }
+  }, [disabled]);
 
   return (
     <View style={[styles.row, { borderBottomColor: theme.border }]}>
@@ -73,25 +96,53 @@ export function DateField({ icon, label, value, onChange }: DateFieldProps) {
             placeholderTextColor={theme.textTertiary}
             style={[styles.input, { color: theme.textPrimary, borderColor: theme.border }]}
             returnKeyType="done"
+            editable={!disabled}
           />
         ) : (
-          <Pressable onPress={() => setEditing(true)}>
+          <Pressable
+            onPress={() => setEditing(true)}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${rel ? rel.text : t('detail.none')}`}
+            accessibilityState={{ disabled }}
+          >
             <Text style={[styles.value, { color: rel ? valueColor : theme.textTertiary }]}>
               {rel ? rel.text : t('detail.none')}
             </Text>
           </Pressable>
         )}
-        <Pressable onPress={() => setShowPicker(true)} hitSlop={8}>
+        <Pressable
+          onPress={() => setPickerSeed(isoToDate(value))}
+          hitSlop={8}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityLabel={`${label}, ${t('detail.pickDate')}`}
+          accessibilityState={{ disabled }}
+        >
           <Icon name="calendar-days" size={18} color={theme.accent} strokeWidth={2} />
         </Pressable>
         {value ? (
-          <Pressable onPress={() => onChange(null)} hitSlop={8}>
+          <Pressable
+            onPress={() => onChange(null)}
+            hitSlop={8}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}, ${t('detail.clear')}`}
+            accessibilityState={{ disabled }}
+          >
             <Icon name="x" size={16} color={theme.textTertiary} strokeWidth={2} />
           </Pressable>
         ) : null}
       </View>
-      {showPicker ? (
-        <DateTimePicker value={isoToDate(value)} mode="date" display="default" onChange={onPickerChange} />
+      {pickerSeed && !disabled ? (
+        <DateTimePicker
+          value={Platform.OS === 'android' ? pickerSeed : isoToDate(value)}
+          mode="date"
+          display="default"
+          positiveButton={{ label: t('common.ok') }}
+          negativeButton={{ label: t('common.cancel') }}
+          onChange={onPickerChange}
+        />
       ) : null}
     </View>
   );

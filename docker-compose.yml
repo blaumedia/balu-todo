@@ -5,7 +5,7 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_USER: balu
-      POSTGRES_PASSWORD: ${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env — see .env.example}
+      POSTGRES_PASSWORD: ${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env - see .env.example}
       POSTGRES_DB: balu
     volumes:
       - balu-db:/var/lib/postgresql/data
@@ -39,8 +39,8 @@ services:
         required: false
     environment:
       # Explicit so the `:?` guards still fail fast when these are missing.
-      DATABASE_URL: postgresql+psycopg://balu:${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env — see .env.example}@db:5432/balu
-      SECRET_KEY: ${BALU_SECRET_KEY:?set BALU_SECRET_KEY in .env — see .env.example}
+      DATABASE_URL: postgresql+psycopg://balu:${BALU_DB_PASSWORD:?set BALU_DB_PASSWORD in .env - see .env.example}@db:5432/balu
+      SECRET_KEY: ${BALU_SECRET_KEY:?set BALU_SECRET_KEY in .env - see .env.example}
       BALU_ALLOW_REGISTRATION: ${BALU_ALLOW_REGISTRATION:-true}
       BALU_CORS_ORIGINS: ${BALU_CORS_ORIGINS:-}
     volumes:

@@ -6,6 +6,7 @@ import { useApp } from "./store/app.js";
 import { LoginView } from "./views/LoginView.js";
 import { Shell } from "./views/Shell.js";
 import { InviteAcceptView } from "./views/InviteAcceptView.js";
+import { UnreachableView } from "./views/UnreachableView.js";
 import { Icon } from "./components/Icon.js";
 
 /** Extract the invite token from `/invite/:token`, or null. */
@@ -48,6 +49,10 @@ export function App() {
       await bootSession();
     })();
   }, [inviteToken, setBoot]);
+
+  // Before the invite branch: a failed /me after accepting an invite loops in
+  // "unreachable", and the accept spinner would hide why nothing happens.
+  if (boot === "unreachable" || boot === "noWorkspace") return <UnreachableView />;
 
   if (inviteToken) {
     return (

@@ -5,16 +5,20 @@
   "type": "module",
   "packageManager": "pnpm@11.16.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
     "dev": "pnpm --filter @balu/web dev"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "eslint": "9.39.5",
     "typescript": "^5.6.3",
+    "typescript-eslint": "8.72.1",
     "vitest": "^2.1.8"
   }
 }

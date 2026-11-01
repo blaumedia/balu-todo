@@ -11,21 +11,30 @@ from ..db import get_db
 from ..models import Membership, User, Workspace
 from ..schemas.user import MeUpdate, UserOut, user_out
 from ..schemas.workspace import MembershipOut, MeResponse, WorkspaceOut
+from ..services import rescue_workspaceless_account
 
 router = APIRouter(tags=["account"])
 
 
-@router.get("/me", response_model=MeResponse)
-def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeResponse:
-    rows = db.execute(
+def _membership_rows(db: Session, user_id):
+    return db.execute(
         select(Membership, Workspace)
         .join(Workspace, Workspace.id == Membership.workspace_id)
-        .where(Membership.user_id == user.id, Membership.is_deleted.is_(False))
+        .where(Membership.user_id == user_id, Membership.is_deleted.is_(False))
         # Stable, oldest-first: the clients fall back to `memberships[0]` when the
         # workspace they were in disappears, and an arbitrary row order would
         # drop them somewhere different on every call.
         .order_by(Membership.created_at)
     ).all()
+
+
+@router.get("/me", response_model=MeResponse)
+def get_me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeResponse:
+    rows = _membership_rows(db, user.id)
+    if not rows and rescue_workspaceless_account(db, user.id) is not None:
+        # Rare path only: the common case is the one query above.
+        db.commit()
+        rows = _membership_rows(db, user.id)
     memberships = [
         MembershipOut(
             workspace=WorkspaceOut(

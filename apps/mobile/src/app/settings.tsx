@@ -1,3 +1,4 @@
+import { isMcpUnavailable } from '@balu/api-client';
 import type { Locale, McpSettings, Theme } from '@balu/domain';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -17,12 +18,15 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidKeyboardSpacer } from '../components/AndroidKeyboardSpacer';
 import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
-import { getApi, initSync } from '../lib/clients';
-import { establishSession, logout, switchWorkspace } from '../lib/boot';
+import { useKeyboardReveal } from '../hooks/use-keyboard-reveal';
+import { clearExpectedAccessLoss, expectAccessLoss, getApi, purgeWorkspaceStorage } from '../lib/clients';
+import { landAfterDelete, logout, switchWorkspace } from '../lib/boot';
+import { chooseLocale } from '../lib/localeChoice';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -43,6 +47,7 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const keyboardReveal = useKeyboardReveal();
   const user = useApp((s) => s.user);
   const workspace = useApp((s) => s.workspace);
   const memberships = useApp((s) => s.memberships);
@@ -50,7 +55,6 @@ export default function SettingsScreen() {
   const themeSetting = useApp((s) => s.theme);
   const locale = useApp((s) => s.locale);
   const setTheme = useApp((s) => s.setTheme);
-  const setLocale = useApp((s) => s.setLocale);
   const setUser = useApp((s) => s.setUser);
   const setServerUrl = useApp((s) => s.setServerUrl);
   const setContext = useApp((s) => s.setContext);
@@ -59,8 +63,8 @@ export default function SettingsScreen() {
 
   const [name, setName] = useState(user?.name ?? '');
   const [permissionDenied, setPermissionDenied] = useState(false);
-  // Null until the server answers. A 404 means this instance runs without
-  // BALU_MCP_ENABLED (or predates the feature) - either way the section stays hidden.
+  // Null until the server answers, and null when it has MCP off or predates it
+  // (`getMcpSettings` maps both to null) - the section stays hidden.
   const [mcp, setMcp] = useState<McpSettings | null>(null);
   const [mcpRevealed, setMcpRevealed] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -97,7 +101,11 @@ export default function SettingsScreen() {
         setMcp(next);
         setMcpRevealed(false);
       })
-      .catch(() => Alert.alert(t('auth.errorGeneric')));
+      .catch((e) => {
+        // MCP was switched off while Settings was open: hide the section, no error.
+        if (isMcpUnavailable(e)) setMcp(null);
+        else Alert.alert(t('auth.errorGeneric'));
+      });
   };
 
   const generateMcpKey = () => {
@@ -133,13 +141,14 @@ export default function SettingsScreen() {
   const doSwitch = async (id: string) => {
     // Both flows re-establish the session; letting them overlap could race two
     // initSync calls, or switch *into* the workspace that is being deleted.
-    if (switchingRef.current || deletingRef.current || id === workspace?.id) return;
+    if (switchingRef.current || deletingRef.current || leaving.current || id === workspace?.id) return;
     switchingRef.current = true;
     setSwitching(true);
     try {
       const ok = await switchWorkspace(id);
       if (!ok) {
-        Alert.alert(t('workspace.switchError'));
+        // A logout that cut the switch off already shows the login step: no error on top of it.
+        if (useApp.getState().boot === 'ready') Alert.alert(t('workspace.switchError'));
         return;
       }
       // Everything under this screen still belongs to the old workspace: a
@@ -148,6 +157,8 @@ export default function SettingsScreen() {
       // server. Reset the context and collapse the stack back to the tabs, which
       // set the context themselves on focus.
       setContext({ kind: 'list', list: 'today' });
+      // router.canDismiss() reads expo-router's store, which only lags at cold start
+      // (before the container's onReady); a user action here runs long after it.
       if (router.canDismiss()) router.dismissAll();
     } catch {
       Alert.alert(t('workspace.switchError'));
@@ -163,7 +174,7 @@ export default function SettingsScreen() {
   };
 
   const doDelete = async () => {
-    if (deletingRef.current || switchingRef.current || !workspace || !serverUrl) return;
+    if (deletingRef.current || switchingRef.current || leaving.current || !workspace || !serverUrl) return;
     const api = getApi();
     if (!api) return;
     const doomedId = workspace.id;
@@ -172,41 +183,27 @@ export default function SettingsScreen() {
     setSwitching(true);
     try {
       try {
+        expectAccessLoss(doomedId);
         await api.deleteWorkspace(doomedId);
       } catch {
         // Nothing happened server-side, so the live session is still valid.
+        clearExpectedAccessLoss(doomedId);
         Alert.alert(t('workspace.deleteError'));
         return;
       }
-      // Past this point the workspace is gone and the session points at
-      // something that no longer exists, so landing somewhere else is not
-      // optional. No preferred id: the remembered last-used id is the doomed
-      // one, so pickMembership falls through to the first remaining workspace -
-      // or to the fresh default the server minted when this was the last.
-      let ok = false;
-      for (let attempt = 0; attempt < 2 && !ok; attempt++) {
-        try {
-          ok = await establishSession(serverUrl, api);
-        } catch {
-          ok = false;
-        }
-      }
-      // Last resort when the server stays unreachable: switch locally to a
-      // workspace we already know about, so the app is never left syncing
-      // against the deleted one until the next cold start.
-      if (!ok && user) {
-        const survivors = memberships.filter((m) => m.workspace.id !== doomedId);
-        if (survivors[0]) {
-          useApp.getState().setSession(user, survivors, survivors[0].workspace);
-          initSync(serverUrl, survivors[0].workspace.id, user.id);
-          ok = true;
-        }
-      }
-      if (!ok) Alert.alert(t('workspace.deleteError'));
+      // The workspace is gone, so landing in a surviving one is not optional
+      // (see landAfterDelete).
+      const landed = await landAfterDelete(serverUrl, api, doomedId);
+      void purgeWorkspaceStorage(doomedId);
+      // The delete worked in every case. 'held', 'left' (expired, logged out, notice up)
+      // and 'landed' are explained by something else; 'failed' (nowhere to land yet) gets
+      // its own message, not the delete-error one: a retry would only meet a 404.
+      if (landed === 'failed') Alert.alert(t('workspace.deletedNoLanding'));
       cancelDelete();
       // Same hygiene as a switch: everything under this screen still belongs to
       // the workspace that no longer exists.
       setContext({ kind: 'list', list: 'today' });
+      // Store is current here (see the switch above).
       if (router.canDismiss()) router.dismissAll();
     } finally {
       deletingRef.current = false;
@@ -231,29 +228,48 @@ export default function SettingsScreen() {
     bestEffortPatch({ theme: value });
   };
   const changeLocale = (value: Locale) => {
-    setLocale(value);
-    bestEffortPatch({ locale: value });
+    chooseLocale(value);
   };
 
-  const doLogout = async () => {
-    await logout();
-    router.replace('/onboarding');
+  // Re-entry guard: a second tap while the first logout runs would post and
+  // purge twice. The ref blocks synchronously, the state disables the button.
+  const leaving = useRef(false);
+  const [leavingUi, setLeavingUi] = useState(false);
+  const leave = async (afterLogout?: () => void) => {
+    if (leaving.current) return;
+    leaving.current = true;
+    setLeavingUi(true);
+    try {
+      try {
+        await logout();
+      } catch {
+        /* logout() already ended the session (the root layout leaves the screen); a failed purge has no UI to report to */
+      }
+      afterLogout?.();
+    } finally {
+      leaving.current = false;
+      setLeavingUi(false);
+    }
   };
-  const changeServer = async () => {
-    await logout();
-    setServerUrl(null);
-    router.replace('/onboarding');
-  };
+  const doLogout = () => leave();
+  const changeServer = () => leave(() => setServerUrl(null));
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
-      <StackHeader title={t('settings.title')} />
+      <StackHeader title={t('settings.title')} backFallback="/today" />
       <ScrollView
+        ref={keyboardReveal.ref}
+        onScroll={keyboardReveal.onScroll}
+        onTouchStart={keyboardReveal.onTouchStart}
+        onTouchEnd={keyboardReveal.onTouchEnd}
+        onTouchCancel={keyboardReveal.onTouchCancel}
+        scrollEventThrottle={keyboardReveal.scrollEventThrottle}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         // iOS only: keeps the inline delete confirmation above the keyboard.
-        // Android manages the soft keyboard through the window softInputMode and
-        // ignores this prop, so it stays gated rather than set unconditionally.
+        // Android ignores this prop, and with mandatory edge-to-edge (SDK 54) its
+        // window does not resize for the keyboard either - the
+        // AndroidKeyboardSpacer below makes the content scrollable above the IME.
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
         {/* Account */}
@@ -272,7 +288,7 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.field}>
             <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>{t('settings.email')}</Text>
-            <Text style={[styles.fieldValue, { color: theme.textTertiary }]}>{user?.email ?? '—'}</Text>
+            <Text style={[styles.fieldValue, { color: theme.textTertiary }]}>{user?.email ?? '-'}</Text>
           </View>
         </View>
         {/* Workspace */}
@@ -287,8 +303,9 @@ export default function SettingsScreen() {
                       <Pressable
                         key={m.workspace.id}
                         onPress={() => doSwitch(m.workspace.id)}
+                        disabled={leavingUi}
                         accessibilityRole="button"
-                        accessibilityState={{ selected: active, disabled: switching }}
+                        accessibilityState={{ selected: active, disabled: switching || leavingUi }}
                         style={({ pressed }) => [
                           styles.wsRow,
                           i < memberships.length - 1 && {
@@ -347,7 +364,7 @@ export default function SettingsScreen() {
                       <Button
                         title={t('workspace.delete')}
                         danger
-                        disabled={deleteInput.trim() !== workspace.name.trim()}
+                        disabled={leavingUi || deleteInput.trim() !== workspace.name.trim()}
                         onPress={doDelete}
                         style={{ flex: 1 }}
                       />
@@ -522,17 +539,18 @@ export default function SettingsScreen() {
           <View style={styles.field}>
             <Icon name="server" size={18} color={theme.textTertiary} strokeWidth={2} />
             <Text style={[styles.fieldValue, { color: theme.textPrimary, marginLeft: space.s2 }]} numberOfLines={1}>
-              {serverUrl ?? '—'}
+              {serverUrl ?? '-'}
             </Text>
           </View>
         </View>
-        <Pressable onPress={changeServer} style={styles.linkRow}>
+        <Pressable onPress={changeServer} disabled={leavingUi} style={[styles.linkRow, leavingUi && { opacity: 0.5 }]}>
           <Icon name="smartphone" size={16} color={theme.accent} strokeWidth={2} />
           <Text style={[styles.link, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
         </Pressable>
 
-        <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} style={{ marginTop: space.s6 }} />
+        <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} disabled={leavingUi} style={{ marginTop: space.s6 }} />
         <View style={{ height: space.s8 }} />
+        <AndroidKeyboardSpacer bottomInset={insets.bottom} onKeyboardSettled={keyboardReveal.onKeyboardSettled} />
       </ScrollView>
     </View>
   );

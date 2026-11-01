@@ -249,6 +249,7 @@ function Thumbnail({
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on attachment.id on purpose: sync replaces the object, but the download must not restart for the same attachment
   }, [uri, workspaceId, attachment.id]);
 
   return (

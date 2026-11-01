@@ -11,6 +11,7 @@ import { activeProjects, archivedProjects, reorderUpdates, selectList, todayLoca
 import type { Snapshot } from "@balu/sync-client";
 import { getSync } from "../lib/clients.js";
 import { dragKind, projectRowData, setDragResolver } from "../lib/drag.js";
+import { archivedViewProjectId } from "../lib/quickadd.js";
 import { canWrite, useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
 import { useApp } from "../store/app.js";
@@ -153,6 +154,8 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
 
   const projects = activeProjects(snapshot.projects);
   const archived = archivedProjects(snapshot.projects);
+  // Like mobile: no add button on an archived project's view (Cmd-N explains why).
+  const archivedView = archivedViewProjectId(view, snapshot.projects, snapshot.idAliases) !== null;
   // Where each project row is rendered right now. A rename input unmounts when
   // its project leaves that spot (archived or deleted on another device); the
   // unmount fires blur, which must cancel rather than commit a half-typed name.
@@ -449,7 +452,7 @@ export function Sidebar({ snapshot }: { snapshot: Snapshot }) {
       </nav>
 
       <div style={{ marginTop: "auto", padding: 12, borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 10 }}>
-        {writable && (
+        {writable && !archivedView && (
           <Button variant="secondary" icon="plus" fullWidth onClick={() => setQuickAdd(true)}>
             {t("quickadd.add")}
             <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-tertiary)", fontWeight: 400 }}>⌘N</span>

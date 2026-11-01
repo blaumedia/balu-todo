@@ -1,8 +1,7 @@
 import type { Snapshot } from '@balu/sync-client';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import type { Label, Member, Project, Section } from '@balu/domain';
+import { commentCountsByTask, type Label, type Member, type Project, type Section } from '@balu/domain';
 import { getSync, subscribeSyncClient } from '../lib/clients';
-import { commentCountsByTask } from '../lib/collab';
 
 const EMPTY: Snapshot = {
   projects: [],
@@ -52,14 +51,17 @@ export interface ReplicaMaps {
 }
 
 export function useMaps(snapshot: Snapshot): ReplicaMaps {
+  // Only these slices: `snapshot` itself changes on every task edit and would
+  // rebuild every map.
+  const { projects, labels, sections, members, comments } = snapshot;
   return useMemo(
     () => ({
-      projects: new Map(snapshot.projects.map((p) => [p.id, p])),
-      labels: new Map(snapshot.labels.map((l) => [l.id, l])),
-      sections: new Map(snapshot.sections.map((s) => [s.id, s])),
-      members: new Map(snapshot.members.map((m) => [m.id, m])),
-      commentCounts: commentCountsByTask(snapshot),
+      projects: new Map(projects.map((p) => [p.id, p])),
+      labels: new Map(labels.map((l) => [l.id, l])),
+      sections: new Map(sections.map((s) => [s.id, s])),
+      members: new Map(members.map((m) => [m.id, m])),
+      commentCounts: commentCountsByTask(comments),
     }),
-    [snapshot.projects, snapshot.labels, snapshot.sections, snapshot.members, snapshot.comments],
+    [projects, labels, sections, members, comments],
   );
 }

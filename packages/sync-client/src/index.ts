@@ -1,6 +1,16 @@
-export { createSyncClient } from "./client.js";
+export {
+  clearLossNotice,
+  createSyncClient,
+  purgeWorkspaceData,
+  wasSaved,
+  workspaceStorageKeys,
+} from "./client.js";
 export type {
+  AccessLost,
+  MutateResult,
+  PurgedWorkspace,
   RejectedCommand,
+  RelocatedCommand,
   Snapshot,
   SyncClient,
   SyncClientOptions,

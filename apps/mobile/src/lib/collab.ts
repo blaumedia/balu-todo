@@ -3,8 +3,9 @@
 // The comment ordering/counting and the §3.4 role rules now live in
 // @balu/domain (D4/D5) — web and mobile used to carry separate copies that
 // ordered same-second comments differently. This module keeps the mobile-facing
-// signatures (which take a sync-client `Snapshot`) plus the assignee initials.
-import { commentCountsByTask as countsOf, commentsForTask as forTask } from '@balu/domain';
+// `commentsForTask` (which takes a sync-client `Snapshot`) plus the assignee initials.
+// Comment counts: use `commentCountsByTask` from @balu/domain directly.
+import { commentsForTask as forTask } from '@balu/domain';
 import type { Comment } from '@balu/domain';
 import type { Snapshot } from '@balu/sync-client';
 
@@ -18,11 +19,6 @@ export {
 /** Comments of one task, non-deleted, ordered `created_at` asc then id (§3.4). */
 export function commentsForTask(snap: Snapshot, taskId: string): Comment[] {
   return forTask(snap.comments, taskId);
-}
-
-/** Open-comment counts per task id, for the row chip. */
-export function commentCountsByTask(snap: Snapshot): Map<string, number> {
-  return countsOf(snap.comments);
 }
 
 /** Two-letter initials from a display name, for the assignee chip. */

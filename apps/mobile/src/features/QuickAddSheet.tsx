@@ -1,4 +1,5 @@
 import { activeProjects, todayLocalISO } from '@balu/domain';
+import { wasSaved } from '@balu/sync-client';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,7 +9,7 @@ import { TokenPill } from '../components/TokenPill';
 import { useMyRole } from '../hooks/use-my-role';
 import { addTask } from '../lib/actions';
 import { shouldCloseWriteSheet } from '../lib/role';
-import { interpretChange } from '../lib/quickAddInput';
+import { applyChange, textToSubmit } from '../lib/quickAddInput';
 import { composeTaskArgs, resolveQuickAddContext } from '../lib/quickadd';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
@@ -25,6 +26,8 @@ export function QuickAddSheet() {
   const snap = useSnapshot();
   const role = useMyRole();
   const [text, setText] = useState('');
+  // Newest typed text; `text` lags by a render, so a press in that window would drop a character.
+  const latestText = useRef('');
   const [inputEpoch, setInputEpoch] = useState(0);
   const inputRef = useRef<TextInput>(null);
   const lastSubmitAt = useRef(0);
@@ -34,6 +37,7 @@ export function QuickAddSheet() {
   useEffect(() => {
     if (open) {
       setText('');
+      latestText.current = '';
       // A backdrop-dismiss mid-composition can leave the IME holding stale
       // text that a reopened composer would silently submit — remount too.
       if (Platform.OS === 'android') setInputEpoch((e) => e + 1);
@@ -54,9 +58,9 @@ export function QuickAddSheet() {
   );
 
   const submit = (raw?: string) => {
-    // `raw` lets a caller submit text that state hasn't caught up with yet —
-    // the hardware-Return path below has the value before `setText` lands.
-    const trimmed = (raw ?? text).trim();
+    // `raw` is needed because applyChange has already cleared the ref on the
+    // hardware-Return path, so the ref no longer holds the text to submit.
+    const trimmed = textToSubmit(raw, latestText).trim();
     if (!trimmed) return;
     // A hardware enter (BT keyboard, adb) fires onSubmitEditing twice on
     // Android — once via the key event, once via the editor action. Whether
@@ -74,15 +78,20 @@ export function QuickAddSheet() {
       labels: snap.labels,
       today,
     });
-    addTask(args);
+    // Dropped (access to the workspace was just lost, the app is moving away): keep
+    // the text and say nothing - "added" would be false.
+    if (!wasSaved(addTask(args))) return;
     if (target.redirected && args['project_id'] === undefined) {
       // The context is dead, so close rather than repeat this for every next task.
       setText('');
+      latestText.current = '';
       close();
       Alert.alert(t('quickadd.inboxTitle'), t('quickadd.inboxBody'));
       return;
     }
-    setText(''); // submit-and-add-another: stay open, keep focus
+    setText('');
+    latestText.current = '';
+    // submit-and-add-another: stay open, keep focus
     inputRef.current?.clear();
     // Gboard's composing region survives a controlled clear and resurrects
     // the stale text into the next submission — remount to reset the IME,
@@ -116,7 +125,7 @@ export function QuickAddSheet() {
           onChangeText={(v) => {
             // A hardware Return arrives here as a newline, not as an editor
             // action — see `interpretChange`.
-            const intent = interpretChange(v);
+            const intent = applyChange(latestText, v);
             // Always sync state, including on the submit path: if the debounce
             // rejects the submit, neither branch ran and the native field kept
             // the newline while state did not — the next keystroke could then

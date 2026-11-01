@@ -25,6 +25,7 @@ from ..schemas.invite import (
     InvitesResponse,
 )
 from ..schemas.workspace import AcceptInviteResponse, WorkspaceOut
+from ..services import fresh_membership, lock_workspace, require_member_under_lock
 from ..sync.engine import ROLE_RANK, bump_version
 from ..tokens import hash_token, new_token
 from .workspaces import _parse_ws_id, get_membership
@@ -57,6 +58,14 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
+def _invite_usable(invite: Invite, user: User) -> bool:
+    if invite.revoked or _aware(invite.expires_at) <= datetime.now(UTC):
+        return False
+    # An invite addressed to someone specific only admits that someone (§7).
+    # Untargeted invites (no email) stay open to anyone holding the link.
+    return not (invite.email and invite.email.lower() != user.email.lower())
+
+
 @router.post(
     "/workspaces/{workspace_id}/invites",
     status_code=status.HTTP_201_CREATED,
@@ -70,6 +79,9 @@ def create_invite(
 ) -> InviteCreateResponse:
     ws_id = _parse_ws_id(workspace_id)
     _require_admin(db, ws_id, user)
+    # An admin demoted while waiting must not mint invites; a create racing a
+    # workspace delete is a 404, not an FK error.
+    require_member_under_lock(db, ws_id, user.id, "admin", "admin role required")
     raw = new_token()
     invite = Invite(
         id=uuid.uuid4(),
@@ -125,7 +137,9 @@ def revoke_invite(
         inv_id = uuid.UUID(invite_id)
     except ValueError:
         raise not_found("invite not found") from None
-    invite = db.get(Invite, inv_id)
+    # Without the lock an accept could not be ordered against the revoke.
+    require_member_under_lock(db, ws_id, user.id, "admin", "admin role required")
+    invite = db.get(Invite, inv_id, populate_existing=True)
     if invite is None or invite.workspace_id != ws_id:
         raise not_found("invite not found")
     invite.revoked = True
@@ -145,33 +159,41 @@ def accept_invite(
     invite = db.execute(
         select(Invite).where(Invite.token_hash == hash_token(body.token))
     ).scalar_one_or_none()
-    if invite is None or invite.revoked or _aware(invite.expires_at) <= datetime.now(UTC):
+    # Cheap pre-check: garbage, revoked or foreign tokens never touch the lock.
+    if invite is None or not _invite_usable(invite, user):
         raise invalid_invite_token()
+    invite_id, ws_id = invite.id, invite.workspace_id
 
-    # An invite addressed to someone specific only admits that someone (§7).
-    # Untargeted invites (no email) stay open to anyone holding the link.
-    if invite.email and invite.email.lower() != user.email.lower():
+    # Lock, then judge again (members.py). A revoke, a workspace delete or a
+    # second accept by the same user that committed while this one waited must
+    # be seen: judging the pre-lock reads let a revoked invite admit a member,
+    # let a delete strand the new member without a workspace, and let a double
+    # accept insert a duplicate membership (IntegrityError, a 500).
+    if not lock_workspace(db, ws_id):
         raise invalid_invite_token()
-
-    workspace = db.get(Workspace, invite.workspace_id)
+    invite = db.execute(
+        select(Invite).where(Invite.id == invite_id).execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if invite is None or not _invite_usable(invite, user):
+        raise invalid_invite_token()
+    workspace = db.get(Workspace, ws_id, populate_existing=True)
     if workspace is None:
         raise invalid_invite_token()
 
-    membership = db.get(
-        Membership, {"workspace_id": invite.workspace_id, "user_id": user.id}
-    )
+    membership = fresh_membership(db, ws_id, user.id)
     if membership is not None and not membership.is_deleted:
-        # Already a member: idempotent success (role is not downgraded).
+        # Already a member (including by a concurrent accept of the same user):
+        # idempotent success, role is not downgraded (§7).
         return AcceptInviteResponse(
             workspace=WorkspaceOut(
                 id=str(workspace.id), name=workspace.name, created_at=workspace.created_at
             )
         )
 
-    version = bump_version(db, invite.workspace_id)
+    version = bump_version(db, ws_id)
     if membership is None:
         membership = Membership(
-            workspace_id=invite.workspace_id,
+            workspace_id=ws_id,
             user_id=user.id,
             role=invite.role,
             version=version,

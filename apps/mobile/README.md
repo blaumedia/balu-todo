@@ -1,17 +1,17 @@
 # @balu/mobile
 
-Balu's mobile app — Expo (SDK 57) + expo-router, sharing the exact contract and
+Balu's mobile app - Expo (SDK 54) + expo-router, sharing the exact contract and
 domain logic of the web client via the workspace packages `@balu/domain`,
 `@balu/nl-parser`, `@balu/sync-client`, and `@balu/api-client`.
 
 It is **local-first**: every screen renders from an on-device replica (persisted
 in SQLite), mutations apply optimistically and queue durably, and sync flushes
-when online — so it works fully offline and converges when the network returns.
+when online - so it works fully offline and converges when the network returns.
 
 ## What's inside
 
-- **Onboarding** — enter your self-hosted server URL, then log in / register.
-- **4 tabs** — Today (with *This Evening*), Upcoming (day/week groups), Browse
+- **Onboarding** - enter your self-hosted server URL, then log in / register.
+- **4 tabs** - Today (with *This Evening*), Upcoming (day/week groups), Browse
   (Inbox · Anytime · Someday · Logbook · Projects · Labels), Search.
 - **Quick-add sheet** (the floating brand-gradient button) with live NL token
   pills; **task detail** bottom sheet (with a **Remind me** row); **schedule**
@@ -19,10 +19,10 @@ when online — so it works fully offline and converges when the network returns
 - Swipe a row **right to complete** (haptic + checkbox animation), **left to
   schedule**.
 - **Search** across tasks (title + notes, open + completed via a toggle),
-  projects and labels — grouped results, tap to open / navigate.
+  projects and labels - grouped results, tap to open / navigate.
 - **Local reminder notifications** (opt-in in Settings): the app mirrors each
   open task's future `reminder_at` onto the OS scheduler and fires a local
-  notification; tapping it deep-links to the task. Local only — no remote push
+  notification; tapping it deep-links to the task. Local only - no remote push
   (see below).
 - Light/dark theme from the Balu design tokens (system-follow + manual
   override); German + English throughout.
@@ -50,7 +50,7 @@ ipconfig getifaddr en0   # Wi-Fi (try en1 if that's empty)
 ```
 
 That is the address your phone can reach. `localhost` will **not** work from the
-phone — it must be the LAN IP.
+phone - it must be the LAN IP.
 
 ### 3. Install deps & start the dev server
 
@@ -85,27 +85,27 @@ in. The URL is saved and is editable later in **Settings → Server**.
 
 1. Log in while online (initial full sync populates the replica).
 2. Enable Airplane mode.
-3. Add / complete / edit tasks — everything works instantly and is saved to the
+3. Add / complete / edit tasks - everything works instantly and is saved to the
    durable SQLite queue.
-4. Force-quit and relaunch — your changes are still there (queue + replica
+4. Force-quit and relaunch - your changes are still there (queue + replica
    persisted), the app boots from the cached session.
-5. Turn networking back on — the queue flushes and converges with the web
+5. Turn networking back on - the queue flushes and converges with the web
    client.
 
 ## Reminder notifications test (Expo Go)
 
-Local reminders are scheduled on-device from the replica — **no dev build and no
+Local reminders are scheduled on-device from the replica - **no dev build and no
 remote push server are involved**, so this works fully in Expo Go.
 
 1. In the app, open **Settings → Notifications** and turn **Reminders** on. iOS/
-   Android prompts for notification permission — allow it. (If you deny, the
+   Android prompts for notification permission - allow it. (If you deny, the
    toggle stays off and a hint explains how to re-enable it in system settings.)
 2. Open any task's detail sheet and set **Remind me** to ~2 minutes from now:
    type a day in the natural-language field (fires at 09:00) or use the native
    date **and time** picker for a precise moment.
 3. **Background the app** (go to the home screen) or lock the phone.
 4. At the reminder time a local notification appears: title = the task title,
-   body = `Project · deadline`. **Tap it** — the app opens and the task's detail
+   body = `Project · deadline`. **Tap it** - the app opens and the task's detail
    sheet is shown (deep link via expo-router).
 5. Completing, deleting, or rescheduling the task re-reconciles automatically
    (the pending notification is cancelled / re-armed). Toggling **Reminders**
@@ -117,7 +117,7 @@ Notes & limits:
   out of scope here. Balu's server-side channels (ntfy / email / telegram,
   contract §8) are the remote path and are configured separately. With both a
   local reminder and a server channel set up, you may receive **two**
-  notifications — accepted in v1 (the Settings hint says so).
+  notifications - accepted in v1 (the Settings hint says so).
 - The scheduler caps at the **next 50** upcoming reminders, soonest first (iOS
   caps pending local notifications at 64).
 - Reminders are re-armed on login/boot when the permission is still granted; if
@@ -127,7 +127,7 @@ Notes & limits:
 
 - **Cleartext HTTP on LAN.** Self-hosted dev servers are plain `http://`.
   - In **Expo Go**, cleartext LAN requests already work (Expo Go's own app
-    permits them in dev) — no extra config needed.
+    permits them in dev) - no extra config needed.
   - For **standalone / dev-client builds**, `app.json` already allows it:
     iOS via `NSAppTransportSecurity.NSAllowsLocalNetworking`, Android via the
     `expo-build-properties` plugin (`usesCleartextTraffic: true`). Put a TLS
@@ -150,15 +150,16 @@ Notes & limits:
 ## Verify locally
 
 ```bash
-pnpm --filter @balu/mobile typecheck        # tsc --noEmit — clean
-pnpm --filter @balu/mobile test             # vitest — reminder + search logic
+pnpm --filter @balu/mobile typecheck        # tsc --noEmit - clean
+pnpm --filter @balu/mobile lint             # eslint (expo config) - clean
+pnpm --filter @balu/mobile test             # vitest - pure logic
 npx expo export --platform ios              # full Metro bundle
 npx expo-doctor                             # project health
 ```
 
 ## Store builds (EAS)
 
-`eas.json` is not in the repo — it holds App Store Connect / Play key ids and paths
+`eas.json` is not in the repo - it holds App Store Connect / Play key ids and paths
 to local signing keys. Copy [`eas.example.json`](eas.example.json) to `eas.json` and
 fill in your own values; the build profiles work as-is, the `submit` block needs your
 credentials.
@@ -185,14 +186,15 @@ src/
   store/                   zustand app store + replica snapshot hooks
   theme/                   design tokens (TS) + ThemeProvider
   i18n/                    de / en dictionaries
-test/                      vitest — reminderPlan + search (pure logic)
+test/                      vitest - pure logic and hooks-free helpers (reminders,
+                           search, sync notices, roles, serverUrl, quick-add, boot, ...)
 ```
 
 ## Troubleshooting
 
-- **"Project is incompatible with this version of Expo Go"** — the app must be on the
+- **"Project is incompatible with this version of Expo Go"** - the app must be on the
   same Expo SDK as the Expo Go app from the store. The store build lags new SDK
-  releases, so this repo pins the SDK Expo Go actually supports (currently **54** —
+  releases, so this repo pins the SDK Expo Go actually supports (currently **54** -
   the App Store build has been 54.0.2 since Sep 2025; newer-SDK Expo Go builds are
   only distributed via expo.dev/go, and the store error message misleadingly says to
   "download the latest version"). If it happens again after an SDK bump here, update Expo Go; if Expo
@@ -200,4 +202,4 @@ test/                      vitest — reminderPlan + search (pure logic)
   run `npx expo install --fix`, and restart with `npx expo start -c`.
 - `npx expo-doctor` misdetects the project root in this pnpm monorepo (it walks up to
   the workspace lockfile) and errors with "Cannot determine the project's Expo SDK
-  version" — harmless; `npx expo config` and `npx expo export` are the real checks.
+  version" - harmless; `npx expo config` and `npx expo export` are the real checks.

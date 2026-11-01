@@ -1,9 +1,10 @@
 """Remote MCP endpoints (§10): the JSON-RPC transport plus key management.
 
-Everything here 404s when ``BALU_MCP_ENABLED`` is off, including the key
-endpoints - the settings UIs read that 404 as "this server has no MCP support"
-and hide the section, which is also what an older server without the feature
-does.
+Everything here 404s when ``BALU_MCP_ENABLED`` is off, except
+``GET /me/mcp?probe=true``, which answers ``200 {"enabled": false}`` for clients
+that understand it. Without ``probe``, old clients keep getting the 404 they read
+as "this server has no MCP support" and hide the section, which is also what an
+older server without the feature does.
 
 None of it appears in the OpenAPI schema: `/mcp` is JSON-RPC rather than REST and
 has nothing useful to say there, and keeping the document independent of runtime
@@ -12,10 +13,13 @@ configuration is worth more than documenting two account endpoints.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from ..auth import get_current_user
 from ..config import get_settings
@@ -27,7 +31,9 @@ from ..mcp.protocol import JsonRpcError, dispatch, error_response, parse_message
 from ..mcp.tools import ToolContext
 from ..models import User
 from ..ratelimit import MCP_AUTH_PER_IP, MCP_KEY_PER_IP, client_ip, limiter
-from ..schemas.mcp import McpSettings
+from ..schemas.mcp import McpDisabled, McpSettings
+
+logger = logging.getLogger("balu.mcp")
 
 router = APIRouter(tags=["mcp"], include_in_schema=False)
 
@@ -39,6 +45,26 @@ _KEY_PATH = "/me/mcp/key"
 def require_mcp_enabled() -> None:
     if not get_settings().mcp_enabled:
         raise not_found("Not found")
+
+
+def _settings_gate(probe: str | None = None) -> bool:
+    """Feature gate for GET /me/mcp only.
+
+    Clients that understand `{"enabled": false}` ask with `?probe=true` and get a
+    200 instead of a 404 (no red console line). Everyone else - mobile <= 1.3.2,
+    old web bundles - keeps the 404 they read as "hide the section", because they
+    render any 200 body. Runs before auth, so an unauthenticated non-probe call
+    still 404s exactly as before.
+
+    `probe` is read leniently: only "true"/"1" count (case-insensitive,
+    surrounding spaces ignored), any other value is ignored like before (no 422
+    for a value an old server never validated).
+    """
+    enabled = get_settings().mcp_enabled
+    probing = probe is not None and probe.strip().lower() in ("true", "1")
+    if not enabled and not probing:
+        raise not_found("Not found")
+    return enabled
 
 
 def _unauthorized() -> ApiError:
@@ -103,11 +129,19 @@ def _settings_payload(request: Request, own_path: str, key: str | None) -> McpSe
 # ---------------------------------------------------------------------------
 # Key management (session-authenticated, for the settings UIs)
 # ---------------------------------------------------------------------------
-@router.get(_SETTINGS_PATH, response_model=McpSettings, dependencies=[Depends(require_mcp_enabled)])
+@router.get(_SETTINGS_PATH, response_model=McpSettings | McpDisabled)
 def get_mcp_settings(
     request: Request,
+    response: Response,
+    enabled: bool = Depends(_settings_gate),
     user: User = Depends(get_current_user),
-) -> McpSettings:
+) -> McpSettings | McpDisabled:
+    # The body can carry a full-access key, and browsers disk-cache plain 200 GETs.
+    # Set on the disabled 200 too, so nothing stale outlives a toggle. The 404s carry
+    # no secret and no validators, so they are left alone.
+    response.headers["Cache-Control"] = "no-store"
+    if not enabled:
+        return McpDisabled()
     # Read-only on purpose: both settings screens call this on mount just to
     # decide whether to render the section, and that is not a request for a
     # non-expiring full-access credential. `key` stays null until POST /me/mcp/key.
@@ -117,12 +151,14 @@ def get_mcp_settings(
 @router.post(_KEY_PATH, response_model=McpSettings, dependencies=[Depends(require_mcp_enabled)])
 def create_mcp_key(
     request: Request,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> McpSettings:
     """Mint a key, or replace the existing one. Explicit user action, both ways."""
     if not limiter.allow(f"mcp:key:{client_ip(request)}", MCP_KEY_PER_IP):
         raise rate_limited(retry_after=int(MCP_KEY_PER_IP.window))
+    response.headers["Cache-Control"] = "no-store"
     return _settings_payload(request, _KEY_PATH, generate_mcp_key(db, user))
 
 
@@ -142,7 +178,13 @@ async def mcp_post(
     db: Session = Depends(get_db),
     event_sender: EventSender = Depends(get_event_sender),
 ) -> Response:
-    raw = await request.body()
+    try:
+        raw = await request.body()
+    except ClientDisconnect:
+        # The client went away mid-body: nobody to answer, and not a server
+        # fault, so do not let it escape as an unhandled ASGI exception.
+        logger.info("mcp request aborted by client")
+        return Response(status_code=400)
     authorization = request.headers.get("Authorization", "")
     ip = client_ip(request)
     # The body is the only async part; tool handling is synchronous SQLAlchemy and

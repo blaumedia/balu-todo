@@ -19,6 +19,9 @@ module then parses the stream itself, enforcing the cap as the bytes arrive.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -28,6 +31,8 @@ from fastapi.responses import FileResponse
 from python_multipart.exceptions import FormParserError
 from python_multipart.multipart import MultipartParser, parse_options_header
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
+from starlette.requests import ClientDisconnect
 
 from ..attachments import (
     blob_path,
@@ -36,12 +41,15 @@ from ..attachments import (
     sanitize_filename,
 )
 from ..auth import get_current_user
-from ..db import get_db
+from ..db import get_db, get_sessionmaker
 from ..errors import forbidden, not_found, too_large, validation_error
 from ..models import Attachment, Task, User
+from ..services import require_member_under_lock
 from ..sync.engine import ROLE_RANK, bump_version
 from ..sync.serialize import serialize_attachment
 from .workspaces import _parse_ws_id, get_membership
+
+logger = logging.getLogger("balu.attachments")
 
 router = APIRouter(prefix="/workspaces", tags=["attachments"])
 
@@ -216,6 +224,135 @@ def _declared_length_within(request: Request, ceiling: int) -> None:
         raise too_large(f"File exceeds the {max_bytes() // (1024 * 1024)} MB limit")
 
 
+def _authorize_upload(db: Session, ws_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Pre-stream gate (threadpool). Not authoritative: `_store_attachment` judges
+    again under the lock once the body is in."""
+    try:
+        membership = get_membership(db, ws_id, user_id)
+        if ROLE_RANK.get(membership.role, 0) < ROLE_RANK["member"]:
+            raise forbidden("viewer role is read-only")
+    finally:
+        # End the transaction auth and this check opened: otherwise the pooled
+        # connection sits idle in transaction for as long as the body streams.
+        db.rollback()
+
+
+class _Claim:
+    """Atomic hand-over of the blob between the handler and the worker thread.
+
+    Exactly one side wins: the worker `start()`s (and owns the blob) or the
+    handler `abandon()`s (and unlinks the blob). A worker that loses never
+    opens a session. The worker uses a session of its own, so the request
+    session that the dependency teardown closes (possibly while the worker is
+    still running, on a native task cancellation) is never shared with it.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._state = "pending"
+
+    def start(self) -> bool:
+        with self._lock:
+            if self._state != "pending":
+                return False
+            self._state = "started"
+            return True
+
+    def abandon(self) -> bool:
+        with self._lock:
+            if self._state != "pending":
+                return False
+            self._state = "abandoned"
+            return True
+
+
+def _store_attachment(
+    ws_id: uuid.UUID,
+    user_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    path: Path,
+    task_ref: str,
+    sink: _UploadSink,
+    claim: _Claim,
+) -> dict[str, Any]:
+    """Everything after the body (threadpool): lock, re-judge, store.
+
+    Every statement here can wait on the workspace lock for as long as a
+    concurrent command holds it; on the event loop that wait stalled every
+    request the process was serving.
+    """
+    if not claim.start():
+        raise asyncio.CancelledError
+    db = get_sessionmaker()()
+    try:
+        return _store_with_session(db, ws_id, user_id, attachment_id, path, task_ref, sink)
+    finally:
+        db.close()
+
+
+def _store_with_session(
+    db: Session,
+    ws_id: uuid.UUID,
+    user_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+    path: Path,
+    task_ref: str,
+    sink: _UploadSink,
+) -> dict[str, Any]:
+    committing = False
+    try:
+        # After the stream, not during it: the parts may arrive in any order, so
+        # this is the first point at which `task_id` is guaranteed to be known.
+        # The write it may discard is bounded by the cap and is only reachable
+        # by a caller who is already an authenticated, writable member.
+        # Workspace lock first (as every sync command does), then the caller
+        # again: a member removed or demoted to viewer, or a workspace deleted,
+        # while the body streamed must not get the upload stored. The task
+        # lookup comes after the lock too, so a task_delete or project_delete
+        # still in flight is committed, and its cascade complete, before the
+        # task is looked up: no attachment lands on a deleted task.
+        require_member_under_lock(db, ws_id, user_id, "member", "viewer role is read-only")
+        version = bump_version(db, ws_id)
+        task = _get_task(db, ws_id, task_ref)
+
+        attachment = Attachment(
+            id=attachment_id,
+            workspace_id=ws_id,
+            task_id=task.id,
+            filename=sanitize_filename(sink.filename),
+            content_type=sanitize_content_type(sink.content_type),
+            size_bytes=sink.file_bytes,
+            created_by=user_id,
+            # A fresh workspace version, exactly as a command would take: without
+            # it the row carries version 0 and no incremental sync ever reports
+            # the new attachment.
+            version=version,
+        )
+        db.add(attachment)
+        # Flushed apart from the commit: a flush failure (constraint, data error)
+        # is a definite rollback, and only the COMMIT itself has an unknown
+        # outcome once it is sent.
+        db.flush()
+        committing = True
+        db.commit()
+    except Exception:
+        db.rollback()
+        # A failure before the commit is a definite rollback. A commit whose
+        # acknowledgement was lost may still have reached the server, and the
+        # blob of a committed row must stay: that outcome is unknown, so the
+        # blob is kept (an orphan file is the lesser harm, and a check from a
+        # fresh session could run before the in-flight commit is visible).
+        if not committing:
+            path.unlink(missing_ok=True)
+        raise
+    # After the commit and outside the try: a failure here must not delete the
+    # blob of a committed row.
+    db.refresh(attachment)
+    # The serializer, not a response_model: the sync payload and this response
+    # are the same object shape, and one of them drifting is a client bug.
+    return serialize_attachment(attachment)
+
+
 @router.post(
     "/{workspace_id}/attachments",
     status_code=status.HTTP_201_CREATED,
@@ -229,9 +366,10 @@ async def upload_attachment(
     # Everything in this block runs before a single body byte is read - that is
     # the whole point of taking a bare `Request` (see the module docstring).
     ws_id = _parse_ws_id(workspace_id)
-    membership = get_membership(db, ws_id, user.id)
-    if ROLE_RANK.get(membership.role, 0) < ROLE_RANK["member"]:
-        raise forbidden("viewer role is read-only")
+    # Captured before the rollback in `_authorize_upload` expires `user`, so
+    # nothing lazy-loads on the event loop.
+    user_id = user.id
+    await run_in_threadpool(_authorize_upload, db, ws_id, user_id)
 
     limit = max_bytes()
     ceiling = limit + ENVELOPE_OVERHEAD
@@ -271,8 +409,17 @@ async def upload_attachment(
         sink.close()
         path.unlink(missing_ok=True)
         raise validation_error("malformed multipart body") from None
+    except ClientDisconnect:
+        # The client went away mid-body. Not a server fault, so it must not
+        # escape as an unhandled exception (uvicorn would log it as an ERROR
+        # with a traceback). The response cannot reach the client; the 4xx only
+        # keeps the ASGI app from treating it as a crash.
+        sink.close()
+        path.unlink(missing_ok=True)
+        logger.info("upload aborted by client: workspace=%s bytes_received=%d", ws_id, total)
+        raise validation_error("upload aborted") from None
     except Exception:
-        # A parser error, a dropped connection, a full disk: never leave the
+        # Anything else (a full disk, an unexpected I/O error): never leave the
         # half-written blob behind.
         sink.close()
         path.unlink(missing_ok=True)
@@ -294,41 +441,23 @@ async def upload_attachment(
         path.unlink(missing_ok=True)
         raise validation_error("truncated or incomplete multipart body")
 
+    claim = _Claim()
     try:
-        # After the stream, not during it: the parts may arrive in any order, so
-        # this is the first point at which `task_id` is guaranteed to be known.
-        # The write it may discard is bounded by the cap and is only reachable
-        # by a caller who is already an authenticated, writable member.
-        # Workspace lock first (as every sync command does), so a task_delete or
-        # project_delete still in flight is committed, and its cascade complete,
-        # before the task is looked up: no attachment lands on a deleted task.
-        version = bump_version(db, ws_id)
-        task = _get_task(db, ws_id, task_ref)
-
-        attachment = Attachment(
-            id=attachment_id,
-            workspace_id=ws_id,
-            task_id=task.id,
-            filename=sanitize_filename(sink.filename),
-            content_type=sanitize_content_type(sink.content_type),
-            size_bytes=sink.file_bytes,
-            created_by=user.id,
-            # A fresh workspace version, exactly as a command would take: without
-            # it the row carries version 0 and no incremental sync ever reports
-            # the new attachment.
-            version=version,
+        return await run_in_threadpool(
+            _store_attachment, ws_id, user_id, attachment_id, path, task_ref, sink, claim
         )
-        db.add(attachment)
-        db.commit()
-    except Exception:
-        db.rollback()
-        path.unlink(missing_ok=True)
+    except BaseException:
+        # Any failure before the worker thread took the job (cancelled at
+        # anyio's checkpoint or while waiting for a threadpool token, a
+        # threadpool error, or a native `task.cancel()` such as uvicorn's
+        # graceful-shutdown timeout after the job was queued but before the
+        # worker ran it - anyio's shield does not stop that, and this claim
+        # decides the race, so do not replace it with a plain flag): nothing
+        # was committed and the thread never owned the blob. A worker that
+        # already claimed the job handles its own blob and its own session.
+        if claim.abandon():
+            path.unlink(missing_ok=True)
         raise
-
-    db.refresh(attachment)
-    # The serializer, not a response_model: the sync payload and this response
-    # are the same object shape, and one of them drifting is a client bug.
-    return serialize_attachment(attachment)
 
 
 @router.get("/{workspace_id}/attachments/{attachment_id}/file")

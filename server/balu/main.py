@@ -15,9 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import OperationalError, StatementError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 from . import __version__
 from .config import get_settings
+from .db import describe_transient_error, is_transient_db_error, validate_database_url
+from .errors import unavailable
 from .routers import attachments as attachments_router
 from .routers import auth as auth_router
 from .routers import channels as channels_router
@@ -49,6 +52,10 @@ def _error_shape(exc: RequestValidationError) -> list[tuple]:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before migrations, which read the URL too: a URL with an ambiguous '@' (see
+    # validate_database_url) must stop the boot here, not leak a password tail
+    # through a connect error.
+    validate_database_url(get_settings().database_url)
     if os.environ.get("BALU_AUTO_MIGRATE", "1") != "0":
         from .migrate import run_migrations
 
@@ -63,7 +70,7 @@ async def lifespan(app: FastAPI):
             logger.error(
                 "Cannot reach the database with DATABASE_URL. If this volume was "
                 "initialised with a different password, changing BALU_DB_PASSWORD "
-                "does not re-key it — rotate the role (ALTER USER balu WITH "
+                "does not re-key it - rotate the role (ALTER USER balu WITH "
                 "PASSWORD '…') or start from a fresh volume. Original error: %s",
                 exc,
             )
@@ -185,8 +192,22 @@ def create_app() -> FastAPI:
             content={"detail": {"code": "validation_error", "message": _VALIDATION_MESSAGE}},
         )
 
+    def _unavailable_response(request: Request, exc: Exception) -> JSONResponse:
+        logger.error(
+            "transient database error on %s %r: %s",
+            request.method, request.url.path, describe_transient_error(exc),
+        )
+        err = unavailable()
+        return JSONResponse(status_code=503, content={"detail": err.detail}, headers=err.headers)
+
+    @api.exception_handler(PoolTimeoutError)
+    async def _pool_timeout_handler(request: Request, exc: PoolTimeoutError):
+        return _unavailable_response(request, exc)
+
     @api.exception_handler(StatementError)
     async def _db_error_handler(request: Request, exc: StatementError):
+        if is_transient_db_error(exc):
+            return _unavailable_response(request, exc)
         # Left to uvicorn, a StatementError is logged with its full traceback, and
         # Postgres's DETAIL ("Failing row contains (...)") carries user content.
         logger.error(

@@ -4,10 +4,12 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import DraggableFlatList, { type DragEndParams, type RenderItemParams } from 'react-native-draggable-flatlist';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidKeyboardSpacer } from '../../components/AndroidKeyboardSpacer';
 import { HeaderActions } from '../../components/HeaderActions';
 import { Icon } from '../../components/Icon';
 import { MoreButton } from '../../components/MoreButton';
 import { Divider, ListRow, ScreenHeader, SectionHeader } from '../../components/ui';
+import { useKeyboardReveal } from '../../hooks/use-keyboard-reveal';
 import { useWritable } from '../../hooks/use-my-role';
 import { addProject, updateProject } from '../../lib/actions';
 import { hapticDrop, hapticSelect } from '../../lib/haptics';
@@ -21,6 +23,7 @@ export default function BrowseScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const keyboardReveal = useKeyboardReveal();
   const snap = useSnapshot();
   const setContext = useApp((s) => s.setContext);
   const user = useApp((s) => s.user);
@@ -179,6 +182,8 @@ export default function BrowseScreen() {
           ))}
         </>
       ) : null}
+
+      <AndroidKeyboardSpacer bottomInset={insets.bottom} onKeyboardSettled={keyboardReveal.onKeyboardSettled} />
     </View>
   );
 
@@ -186,6 +191,11 @@ export default function BrowseScreen() {
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <ScreenHeader title={t('nav.browse')} right={<HeaderActions />} />
       <DraggableFlatList
+        ref={keyboardReveal.ref}
+        onScrollOffsetChange={keyboardReveal.setOffset}
+        onTouchStart={keyboardReveal.onTouchStart}
+        onTouchEnd={keyboardReveal.onTouchEnd}
+        onTouchCancel={keyboardReveal.onTouchCancel}
         data={projects}
         keyExtractor={(p) => p.id}
         renderItem={renderProject}

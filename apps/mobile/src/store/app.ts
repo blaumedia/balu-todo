@@ -2,7 +2,14 @@ import type { Locale, Membership, SmartList, Theme, User, Workspace } from '@bal
 import { create } from 'zustand';
 import { sqliteKV, SETTINGS } from '../lib/kv';
 
-type Boot = 'loading' | 'onboarding' | 'ready';
+/**
+ * `reconnecting`: signed in, but /me cannot be reached after the open workspace was
+ * lost. `noWorkspace`: /me answered with an account that has no workspace. Both
+ * show a full-screen notice (components/BootNotice) while lib/boot.ts keeps asking.
+ */
+export type Boot = 'loading' | 'onboarding' | 'reconnecting' | 'noWorkspace' | 'ready';
+
+export type LoginNotice = 'sessionExpired';
 
 /** The context the floating add button / quick-add creates into. */
 export type ComposeContext =
@@ -29,6 +36,9 @@ export interface AppState {
   scheduleTaskId: string | null;
   projectActionsId: string | null;
 
+  /** Shown above the login form (lib/boot.ts expireSession). */
+  loginNotice: LoginNotice | null;
+  setLoginNotice(notice: LoginNotice | null): void;
   setBoot(b: Boot): void;
   setServerUrl(url: string | null): void;
   setSession(user: User, memberships: Membership[], workspace: Workspace): void;
@@ -50,7 +60,7 @@ export interface AppState {
   reset(): void;
 }
 
-export const useApp = create<AppState>((set) => ({
+export const useApp = create<AppState>((set, get) => ({
   boot: 'loading',
   serverUrl: null,
   user: null,
@@ -65,8 +75,10 @@ export const useApp = create<AppState>((set) => ({
   detailTaskId: null,
   scheduleTaskId: null,
   projectActionsId: null,
+  loginNotice: null,
 
   setBoot: (boot) => set({ boot }),
+  setLoginNotice: (loginNotice) => set({ loginNotice }),
   setServerUrl: (serverUrl) => {
     if (serverUrl) void sqliteKV.setItem(SETTINGS.serverUrl, serverUrl);
     else void sqliteKV.removeItem(SETTINGS.serverUrl);
@@ -76,7 +88,7 @@ export const useApp = create<AppState>((set) => ({
     void sqliteKV.setItem(SETTINGS.session, JSON.stringify({ user, workspace }));
     // Remember the workspace so the next launch reopens it (§7, I8).
     void sqliteKV.setItem(SETTINGS.lastWorkspaceId, workspace.id);
-    set({ user, memberships, workspace, locale: user.locale, boot: 'ready' });
+    set({ user, memberships, workspace, locale: user.locale, boot: 'ready', loginNotice: null });
   },
   setUser: (user) => set({ user, locale: user.locale }),
   setTheme: (theme) => {
@@ -85,7 +97,12 @@ export const useApp = create<AppState>((set) => ({
   },
   setLocale: (locale) => {
     void sqliteKV.setItem(SETTINGS.locale, locale);
-    set({ locale });
+    // Keep user.locale in step: setUser({ ...user, name }) would otherwise carry
+    // the old value and switch the language back. The cached session (offline boot)
+    // is rewritten from the new state for the same reason.
+    set((s) => ({ locale, user: s.user ? { ...s.user, locale } : s.user }));
+    const { user, workspace } = get();
+    if (user && workspace) void sqliteKV.setItem(SETTINGS.session, JSON.stringify({ user, workspace }));
   },
   setRemindersEnabled: (remindersEnabled) => {
     void sqliteKV.setItem(SETTINGS.remindersEnabled, remindersEnabled ? '1' : '0');
@@ -113,5 +130,6 @@ export const useApp = create<AppState>((set) => ({
       detailTaskId: null,
       scheduleTaskId: null,
       projectActionsId: null,
+      loginNotice: null,
     }),
 }));

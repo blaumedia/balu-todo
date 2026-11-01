@@ -162,8 +162,8 @@ export type Channel = NtfyChannel | EmailChannel | TelegramChannel;
 // ── Remote MCP server (contract §10) ──────────────────────────────────
 
 /**
- * What a client needs to connect an MCP client to this server. Absent entirely
- * (the endpoint 404s) when the server runs without `BALU_MCP_ENABLED`.
+ * What a client needs to connect an MCP client to this server. `getMcpSettings()`
+ * yields null instead when the server runs without `BALU_MCP_ENABLED` (contract §10).
  */
 export interface McpSettings {
   enabled: boolean;
@@ -280,11 +280,16 @@ export interface SyncRequest {
 
 export type CommandStatus = "ok" | { error_code: string; error: string };
 
+/** Why the server filed a `task_add` somewhere other than requested (contract §5.2, §5.5). */
+export type RelocationReason = "project_deleted" | "section_deleted" | "parent_deleted";
+
 export interface SyncResponse {
   sync_token: string;
   full_sync: boolean;
   sync_status: Record<string, CommandStatus>;
   temp_id_mapping: Record<string, string>;
+  /** v1.5.1: accepted `task_add`s filed elsewhere because their target was deleted, keyed by command uuid. Absent on older servers. */
+  relocated?: Record<string, { reasons: RelocationReason[] }>;
   projects: Project[];
   sections: Section[];
   tasks: Task[];

@@ -1,9 +1,10 @@
 import { ApiError } from '@balu/api-client';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
+  type LayoutChangeEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -13,20 +14,29 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidKeyboardSpacer } from '../components/AndroidKeyboardSpacer';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
+import { useKeyboardReveal } from '../hooks/use-keyboard-reveal';
 import { useT, type TranslationKey } from '../i18n';
-import { establishSession } from '../lib/boot';
+import { NoWorkspaceError, establishSession, holdForWorkspace } from '../lib/boot';
 import { apiBase, getApi, initApi } from '../lib/clients';
 import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '../lib/serverUrl';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
 
+// The form view whose bottom (its lowest button) must end up above the IME.
+interface RevealTarget {
+  ref: React.Ref<View>;
+  onLayout: (e: LayoutChangeEvent) => void;
+}
+
 export default function Onboarding() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const keyboardReveal = useKeyboardReveal({ topInset: insets.top });
   const serverUrl = useApp((s) => s.serverUrl);
   const setServerUrl = useApp((s) => s.setServerUrl);
   // "Change server" clears the stored URL; keep the last value so the input
@@ -36,7 +46,7 @@ export default function Onboarding() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} onTouchCancel={keyboardReveal.onTouchCancel} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
         <View style={styles.brand}>
           <LinearGradient colors={[theme.gradientFrom, theme.gradientTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logo}>
             <Icon name="check" size={34} color="#fff" strokeWidth={3} />
@@ -46,16 +56,17 @@ export default function Onboarding() {
         </View>
 
         {serverUrl ? (
-          <AuthStep serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
+          <AuthStep revealTarget={{ ref: keyboardReveal.targetRef, onLayout: keyboardReveal.onTargetLayout }} serverUrl={serverUrl} onChangeServer={() => setServerUrl(null)} />
         ) : (
-          <ServerStep initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
+          <ServerStep revealTarget={{ ref: keyboardReveal.targetRef, onLayout: keyboardReveal.onTargetLayout }} initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
         )}
+        <AndroidKeyboardSpacer bottomInset={insets.bottom} onKeyboardSettled={keyboardReveal.onKeyboardSettled} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfirm: (url: string) => void }) {
+function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: string; onConfirm: (url: string) => void; revealTarget: RevealTarget }) {
   const theme = useTheme();
   const { t } = useT();
   const [value, setValue] = useState(initialValue);
@@ -105,7 +116,7 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   };
 
   return (
-    <View style={styles.form}>
+    <View ref={revealTarget.ref} onLayout={revealTarget.onLayout} collapsable={false} style={styles.form}>
       <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>{t('onboarding.serverTitle')}</Text>
       <Text style={[styles.hint, { color: theme.textSecondary }]}>{t('onboarding.serverHint')}</Text>
       <Field
@@ -160,15 +171,23 @@ function ServerStep({ initialValue, onConfirm }: { initialValue: string; onConfi
   );
 }
 
-function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeServer: () => void }) {
+function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: string; onChangeServer: () => void; revealTarget: RevealTarget }) {
   const theme = useTheme();
   const { t } = useT();
+  const loginNotice = useApp((s) => s.loginNotice);
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const submit = async () => {
     setBusy(true);
@@ -181,9 +200,24 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         await api.login({ email: email.trim(), password });
       }
       const client = getApi();
-      if (client) await establishSession(serverUrl, client);
+      // The session did not start (a logout or expiry overtook it): stay on the login
+      // step and say so, instead of opening Today with no session.
+      if (!client || !(await establishSession(serverUrl, client))) {
+        setError(t('auth.errorGeneric'));
+        return;
+      }
       router.replace('/today');
     } catch (e) {
+      if (e instanceof NoWorkspaceError) {
+        // Signed in, but the account has no workspace yet: the notice explains it and keeps
+        // asking. Nothing else moves this screen once a workspace appears (the root layout
+        // only leaves *for* onboarding, the index gate only runs on its own route), so wait
+        // for the hold and leave for Today only if this hold landed the session (a logout
+        // from the notice ends it as 'left' at once) and this screen is still there.
+        const outcome = await holdForWorkspace(serverUrl, getApi() ?? api);
+        if (outcome === 'landed' && mounted.current) router.replace('/today');
+        return;
+      }
       const code = e instanceof ApiError ? (`auth.${e.code}` as TranslationKey) : 'auth.errorGeneric';
       // `rate_limited` included so a throttled user is told to wait rather than
       // being sent back to re-check a password that was fine.
@@ -195,7 +229,7 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
   };
 
   return (
-    <View style={styles.form}>
+    <View ref={revealTarget.ref} onLayout={revealTarget.onLayout} collapsable={false} style={styles.form}>
       <Text style={[styles.stepTitle, { color: theme.textPrimary }]}>
         {mode === 'login' ? t('auth.loginTitle') : t('auth.registerTitle')}
       </Text>
@@ -211,6 +245,11 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         ) : null}
         <Text style={[styles.changeLink, { color: theme.accent }]}>{t('onboarding.changeServer')}</Text>
       </Pressable>
+      {loginNotice === 'sessionExpired' ? (
+        <Text style={[styles.notice, { color: theme.textPrimary, borderColor: theme.border }]}>
+          {t('auth.sessionExpired')}
+        </Text>
+      ) : null}
 
       {mode === 'register' ? (
         <Field icon="settings" placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
@@ -270,6 +309,7 @@ const styles = StyleSheet.create({
   warning: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, gap: space.s2 },
   warningTitle: { fontSize: font.secondary, fontWeight: font.weightSemibold },
   insecureBadge: { fontSize: font.caption, fontWeight: font.weightMedium },
+  notice: { borderWidth: 1, borderRadius: radius.control, padding: space.s3, fontSize: font.secondary },
   serverChip: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: space.s2 },
   serverText: { fontSize: font.caption, flexShrink: 1 },
   changeLink: { fontSize: font.caption, fontWeight: font.weightMedium, marginLeft: 'auto' },

@@ -5,7 +5,7 @@ clients (web, mobile) implement exactly this. Changes to this file are breaking-
 reviews, not drive-by edits.
 
 Design in one paragraph: **REST is only for identity** (auth, account, workspace
-membership). **Everything inside a workspace flows through one sync endpoint** — a
+membership). **Everything inside a workspace flows through one sync endpoint** - a
 Todoist-style server-authoritative command queue with `sync_token` incremental pulls.
 Clients keep a full local replica, apply mutations optimistically, queue commands durably,
 and flush when online. The server is the authority; conflicts resolve by
@@ -14,16 +14,20 @@ last-write-wins at the patch level (see §6).
 - Base URL: `/api/v1`
 - All request/response bodies: JSON, UTF-8.
 - Timestamps: ISO 8601 UTC with `Z` suffix (`2026-07-23T14:00:00Z`). Server-assigned.
-- Calendar dates (`start_date`, `deadline`): `YYYY-MM-DD`, no timezone — they mean "that
+- Calendar dates (`start_date`, `deadline`): `YYYY-MM-DD`, no timezone - they mean "that
   day in the user's local calendar".
 - IDs: UUIDv4 strings, server-generated. Clients reference not-yet-synced objects via
   `temp_id` (§5.3).
 - Errors (REST): `{"detail": {"code": "<machine_code>", "message": "<human text>"}}` with
   appropriate HTTP status. Codes used: `invalid_credentials`, `email_taken`,
   `registration_disabled`, `invalid_token`, `token_expired`, `not_found`, `forbidden`,
-  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`, `internal_error`.
+  `validation_error`, `rate_limited`, `last_owner`, `channel_unavailable`, `too_large`,
+  `unavailable` (503, carries `Retry-After`; a temporary database failure,
+  retryable - but for a non-sync write the outcome may be unknown, e.g. the connection
+  dropped during COMMIT, so re-read before retrying),
+  `internal_error`.
   Error messages are for humans and never carry internal detail (driver messages,
-  the submitted body, transport hostnames) — that goes to the server log.
+  the submitted body, transport hostnames) - that goes to the server log.
 
 ## 1. Authentication
 
@@ -35,7 +39,7 @@ JWT bearer auth. `Authorization: Bearer <access_token>` on every authenticated r
 
 | Endpoint | Body | Response |
 |---|---|---|
-| `POST /auth/register` | `{email, password, name}` | `201 {user, access_token, refresh_token}` |
+| `POST /auth/register` | `{email, password, name}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) | `201 {user, access_token, refresh_token}` |
 | `POST /auth/login` | `{email, password}` | `200 {user, access_token, refresh_token}` |
 | `POST /auth/refresh` | `{refresh_token}` | `200 {access_token, refresh_token}` |
 | `POST /auth/logout` | `{refresh_token}` | `204` (invalidates the whole session family) |
@@ -46,29 +50,42 @@ Rules:
   → `403 registration_disabled`. **Invites do not bypass this gate**: `POST /invites/accept`
   resolves an authenticated user, so it can only add an account that already exists. With
   registration closed there is no route to a new account at all.
-- `POST /auth/register` auto-creates a personal workspace named after the user — the
-  full name, e.g. "Anna Maria Schmidt" — with the user as `owner`.
+- Registering an address that is taken, including by a registration racing this one →
+  `409 email_taken`.
+- `POST /auth/register` auto-creates a personal workspace named after the user - the
+  full name, e.g. "Anna Maria Schmidt" - with the user as `owner`.
 - **Throttling (v1.2.1):** `/auth/login`, `/auth/register` and `/auth/refresh` are rate
   limited per client IP, and `/auth/login` additionally per account. Exceeding a limit →
   `429 rate_limited`. A login for an unknown address costs the same as one for a known
   address (no enumeration oracle).
 - `POST /auth/logout` revokes the entire refresh-token family, not only the presented
-  token — otherwise earlier tokens of the same session stayed usable after logout.
+  token - otherwise earlier tokens of the same session stayed usable after logout.
 - Password: min 8 chars, hashed with argon2id (fallback bcrypt acceptable if argon2 is a
-  packaging problem — pick one, document it).
+  packaging problem - pick one, document it).
 - `POST /auth/refresh` with an already-rotated token → `401 invalid_token` **and**
-  invalidates the whole session family (replay defense).
+  invalidates the whole session family (replay defense), with one exception (v1.5.2):
+  the **immediately previous** token of a family, presented again within 60 seconds of
+  its rotation, is answered `200` with the **same** successor refresh token (plus a fresh
+  access token) and the family stays alive. This covers a lost response, a client timeout
+  followed by a retry, and two tabs refreshing at once. The successor must still be live
+  (not revoked, not expired). The server keeps that successor in memory for the 60 seconds
+  only, so after a server restart (or on another server process) the retry is a replay.
+  Any older token, and the predecessor after 60 seconds, is a replay (`401`, family
+  invalidated). Two refreshes presenting the same token at the same
+  time are serialised: one rotates it, the other gets that successor.
+- Clients end a session only when `POST /auth/refresh` answers `401`. A network error, a timeout, `429` or `5xx` keeps the tokens and is retried. A refresh whose answer was lost (timeout or network error) is repeated once with the same token, and both attempts finish within 50 seconds of the first, inside the reuse window above. On that 401 the apps show their login screen and keep the local queue and replica: they sync once the same user signs in again, and are wiped first when a different user signs in on that device.
+- Clients must not refresh with the same refresh token twice at once, otherwise the replay defense above logs them all out whenever the reuse window does not apply (e.g. after a server restart): tabs sharing one storage re-read the stored tokens before refreshing and order refreshes (Web Locks where available, otherwise a best-effort, short-lived lease in the shared storage, since plain http has no Web Locks; it is re-checked right before the request but is not a hard guarantee). A single-realm client that owns its storage (mobile) uses the in-process single flight only. Stored tokens of a different user (JWT `sub`) are never adopted: a tab whose session was ended or replaced by another tab drops its in-memory state and re-reads storage.
 
 ## 2. Account & workspaces (REST)
 
 | Endpoint | Response / notes |
 |---|---|
-| `GET /me` | `{user, memberships: [{workspace, role}]}` — the client's boot call |
-| `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` |
+| `GET /me` | `{user, memberships: [{workspace, role}]}` - the client's boot call. v1.5.2: an account that has no workspace at all (possible on servers before v1.5.2) gets a fresh default one on this call, owned by it and named like the one registration creates; `POST /auth/login` does the same. Parallel calls create exactly one. |
+| `PATCH /me` | body: any of `{name, locale ("de"\|"en"), theme ("system"\|"light"\|"dark")}` (v1.5.2: `name` is trimmed, 1-200 characters after trimming, else `422 validation_error`) |
 | `POST /workspaces` | `{name}` → `201 {workspace}`; creator becomes `owner` |
-| `PATCH /workspaces/{id}` | `{name}` — requires role ≥ admin |
-| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. |
-| `GET /healthz` | `200 {"status":"ok"}` — no auth, for compose healthchecks |
+| `PATCH /workspaces/{id}` | `{name}` - requires role ≥ admin; a workspace deleted meanwhile → `404 not_found` |
+| `DELETE /workspaces/{id}` | requires `owner`; hard-deletes workspace + contents → `204`. Any member left with **no** workspace afterwards (including the deleter) immediately gets a fresh default one, owned by them and named like the one registration creates. Every account therefore always has at least one workspace. An invite accepted while the delete is in flight either lands before it (and its member is covered by the rescue) or fails with `400 invalid_token`. |
+| `GET /healthz` | `200 {"status":"ok"}` - no auth, for compose healthchecks |
 
 Object shapes:
 
@@ -89,7 +106,7 @@ Object shapes:
 
 All resource types below travel through the sync endpoint. Common envelope fields on
 every synced object: `id`, `workspace_id`, `created_at`, `updated_at`, `is_deleted`
-(soft-delete flag — deleted objects still appear in incremental syncs so clients can
+(soft-delete flag - deleted objects still appear in incremental syncs so clients can
 remove them locally).
 
 Attachments (§3.7) are the one split case: their **metadata** syncs like everything
@@ -104,7 +121,7 @@ else, their **bytes** move over REST (§3.7.1) and only while online.
 ```
 
 `color`: one of `slate|red|orange|amber|green|teal|cyan|blue|indigo|violet|pink|rose`.
-There is **no Inbox project** — Inbox is `task.project_id == null`.
+There is **no Inbox project** - Inbox is `task.project_id == null`.
 
 ### 3.2 `section` (headings inside a project)
 
@@ -130,7 +147,7 @@ There is **no Inbox project** — Inbox is `task.project_id == null`.
  "created_by": "…", "created_at": "…", "updated_at": "…", "is_deleted": false}
 ```
 
-Field semantics (these ARE the product decisions — implement precisely):
+Field semantics (these ARE the product decisions - implement precisely):
 
 - **`start_date` vs `deadline` are independent.** `start_date` = when the task becomes
   current (drives Today). `deadline` = hard due date (drives overdue). Either, both, or
@@ -151,7 +168,7 @@ Field semantics (these ARE the product decisions — implement precisely):
   labels and tasks). A value outside the int32 range is clamped to the nearest bound (so
   an append after `2147483647` is never lost), but clamped items then tie: their relative
   order is unspecified, and clients should renumber the container.
-- Subtasks: one level only in v1 — server rejects a `parent_task_id` pointing at a task
+- Subtasks: one level only in v1 - server rejects a `parent_task_id` pointing at a task
   that itself has a parent (`invalid_args`).
 - `label_ids` order is not meaningful.
 - `assigned_to` must be a member of the workspace.
@@ -161,7 +178,7 @@ Field semantics (these ARE the product decisions — implement precisely):
 recurring tasks is a v2 concern.) `task_complete` on a non-recurring task sets
 `completed_at`/`completed_by`.
 
-The next occurrence is **anchored**, not derived from the completion date — the series is
+The next occurrence is **anchored**, not derived from the completion date - the series is
 `anchor, anchor + INTERVAL, anchor + 2·INTERVAL, …` (for `FREQ=WEEKLY` with `BYDAY`: the
 BYDAY days of every `INTERVAL`-th week starting from the anchor's own week), and the
 answer is its smallest member strictly greater than `after`. Each step is measured from
@@ -175,15 +192,15 @@ the anchor, so a clamped month-end recovers: Jan 31 → Feb 28 → **Mar 31**.
 
 `today` comes from the **client**: `task_complete` carries `args.today` (`YYYY-MM-DD`),
 the device's local calendar day, because the optimistic apply runs against that day (§0).
-The server clamps it to ±1 day of UTC — the real span of world timezones — and falls back
+The server clamps it to ±1 day of UTC - the real span of world timezones - and falls back
 to its own UTC day when it is absent or outside that range. Deriving it from UTC alone
 made the server disagree with any client more than a few hours out, and the completed task
 visibly jumped once the response landed. Server
-and client run the same algorithm — `server/balu/sync/recurrence.py` and
+and client run the same algorithm - `server/balu/sync/recurrence.py` and
 `packages/sync-client/src/recurrence.ts` share a test-vector table, because a mismatch
 makes a completed task visibly jump once the sync response lands.
 
-### 3.4 `comment` — v1.2
+### 3.4 `comment` - v1.2
 
 Per-task comment threads, synced like every other resource.
 
@@ -193,7 +210,7 @@ Per-task comment threads, synced like every other resource.
  "created_at": "…", "updated_at": "…", "is_deleted": false}
 ```
 
-- `body`: plain text, 1–5000 chars (client may render minimal markdown later).
+- `body`: plain text, 1-5000 chars (client may render minimal markdown later).
 - Ordering: `created_at` ascending within a task.
 - Deleting a task soft-deletes its comments (cascade, versions bumped).
 - Roles: `viewer` reads but cannot write; `member`+ can comment; edit/delete only by
@@ -251,7 +268,7 @@ Files hanging off a task, any content type. **Metadata syncs, bytes do not.**
 
 | Endpoint | Notes |
 |---|---|
-| `POST /workspaces/{id}/attachments` | `multipart/form-data` with fields `task_id` and `file`. Membership + role ≥ member (`viewer` → `403 forbidden`). Unknown, deleted, or other-workspace `task_id` → `404 not_found`. Over the cap → `413 too_large`. A body that is not multipart, is malformed, is **truncated** (cut off before the closing boundary), or carries no file part / no `task_id`, → `422 validation_error` - a partial upload is never stored as a complete one. Field order is free: the `file` part may precede `task_id`. A zero-byte file is valid. → `201` with the attachment object above. |
+| `POST /workspaces/{id}/attachments` | `multipart/form-data` with fields `task_id` and `file`. Membership + role ≥ member (`viewer` → `403 forbidden`). Membership and role are checked before the body is read and **again before the upload is stored**: a caller removed (`403`) or demoted to viewer (`403`), or whose workspace was deleted (`404`), while the body was streaming is refused and the blob discarded. Unknown, deleted, or other-workspace `task_id` → `404 not_found`. Over the cap → `413 too_large`. A body that is not multipart, is malformed, is **truncated** (cut off before the closing boundary), or carries no file part / no `task_id`, → `422 validation_error` - a partial upload is never stored as a complete one. Field order is free: the `file` part may precede `task_id`. A zero-byte file is valid. → `201` with the attachment object above. |
 | `GET /workspaces/{id}/attachments/{attachment_id}/file` | Membership, **any role**. Streams the blob with `Content-Type: <content_type>`, `Content-Disposition: attachment; filename=<filename>` and `X-Content-Type-Options: nosniff`. Unknown/soft-deleted attachment, one from another workspace, or a row whose blob is missing → `404 not_found`. |
 
 Both take the normal `Authorization: Bearer <access_token>` header - there are no signed
@@ -283,7 +300,7 @@ Defined here so every client and the server agree exactly. `open` means
 |---|---|---|
 | **Inbox** | open ∧ `project_id == null` ∧ `!someday` ∧ `parent_task_id == null` | `sort_order` |
 | **Today** | open ∧ `!someday` ∧ (`start_date ≤ today` ∨ `deadline ≤ today`) | overdue-deadline first, then `evening` last, then priority (1<2<3<0), then `sort_order` |
-| **Upcoming** | open ∧ (`start_date > today` ∨ `deadline > today`) — grouped by the earlier of the two dates | date, then `sort_order` |
+| **Upcoming** | open ∧ (`start_date > today` ∨ `deadline > today`) - grouped by the earlier of the two dates | date, then `sort_order` |
 | **Anytime** | open ∧ `!someday` ∧ `start_date == null` ∧ `project_id != null` | project order, then `sort_order` |
 | **Someday** | open ∧ `someday` | `sort_order` |
 | **Logbook** | `completed_at != null` ∧ `!is_deleted` | `completed_at` desc, grouped by day |
@@ -296,7 +313,7 @@ The Today view additionally splits into "Today" and "This Evening" via `evening`
 
 ## 5. Sync endpoint
 
-`POST /api/v1/workspaces/{workspace_id}/sync` — auth required, membership required.
+`POST /api/v1/workspaces/{workspace_id}/sync` - auth required, membership required.
 Read and write in one round trip: commands are applied first, then changes (including the
 effects of those commands) are returned.
 
@@ -319,9 +336,15 @@ effects of those commands) are returned.
 - `commands` (optional, max 100 per request): applied **in order, each in its own
   transaction**. One failing command does not abort the rest.
 - `uuid`: client-generated UUIDv4, the **idempotency key**, scoped to `(workspace, uuid)`.
-  The server persists processed uuids per workspace; a replayed uuid **in the same
-  workspace** is not re-applied and returns its stored status. The same uuid in another
-  workspace is a different command and is applied normally.
+  The server persists the uuids of **successfully applied** commands per workspace: a
+  replayed uuid **in the same workspace** whose command succeeded is not re-applied and
+  returns `"ok"` again, with its `temp_id_mapping` and `relocated` entries. A **rejected**
+  command is not remembered (v1.5.2): nothing of it was committed, so when the same uuid
+  arrives again it is evaluated afresh against the current state and may now succeed (for
+  example a `task_add` whose temp parent arrived meanwhile, or a viewer since promoted).
+  Rejections stored by earlier servers are treated the same way. Two requests carrying the
+  same uuid at the same time are serialised: one applies it, the other reports its `"ok"`.
+  The same uuid in another workspace is a different command and is applied normally.
 
 ### 5.2 Response
 
@@ -341,7 +364,7 @@ effects of those commands) are returned.
   diffs; soft-deleted ones included with `is_deleted: true`). On full sync, deleted
   objects are omitted.
 - Implementation note (server): per-workspace monotonic `version` bigint; every mutation
-  bumps it and stamps the row; `sync_token` encodes the version. Any encoding is fine —
+  bumps it and stamps the row; `sync_token` encodes the version. Any encoding is fine -
   clients treat it as opaque.
 - **The token is a consistent snapshot bound.** The server reads the version counter
   first and returns every changed object with `since < version ≤ token`, so the response
@@ -380,26 +403,36 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `project_delete` | `id` - soft-deletes project + its sections + its tasks + those tasks' comments and attachments |
 | `section_add` | `temp_id`, `project_id`, `name`, `sort_order?` |
 | `section_update` | `id`, any of `name, sort_order` |
-| `section_delete` | `id` — its tasks move to the project body (section_id → null) |
+| `section_delete` | `id` - its tasks move to the project body (section_id → null) |
 | `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. If the target project, section or parent task was deleted meanwhile, the task is filed elsewhere instead of rejected (§5.5). |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
-| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` — container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). |
-| `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) — see §3.3 for recurring behavior |
+| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` - container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). |
+| `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) - see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
 | `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed) |
-| `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` — bulk, single container expected |
+| `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` - bulk, single container expected |
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
-| `label_delete` | `id` — removed from all tasks |
+| `label_delete` | `id` - removed from all tasks |
 | `comment_add` (v1.2) | `temp_id`, `task_id`, `body` |
-| `comment_update` (v1.2) | `id`, `body` — author only |
-| `comment_delete` (v1.2) | `id` — author or admin+ |
+| `comment_update` (v1.2) | `id`, `body` - author only |
+| `comment_delete` (v1.2) | `id` - author or admin+ |
 | `attachment_delete` (v1.4) | `id` - soft-deletes the row and removes its blob; any role ≥ member. Uploading is REST (§3.7.1), so this is the only attachment command. |
 
 Per-command error codes in `sync_status`: `invalid_args` (validation), `not_found`
 (id/temp_id unknown or deleted - the one exception is a `task_add` whose project,
-section or parent was deleted, §5.5), `forbidden` (viewer role; or comment edit/delete
-by a non-author non-admin), `name_taken` (labels).
+section or parent was deleted, §5.5; also the workspace itself, if it was deleted while
+the request was in flight), `forbidden` (viewer role; a caller removed from the workspace
+or demoted to viewer while the request was in flight - the role is checked per command,
+under the workspace lock; or comment edit/delete by a non-author non-admin), `name_taken` (labels).
+
+A temporary database failure while applying a command (restart, dropped or failed
+connection, pool or lock-wait timeout, deadlock, serialization failure, v1.5.2) is **not**
+a per-command error: the whole request fails with
+`503 {"detail": {"code": "unavailable", ...}}` and a `Retry-After` header. Commands that
+committed before the failure replay as `ok`; the rest are judged again when the client
+resends the same uuids. Clients keep their queue on any non-2xx response and must treat
+`503` as retryable, never as a rejection.
 
 Text limits (`invalid_args` beyond them): task `title` ≤ 1000, task `notes` ≤ 20000,
 comment `body` ≤ 5000, project/section/label `name` ≤ 200, `recurrence` ≤ 200.
@@ -436,7 +469,7 @@ whenever any command in a flush was rejected, then reports the failures to the a
   example the temp id of a parent `task_add` that was rejected for another reason) is
   still `not_found`.
 - Concurrent `task_move` + `task_complete` → both apply (orthogonal fields).
-- Reorder races: `task_reorder` is bulk LWW; a stale reorder may interleave orders —
+- Reorder races: `task_reorder` is bulk LWW; a stale reorder may interleave orders -
   acceptable, next reorder heals it. No exotic merging in v1.
 
 ## 6. Client obligations (what `@balu/sync-client` implements)
@@ -452,33 +485,46 @@ whenever any command in a flush was rejected, then reports the failures to the a
 5. On `full_sync: true`: replace replica wholesale.
 6. temp_id bookkeeping: after flush, rewrite queued commands and replica ids via
    `temp_id_mapping`.
-7. Poll cadence v1: pull on app focus + after every flush + every 60 s while visible.
-   (WebSocket/SSE push is a later optimization; the protocol doesn't change.)
+7. Poll cadence v1: pull on app focus, page visible and app foreground + after every
+   flush + every 60 s while visible (a background tab still pushes queued changes). A
+   sync request, including its token refresh, is abandoned if the response headers have
+   not arrived after 30 s (reading the body has its own, longer 120 s limit, so a large
+   full sync on a slow link can finish); a failed sync is
+   retried after 2 s, doubling to 30 s, reset on success or when the app regains focus,
+   visibility, network or the foreground. (WebSocket/SSE push is a later optimization;
+   the protocol doesn't change.)
+8. `403 forbidden` or `404 not_found` (with the error envelope) from the sync endpoint
+   means the user can no longer reach the workspace (§7 removal, workspace deletion).
+   The client stops syncing it, deletes its local queue, replica and token, and tells
+   the app how many queued changes were discarded; the app moves to a workspace `/me`
+   still lists. A 403/404 without the envelope (e.g. from a proxy) is a transient error.
+9. `relocated` entries (§5.2) are reported to the app after the flush so it can say
+   where the task went.
 
-## 7. Invites & member management (REST) — v1.1
+## 7. Invites & member management (REST) - v1.1
 
 Sharing UI surface. All routes require auth; role requirements noted per route.
 Invites expire after 14 days.
 
 | Endpoint | Notes |
 |---|---|
-| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. No mail is sent (the client shows/copies the link `/invite/<token>`), but when `email` is set the invite is **bound** to it — see accept. |
+| `POST /workspaces/{id}/invites` | body `{role: "admin"\|"member"\|"viewer", email?}` → `201 {invite}`; requires role ≥ admin. No mail is sent (the client shows/copies the link `/invite/<token>`), but when `email` is set the invite is **bound** to it - see accept. |
 | `GET /workspaces/{id}/invites` | `{invites: [...]}`, pending only; role ≥ admin |
 | `DELETE /workspaces/{id}/invites/{invite_id}` | revoke → `204`; role ≥ admin |
-| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. |
+| `POST /invites/accept` | body `{token}` → `200 {workspace}`; adds the authed user with the invite's role; already-a-member → `200` idempotently; expired/revoked/unknown → `400 invalid_token`. If the invite carries an `email`, only the user with that address may accept (case-insensitive); anyone else → `400 invalid_token`. Concurrent accepts by the same user both get `200` and create one membership; an accept racing a revoke or a workspace delete either completes first or gets `400 invalid_token`. |
 | `PATCH /workspaces/{id}/members/{user_id}` | body `{role}`; role ≥ admin, subject to the rank rules below; demoting the **last owner** → `400 last_owner` |
-| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. |
+| `DELETE /workspaces/{id}/members/{user_id}` | remove member (or yourself = leave); role ≥ admin or self, subject to the rank rules below; last owner → `400 last_owner`. Removed members surface via sync as `member` with `is_deleted: true`. A member left with **no** workspace by the removal (or by leaving) immediately gets a fresh default one, exactly as after a workspace delete (§2). |
 
 **Rank rules (v1.2.1).** Roles rank `viewer < member < admin < owner`.
 
 - You may not act on a member ranked **above** you → `403 forbidden`. (Without this an
   admin could demote a sitting owner.) **Peers may act on each other**: an admin can
   demote or remove another admin, and an owner another owner. Forbidding peer actions
-  made a co-owner unremovable through the API — only they could step down — which is a
+  made a co-owner unremovable through the API - only they could step down - which is a
   worse failure than lateral admin conflict, and an owner can always undo one.
 - Granting or revoking the `owner` role requires role `owner`. An admin setting
   `{"role": "owner"}` → `403 forbidden`.
-- Acting on **yourself** is always allowed — stepping down and handing over ownership
+- Acting on **yourself** is always allowed - stepping down and handing over ownership
   stay possible; the `last_owner` guard is what keeps a workspace governable.
 
 **Invites are multi-use until they expire or are revoked**: accepting does not consume
@@ -494,14 +540,14 @@ to an `email` (or revoke it after use) when that is not what you want.
 Membership changes bump the workspace version (members travel through sync).
 A removed member loses sync/REST access immediately (`forbidden`).
 
-## 8. Notification channels & reminders — v1.1
+## 8. Notification channels & reminders - v1.1
 
-Per-user external channels — the self-hosted answer to app-store push relays.
+Per-user external channels - the self-hosted answer to app-store push relays.
 
 | Endpoint | Notes |
 |---|---|
 | `GET /me/channels` | `{channels: [...]}` |
-| `PUT /me/channels` | replaces the full list; validates per type |
+| `PUT /me/channels` | replaces the full list; validates per type; concurrent PUTs are serialised, so the stored list is exactly one of them |
 | `POST /me/channels/test` | body `{type}` → sends a test message → `204`; delivery failure → `400 channel_unavailable` |
 
 Channel shapes: `{"type": "ntfy", "url": "https://ntfy.sh/<topic>"}` ·
@@ -519,7 +565,7 @@ Channel validation (v1.2.1):
   `422 validation_error`. The check runs again at delivery time (DNS can change), and
   redirects are not followed.
 - `email.address` must be a valid address **and equal the authenticated user's own
-  account address** — there is no confirmation flow in v1, and an unverified destination
+  account address** - there is no confirmation flow in v1, and an unverified destination
   would make the deployment's SMTP identity an open relay. Anything else →
   `422 validation_error`.
 
@@ -528,9 +574,9 @@ non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the c
 the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal (not in
 sync payloads); changing `reminder_at` re-arms it. Message: task title, project name,
 deadline if set. Mobile clients additionally schedule **local** notifications from their
-replica; with external channels configured this can duplicate — accepted in v1.
+replica; with external channels configured this can duplicate - accepted in v1.
 
-**Event notifications (v1.2)** — sent through the same per-user channels, fire-and-forget
+**Event notifications (v1.2)** - sent through the same per-user channels, fire-and-forget
 from the command handlers (failures logged, never fail the command):
 
 - **Assignment**: `task_add`/`task_update`/`task_move` that sets `assigned_to` to a user
@@ -544,20 +590,25 @@ from the command handlers (failures logged, never fail the command):
 
 - The server serves the built web client: any non-`/api`, non-`/healthz` GET falls back
   to the SPA `index.html` from `server/static/` when that directory exists. A path that
-  resolves outside `server/static/` is never served — the fallback returns `index.html`
+  resolves outside `server/static/` is never served - the fallback returns `index.html`
   instead (percent-encoded `..` included).
-- CORS: **same-origin by default** (v1.2.1 — the server serves its own SPA). Set
+- CORS: **same-origin by default** (v1.2.1 - the server serves its own SPA). Set
   `BALU_CORS_ORIGINS` to a comma-separated allow-list, or `*`, when the web client is
   hosted on a different origin. Credentials are bearer tokens, not cookies.
 
 ## 10. Remote MCP server - v1.3 (optional, off by default)
 
-Off unless the deployment sets `BALU_MCP_ENABLED=true`. While off, **every endpoint in
-this section 404s**, including the settings ones - which is also what an older server
-without the feature does, so clients treat "404" as "hide the MCP section" rather than
-special-casing a flag. None of these routes appear in `openapi.json`, enabled or not:
-`/mcp` is JSON-RPC rather than REST, and the document should not vary with runtime
-configuration.
+Off unless the deployment sets `BALU_MCP_ENABLED=true`. While off, every endpoint in
+this section 404s, with one exception **(v1.5.2)**: `GET /me/mcp?probe=true` answers
+`200 {"enabled": false}` and nothing else (no `endpoint`, never a stored `key`). Clients
+that send `probe=true` hide the MCP section on `enabled: false` **or** on a 404, because
+an older server ignores the parameter and still 404s. Without `probe` the endpoint keeps
+404ing while off, because released clients (mobile <= 1.3.2, web before 1.5.2) render
+any 200 body as the section. Only `probe=true` or `probe=1` counts (case-insensitive,
+surrounding spaces ignored); any other value is ignored, and `probe` is ignored while
+MCP is on. Auth still applies: an unauthenticated `probe=true` call is `401`. None of
+these routes appear in `openapi.json`, enabled or not: `/mcp` is JSON-RPC rather than
+REST, and the document should not vary with runtime configuration.
 
 **Per-user key.** Each user may hold one MCP bearer key, `balu_mcp_` + 256 bit urlsafe
 random, stored in plaintext on `users.mcp_key` (unique, indexed). Plaintext is
@@ -565,11 +616,14 @@ deliberate: settings shows the key on every visit. It is **never minted implicit
 reading settings is not a request for a non-expiring full-access credential, and both
 UIs read on mount only to decide whether to render the section. `POST /me/mcp/key` is
 the single explicit action: it mints the first key and re-rolls any later one, and the
-previous key stops authenticating immediately.
+previous key stops authenticating immediately. Because those bodies can carry the key,
+`GET /me/mcp` (every `200`, including `{"enabled": false}`) and a successful
+`POST /me/mcp/key` send `Cache-Control: no-store`; error responses (404, 429, 401) carry
+no secret and do not.
 
 | Endpoint | Auth | Notes |
 |---|---|---|
-| `GET /me/mcp` | access token | `{enabled, endpoint, key, claude_code_command}`; `key` is `null` until one is generated, and `claude_code_command` with it. Never writes. |
+| `GET /me/mcp` | access token | `{enabled, endpoint, key, claude_code_command}`; `key` is `null` until one is generated, and `claude_code_command` with it. Never writes. `?probe=true`: see above; while off the body is `{"enabled": false}`. |
 | `POST /me/mcp/key` | access token | generates/replaces the key, same response shape with `key` set |
 | `POST /mcp` | `Authorization: Bearer <mcp key>` | the MCP endpoint (see below) |
 | `GET /mcp` | - | `405` (no server-initiated SSE stream) |

@@ -11,8 +11,8 @@ import { canWrite, type Member, type Role, type Workspace } from '@balu/domain';
 export interface RoleSources {
   userId: string | null | undefined;
   workspaceId: string | null | undefined;
-  members: ReadonlyArray<Pick<Member, 'id' | 'role'>>;
-  memberships: ReadonlyArray<{ role: Role; workspace: Pick<Workspace, 'id'> }>;
+  members: readonly Pick<Member, 'id' | 'role'>[];
+  memberships: readonly { role: Role; workspace: Pick<Workspace, 'id'> }[];
 }
 
 /**

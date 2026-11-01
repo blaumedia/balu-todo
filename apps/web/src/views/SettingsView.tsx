@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import type { Locale, McpSettings, Theme } from "@balu/domain";
 import type { Snapshot } from "@balu/sync-client";
 import { bootSession } from "../lib/boot.js";
-import { api, initSync } from "../lib/clients.js";
+import {
+  api,
+  clearExpectedAccessLoss,
+  expectAccessLoss,
+  initSync,
+  purgeWorkspaceStorage,
+} from "../lib/clients.js";
 import { logout } from "../lib/logout.js";
 import { useMyRole } from "../lib/role.js";
 import { useT } from "../lib/useT.js";
@@ -49,8 +55,8 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
   const role = useMyRole();
   const [name, setName] = useState(user?.name ?? "");
   const [deleting, setDeleting] = useState(false);
-  // Null until the server answers. A 404 means this instance runs without
-  // BALU_MCP_ENABLED (or predates the feature) - either way the section stays hidden.
+  // Null until the server answers, and null when it has MCP off or predates it
+  // (`getMcpSettings` maps both to null) - the section stays hidden.
   const [mcp, setMcp] = useState<McpSettings | null>(null);
 
   useEffect(() => {
@@ -90,10 +96,12 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
       showToast(t("workspace.deleteNameMismatch"));
       return;
     }
+    const doomedId = workspace.id;
     setDeleting(true);
     let deleted = false;
     try {
-      await api.deleteWorkspace(workspace.id);
+      expectAccessLoss(doomedId);
+      await api.deleteWorkspace(doomedId);
       deleted = true;
       // The server never leaves an account workspace-less: deleting the last one
       // mints a fresh default, so /me always answers with something to land in.
@@ -102,15 +110,21 @@ export function SettingsView({ snapshot }: { snapshot: Snapshot }) {
       const next = me.memberships[0]!;
       initSync(next.workspace.id, user.id);
       setWorkspace(next.workspace);
+      void purgeWorkspaceStorage(doomedId);
       showToast(t("workspace.deleted"));
     } catch {
+      if (!deleted) clearExpectedAccessLoss(doomedId);
       // Once the DELETE went through, the store and the sync client point at a
       // workspace that no longer exists, and a failure in one of the follow-up
       // steps would leave them there 404-polling until a manual reload. Re-boot
       // the session exactly as startup does instead: it re-reads /me and picks a
       // surviving workspace (or drops to login if even that fails).
-      if (deleted) await bootSession();
-      else showToast(t("auth.errorGeneric"));
+      if (deleted) {
+        await bootSession();
+        void purgeWorkspaceStorage(doomedId);
+      } else {
+        showToast(t("auth.errorGeneric"));
+      }
     } finally {
       setDeleting(false);
     }

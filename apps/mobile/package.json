@@ -42,7 +42,10 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.17",
+    "eslint": "9.39.5",
+    "eslint-config-expo": "10.0.0",
     "typescript": "~5.9.3",
+    "typescript-eslint": "8.72.1",
     "vitest": "^2.1.8"
   },
   "scripts": {
@@ -51,7 +54,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint",
+    "lint": "eslint . --max-warnings=0",
     "test": "vitest run"
   },
   "private": true

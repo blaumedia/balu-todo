@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from balu.sync.engine import ROLE_RANK
@@ -358,3 +360,84 @@ def test_member_may_still_leave(client, user):
         headers=member["headers"],
     )
     assert resp.status_code == 204
+
+
+def _strand_member(client, owner, member) -> None:
+    """Test setup: delete the member's own workspace."""
+    from tests.conftest import strand
+
+    me = client.get("/api/v1/me", headers=member["headers"]).json()
+    strand(
+        uuid.UUID(
+            next(
+                m["workspace"]["id"]
+                for m in me["memberships"]
+                if m["workspace"]["id"] != owner["workspace_id"]
+            )
+        )
+    )
+
+
+def _assert_fresh_default(client, member) -> None:
+    me = client.get("/api/v1/me", headers=member["headers"]).json()
+    assert len(me["memberships"]) == 1
+    assert me["memberships"][0]["role"] == "owner"
+    assert me["memberships"][0]["workspace"]["name"] == "Otto"
+
+
+def test_removing_a_members_last_workspace_gives_them_a_fresh_one(client, user):
+    member = _join(client, user, role="member")
+    _strand_member(client, user, member)
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{member['user']['id']}",
+        headers=user["headers"],
+    )
+    assert resp.status_code == 204
+    _assert_fresh_default(client, member)
+
+
+def test_leaving_your_last_workspace_gives_you_a_fresh_one(client, user):
+    member = _join(client, user, role="member")
+    _strand_member(client, user, member)
+    resp = client.delete(
+        f"/api/v1/workspaces/{user['workspace_id']}/members/{member['user']['id']}",
+        headers=member["headers"],
+    )
+    assert resp.status_code == 204
+    _assert_fresh_default(client, member)
+
+
+def test_removal_waits_for_an_uncommitted_delete_of_the_members_other_workspace(client, user):
+    from sqlalchemy import text
+
+    from balu.db import get_sessionmaker
+    from balu.sync.engine import bump_version
+    from tests.conftest import Background, wait_for_lock_waiters
+
+    member = _join(client, user, role="member")
+    me = client.get("/api/v1/me", headers=member["headers"]).json()
+    own = uuid.UUID(
+        next(
+            m["workspace"]["id"]
+            for m in me["memberships"]
+            if m["workspace"]["id"] != user["workspace_id"]
+        )
+    )
+    with get_sessionmaker()() as s0:
+        bump_version(s0, own)
+        s0.execute(
+            text("SELECT id FROM users WHERE id = :u FOR NO KEY UPDATE"),
+            {"u": uuid.UUID(member["user"]["id"])},
+        )
+        s0.execute(text("DELETE FROM workspaces WHERE id = :p"), {"p": own})
+        s0.flush()
+        bg = Background(
+            lambda: client.delete(
+                f"/api/v1/workspaces/{user['workspace_id']}/members/{member['user']['id']}",
+                headers=user["headers"],
+            )
+        )
+        wait_for_lock_waiters(1)
+        s0.commit()
+    assert bg.result().status_code == 204
+    _assert_fresh_default(client, member)
