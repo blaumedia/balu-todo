@@ -79,6 +79,8 @@ class Ctx:
     role: str
     temp_map: dict[str, str]  # in-request + persisted temp_id resolution cache
     events: list[Event] = field(default_factory=list)  # fire-and-forget, dispatched post-commit
+    # (workspace, attachment) blobs to remove once the commit succeeded
+    blob_deletions: list[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=list)
 
     # Memoised: process_commands bumps before the handler runs, so the workspace
     # row lock is taken before any other lock or lookup; the handler's own call
@@ -455,10 +457,11 @@ def _delete_comments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) -> No
 
 
 def _delete_attachments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) -> None:
-    """Soft-delete the tasks' attachments and drop their blobs (best-effort).
+    """Soft-delete the tasks' attachments and queue their blobs for removal.
 
     The rows must stay (soft-deleted, version bumped) so clients learn to remove
-    them locally, but the bytes have nothing left to belong to.
+    them locally, but the bytes have nothing left to belong to. The blobs go
+    after the commit (process_commands), never inside the transaction.
     """
     if not task_ids:
         return
@@ -470,7 +473,7 @@ def _delete_attachments_of(ctx: Ctx, task_ids: list[uuid.UUID], version: int) ->
     for a in attachments:
         a.is_deleted = True
         a.version = version
-        remove_blob(a.workspace_id, a.id)
+        ctx.blob_deletions.append((a.workspace_id, a.id))
 
 
 def h_section_add(ctx: Ctx, args: dict) -> dict:
@@ -532,36 +535,48 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     # `section_id` is not checked at all when the requested project is deleted).
     relocated: list[str] = []
 
-    project_id = None
-    requested_project_id = None
-    if args.get("project_id") is not None:
-        project = _get_including_deleted(ctx, Project, args["project_id"], "project")
-        requested_project_id = project.id
-        if project.is_deleted:
-            relocated.append("project_deleted")
-        else:
-            project_id = project.id
-
-    section_id = None
-    project_deleted = "project_deleted" in relocated
-    if args.get("section_id") is not None and not project_deleted:
-        section = _get_including_deleted(ctx, Section, args["section_id"], "section")
-        _check_section_in_project(section, requested_project_id)  # raises with no project (I4)
-        if section.is_deleted:
-            relocated.append("section_deleted")
-        else:
-            section_id = section.id
-    # With the project deleted the task goes to the Inbox whatever the section is, so
-    # the section id is not looked up: it may be an unresolvable temp id whose
-    # section_add failed because of that same deleted project.
-
-    parent_task_id = None
+    # A live parent decides the container (contract §3.3): the sent project and
+    # section are ignored, so they are neither looked up nor can they relocate.
+    live_parent: Task | None = None
+    parent_deleted = False
     if args.get("parent_task_id") is not None:
         parent = _get_including_deleted(ctx, Task, args["parent_task_id"], "task")
         if parent.is_deleted:
-            relocated.append("parent_deleted")
+            parent_deleted = True
         else:
-            parent_task_id = _check_parent(ctx, parent.id)
+            _check_parent(ctx, parent.id)
+            live_parent = parent
+
+    project_id = None
+    section_id = None
+    parent_task_id = None
+    if live_parent is not None:
+        parent_task_id = live_parent.id
+        project_id = live_parent.project_id
+        section_id = live_parent.section_id
+    else:
+        requested_project_id = None
+        if args.get("project_id") is not None:
+            project = _get_including_deleted(ctx, Project, args["project_id"], "project")
+            requested_project_id = project.id
+            if project.is_deleted:
+                relocated.append("project_deleted")
+            else:
+                project_id = project.id
+
+        project_deleted = "project_deleted" in relocated
+        if args.get("section_id") is not None and not project_deleted:
+            section = _get_including_deleted(ctx, Section, args["section_id"], "section")
+            _check_section_in_project(section, requested_project_id)  # raises with no project (I4)
+            if section.is_deleted:
+                relocated.append("section_deleted")
+            else:
+                section_id = section.id
+        # With the project deleted the task goes to the Inbox whatever the section is, so
+        # the section id is not looked up: it may be an unresolvable temp id whose
+        # section_add failed because of that same deleted project.
+    if parent_deleted:
+        relocated.append("parent_deleted")
 
     task = Task(
         id=uuid.uuid4(),
@@ -606,8 +621,22 @@ def h_task_update(ctx: Ctx, args: dict) -> dict:
 def h_task_move(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     if "parent_task_id" in args:
-        task.parent_task_id = _check_parent(ctx, args.get("parent_task_id"))
-    if "project_id" in args:
+        new_parent_id = _check_parent(ctx, args.get("parent_task_id"))
+        if new_parent_id is not None and new_parent_id == task.id:
+            raise CommandError("invalid_args", "a task cannot be its own parent")
+        if new_parent_id is not None and ctx.session.execute(
+            select(Task.id).where(
+                Task.parent_task_id == task.id, Task.is_deleted.is_(False)
+            ).limit(1)
+        ).first() is not None:
+            raise CommandError(
+                "invalid_args", "a task with subtasks cannot become a subtask"
+            )
+        task.parent_task_id = new_parent_id
+    # A subtask's container is its parent's (applied below): a sent project_id or
+    # section_id is ignored, not validated against the task's old project.
+    is_subtask = task.parent_task_id is not None
+    if "project_id" in args and not is_subtask:
         task.project_id = (
             _get_project(ctx, args["project_id"]).id if args.get("project_id") else None
         )
@@ -615,7 +644,7 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
         # unless this same command sets a matching one.
         if "section_id" not in args:
             task.section_id = None
-    if "section_id" in args:
+    if "section_id" in args and not is_subtask:
         if args.get("section_id"):
             section = _get_section(ctx, args["section_id"])
             _check_section_in_project(section, task.project_id)
@@ -624,8 +653,28 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
             task.section_id = None
     if "sort_order" in args:
         task.sort_order = _sort_order(args["sort_order"])
-    task.version = ctx.bump()
+    version = ctx.bump()
+    task.version = version
+    if task.parent_task_id is not None:
+        # Re-parented (or moved) subtask: it follows its parent's container.
+        parent = _get_task(ctx, task.parent_task_id)
+        task.project_id = parent.project_id
+        task.section_id = parent.section_id
+    else:
+        _cascade_to_subtasks(ctx, task, version)
     return {}
+
+
+def _cascade_to_subtasks(ctx: Ctx, parent: Task, version: int) -> None:
+    """A subtask's project_id and section_id follow its parent (contract §3.3)."""
+    subtasks = ctx.session.execute(
+        select(Task).where(Task.parent_task_id == parent.id, Task.is_deleted.is_(False))
+    ).scalars().all()
+    for st in subtasks:
+        if st.project_id != parent.project_id or st.section_id != parent.section_id:
+            st.project_id = parent.project_id
+            st.section_id = parent.section_id
+            st.version = version
 
 
 def _completion_today(args: dict) -> date:
@@ -719,8 +768,18 @@ def h_task_reorder(ctx: Ctx, args: dict) -> dict:
     for item in items:
         if not isinstance(item, dict) or "id" not in item or "sort_order" not in item:
             raise CommandError("invalid_args", "each item needs id and sort_order")
-        task = _get_task(ctx, item["id"])
-        tasks.append((task, _sort_order(item["sort_order"])))
+        sort_order = _sort_order(item["sort_order"])
+        try:
+            task = _get_task(ctx, item["id"])
+        except CommandError as exc:
+            if exc.code != "not_found":
+                raise
+            # Deleted, unknown or foreign: skipped, so one stale id (a teammate deleted
+            # the task meanwhile) does not void the whole reordering (contract §5.5).
+            continue
+        tasks.append((task, sort_order))
+    if not tasks:
+        return {}
     version = ctx.bump()
     for task, sort_order in tasks:
         task.sort_order = sort_order
@@ -839,9 +898,10 @@ def h_attachment_delete(ctx: Ctx, args: dict) -> dict:
     attachment = _get_attachment(ctx, args.get("id"))
     attachment.is_deleted = True
     attachment.version = ctx.bump()
-    # Before the commit, so a later failure in this transaction leaves a live row
-    # whose blob is gone (download 404s) rather than a blob nothing points at.
-    remove_blob(attachment.workspace_id, attachment.id)
+    # After the commit (process_commands): a failed commit must not leave a live
+    # row whose blob is gone (a broken attachment), whereas an orphaned blob after
+    # a crash between commit and removal is only harmless leaked bytes.
+    ctx.blob_deletions.append((attachment.workspace_id, attachment.id))
     return {}
 
 
@@ -1140,6 +1200,16 @@ def process_commands(
                 )
             # Fire-and-forget: post-commit so rows are durable; never affects status.
             dispatch_events(sm, user_id, ctx.events, event_sender)
+            # Best-effort (remove_blob logs failures), and only now the rows are durable.
+            # One failure must never turn the committed ok into an error.
+            for blob_workspace_id, attachment_id in ctx.blob_deletions:
+                try:
+                    remove_blob(blob_workspace_id, attachment_id)
+                except Exception:
+                    logger.warning(
+                        "removing blob of attachment %s failed (workspace %s)",
+                        attachment_id, blob_workspace_id, exc_info=True,
+                    )
         except CommandError as exc:
             session.rollback()
             status = {"error_code": exc.code, "error": exc.message}

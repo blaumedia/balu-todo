@@ -9,6 +9,8 @@ import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from alembic.script.revision import ResolutionError
+from alembic.util.exc import CommandError
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,6 +75,26 @@ async def lifespan(app: FastAPI):
                 "does not re-key it - rotate the role (ALTER USER balu WITH "
                 "PASSWORD '…') or start from a fresh volume. Original error: %s",
                 exc,
+            )
+            raise
+        except CommandError as exc:
+            # alembic words the unknown-revision error itself and chains the
+            # ResolutionError behind it: trust the type first, the text second.
+            if not (
+                isinstance(exc.__cause__, ResolutionError)
+                or "Can't locate revision" in str(exc)
+            ):
+                raise
+            from .migrate import image_head
+
+            logger.error(
+                "The database is at a newer schema revision than this image knows "
+                "(%s). It was migrated by a newer release: run `python -m "
+                "balu.migrate downgrade %s` in the newer image (this image's own "
+                "head; see the README rollback section) before starting this "
+                "older image, or upgrade to the newer image again.",
+                exc,
+                image_head(),
             )
             raise
 

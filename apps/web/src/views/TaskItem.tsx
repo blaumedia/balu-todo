@@ -24,6 +24,8 @@ export interface TaskItemProps {
   isShared?: boolean;
   commentCount?: number;
   showProject?: boolean;
+  /** Today view: hide the date chip of a task due today (it is redundant there). Overdue and future dates stay. */
+  hideTodayDate?: boolean;
   selected?: boolean;
   today: IsoDate;
   locale: Locale;
@@ -31,7 +33,7 @@ export interface TaskItemProps {
   onOpen: () => void;
 }
 
-export function TaskItem({ task, projects, labels, members, currentUserId, isShared = false, commentCount = 0, showProject = false, selected = false, today, locale, t, onOpen }: TaskItemProps) {
+export function TaskItem({ task, projects, labels, members, currentUserId, isShared = false, commentCount = 0, showProject = false, hideTodayDate = false, selected = false, today, locale, t, onOpen }: TaskItemProps) {
   const [hover, setHover] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const isCompleted = task.completed_at != null;
@@ -59,8 +61,9 @@ export function TaskItem({ task, projects, labels, members, currentUserId, isSha
   const assignedToMe = task.assigned_to != null && task.assigned_to === currentUserId;
   // Chip when assigned to someone else, or to me in a shared workspace.
   const showAssignee = assignee != null && (!assignedToMe || isShared);
-  const start = task.start_date ? relativeDate(task.start_date, today, locale, t) : null;
+  const startRaw = task.start_date ? relativeDate(task.start_date, today, locale, t) : null;
   const deadline = task.deadline ? relativeDate(task.deadline, today, locale, t) : null;
+  const start = hideTodayDate && startRaw?.tone === "today" ? null : startRaw;
   const taskLabels = task.label_ids.map((id) => labels.get(id)).filter((l): l is Label => l != null && !l.is_deleted);
 
   return (

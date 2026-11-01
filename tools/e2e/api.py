@@ -6,6 +6,7 @@ Prints statuses and counts only: never a password, token, invite token or body.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import json
 import mimetypes
@@ -94,9 +95,13 @@ def cmd_setup(a) -> int:
         if s2 not in (200, 201):
             raise SystemExit(f"accept: HTTP {s2}")
     s, snap = e.sync("owner", ws, [])
-    existing = [
-        p for p in snap.get("projects", [])
-        if p.get("name") == PROJECT_NAME and not p.get("is_deleted")
+    live = [p for p in snap.get("projects", []) if not p.get("is_deleted")]
+    # a stored project.id that is still alive wins, so a renamed project is not duplicated
+    stored = None
+    with contextlib.suppress(SystemExit):
+        stored = e.load("project.id")
+    existing = [p for p in live if p.get("id") == stored] or [
+        p for p in live if p.get("name") == PROJECT_NAME
     ]
     if existing:
         e.save("project.id", existing[0]["id"])
@@ -104,11 +109,11 @@ def cmd_setup(a) -> int:
         known = tasks_map()
         seen: set[str] = set()
         for t in snap.get("tasks", []):
-            if t.get("project_id") == existing[0]["id"] and not t.get("is_deleted"):
-                # the snapshot wins over a stale tasks.json; first seen per title
-                if t["title"] not in seen:
-                    seen.add(t["title"])
-                    known[t["title"]] = t["id"]
+            in_project = t.get("project_id") == existing[0]["id"] and not t.get("is_deleted")
+            # the snapshot wins over a stale tasks.json; first seen per title
+            if in_project and t["title"] not in seen:
+                seen.add(t["title"])
+                known[t["title"]] = t["id"]
         e.save("tasks.json", json.dumps(known))
         print("project exists")
         return 0
@@ -165,6 +170,11 @@ def cmd_edit_task(a) -> int:
         value = int(a.value)
     elif a.field == "evening":
         value = a.value.lower() in ("1", "true", "t", "yes")
+    elif a.field == "assigned_to":
+        if a.value in ("owner", "member"):
+            value = e.load(f"{a.value}.uid")
+        elif a.value.lower() in ("", "none", "null"):
+            value = None  # unassign
     args = {"id": task_id(a.title), a.field: value}
     cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
     s, b = e.sync("owner", ws_id(), [cmd])
@@ -176,7 +186,13 @@ def cmd_delete_task(a) -> int:
     cmd = {"type": "task_delete", "uuid": e.new_uuid(), "args": {"id": task_id(a.title)}}
     s, b = e.sync("owner", ws_id(), [cmd])
     print("task_delete", a.title, "->", s, e.statuses(b))
-    return synced(s, b)
+    rc = synced(s, b)
+    if rc == 0:
+        # drop the title so a later subtask/bulk of the same title is not read as a collision
+        known = tasks_map()
+        if known.pop(a.title, None) is not None:
+            e.save("tasks.json", json.dumps(known))
+    return rc
 
 
 def cmd_attach(a) -> int:
@@ -211,6 +227,126 @@ def cmd_attach(a) -> int:
         att.get("filename", ""), att.get("content_type", ""), att.get("size_bytes", ""),
     )
     return ok(s)
+
+
+def labels_map() -> dict:
+    try:
+        return json.loads(e.load("labels.json"))
+    except SystemExit:
+        return {}
+
+
+def cmd_label(a) -> int:
+    """Create a label NAME as the owner (CONTRACT 4: label_add); remembered for label-task."""
+    # idempotent: a live label of that name (case-insensitive) is reused, so a rerun
+    # or a wiped labels.json does not hit name_taken
+    s, snap = e.sync("owner", ws_id(), [])
+    if s != 200:
+        raise SystemExit(f"label: snapshot HTTP {s}")
+    for lab in snap.get("labels", []):
+        if not lab.get("is_deleted") and str(lab.get("name", "")).lower() == a.name.lower():
+            known = labels_map()
+            known[a.name.lower()] = lab["id"]
+            e.save("labels.json", json.dumps(known))
+            print("label exists", a.name, "->", s)
+            return ok(s)
+    tmp = e.new_temp_id()
+    cmd = {"type": "label_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": {"name": a.name}}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    mapping = b.get("temp_id_mapping", {})
+    if tmp in mapping:
+        known = labels_map()
+        known[a.name.lower()] = mapping[tmp]
+        e.save("labels.json", json.dumps(known))
+    print("label_add", a.name, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_label_task(a) -> int:
+    """Add label LABEL (created with `label`) to a task, keeping its other labels."""
+    # labels.json is keyed by lower-case name, like the case-insensitive dedupe in `label`
+    known = labels_map()
+    lid = known.get(a.label.lower()) or next(
+        (v for k, v in known.items() if k.lower() == a.label.lower()), None
+    )  # a labels.json written before keys were lower-cased
+    if not lid:
+        raise SystemExit(f"unknown label: {a.label}")
+    tid = task_id(a.title)
+    s0, snap = e.sync("owner", ws_id(), [])
+    if s0 != 200:
+        raise SystemExit(f"label-task: snapshot HTTP {s0}")
+    # a stack or DB reset leaves a dead id in labels.json: say so instead of a server error
+    if not any(x.get("id") == lid and not x.get("is_deleted") for x in snap.get("labels", [])):
+        raise SystemExit(f"label-task: stale label id for {a.label}, rerun label")
+    cur = [t for t in snap.get("tasks", []) if t.get("id") == tid and not t.get("is_deleted")]
+    if not cur:
+        raise SystemExit(f"label-task: task not found in snapshot: {a.title}")
+    have = list(cur[0].get("label_ids", []))
+    if lid not in have:
+        have.append(lid)
+    args = {"id": tid, "label_ids": have}
+    cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("label-task", a.title, a.label, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_comment(a) -> int:
+    cmd = {
+        "type": "comment_add",
+        "uuid": e.new_uuid(),
+        "temp_id": e.new_temp_id(),
+        "args": {"task_id": task_id(a.title), "body": a.text},
+    }
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("comment_add", a.title, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_subtask(a) -> int:
+    parent = task_id(a.parent)
+    # tasks.json is keyed by title: a colliding title would silently retarget later
+    # edit-task/delete-task/comment calls, so refuse it (a live subtask of the same
+    # parent is reused, which makes a rerun a no-op). A stored id that is dead or
+    # gone from the snapshot is stale: create anew and overwrite the entry.
+    existing = tasks_map().get(a.title)
+    if existing:
+        s0, snap = e.sync("owner", ws_id(), [])
+        if s0 != 200:
+            raise SystemExit(f"subtask: snapshot HTTP {s0}")
+        live = [
+            t
+            for t in snap.get("tasks", [])
+            if t.get("id") == existing and not t.get("is_deleted")
+        ]
+        if live and live[0].get("parent_task_id") == parent:
+            print("subtask exists", a.title, "of", a.parent)
+            return 0
+        if live:
+            raise SystemExit(f"subtask: title already used by another task: {a.title}")
+    tmp = e.new_temp_id()
+    args = {"title": a.title, "parent_task_id": parent}
+    if a.start or not a.deadline:
+        args["start_date"] = a.start or today()
+    if a.deadline:
+        args["deadline"] = a.deadline
+    cmd = {"type": "task_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    mapping = b.get("temp_id_mapping", {})
+    if tmp in mapping:
+        known = tasks_map()
+        known[a.title] = mapping[tmp]
+        e.save("tasks.json", json.dumps(known))
+    print("subtask", a.title, "of", a.parent, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_project_rename(a) -> int:
+    args = {"id": e.load("project.id"), "name": a.name}
+    cmd = {"type": "project_update", "uuid": e.new_uuid(), "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("project_update ->", s, e.statuses(b))
+    return synced(s, b)
 
 
 def cmd_project_delete(_a) -> int:
@@ -297,6 +433,26 @@ def main() -> int:
     s.add_argument("title")
     s.add_argument("file")
     s.set_defaults(fn=cmd_attach)
+    s = sub.add_parser("label")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_label)
+    s = sub.add_parser("label-task")
+    s.add_argument("title")
+    s.add_argument("label")
+    s.set_defaults(fn=cmd_label_task)
+    s = sub.add_parser("comment")
+    s.add_argument("title")
+    s.add_argument("text")
+    s.set_defaults(fn=cmd_comment)
+    s = sub.add_parser("subtask")
+    s.add_argument("parent")
+    s.add_argument("title")
+    s.add_argument("--start", default=None, metavar="YYYY-MM-DD")
+    s.add_argument("--deadline", default=None, metavar="YYYY-MM-DD")
+    s.set_defaults(fn=cmd_subtask)
+    s = sub.add_parser("project-rename")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_project_rename)
     sub.add_parser("project-delete").set_defaults(fn=cmd_project_delete)
     sub.add_parser("remove-member").set_defaults(fn=cmd_remove_member)
     sub.add_parser("ws2").set_defaults(fn=cmd_ws2)

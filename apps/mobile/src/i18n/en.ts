@@ -108,6 +108,8 @@ export const en = {
   'priority.p3': 'P3',
 
   'row.complete': 'Complete',
+  'row.moreLabelsOne': '{n} more label',
+  'row.moreLabelsOther': '{n} more labels',
 
   'schedule.title': 'Schedule',
   'schedule.today': 'Today',

@@ -70,9 +70,14 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `setup [--member-role R] [--tasks N]` | registers owner and member, invites, seeds a project and N tasks |
 | `role ROLE` | changes the member's role |
 | `bulk N` | adds N tasks |
-| `edit-task TITLE FIELD VALUE` | `task_update` as owner |
-| `delete-task TITLE` | `task_delete` as owner |
+| `edit-task TITLE FIELD VALUE` | `task_update` as owner (`priority` is an int; `assigned_to` also accepts `owner` or `member` for the seeded account, and `none` (or empty) to unassign; `recurrence` takes an RRULE such as `FREQ=DAILY`) |
+| `delete-task TITLE` | `task_delete` as owner, and forgets the title (a later `subtask` may reuse it) |
 | `attach TITLE FILE` | uploads FILE to the task as owner (multipart, CONTRACT 3.7.1); exit 1 on non-2xx |
+| `label NAME` | creates a label as owner (id remembered for `label-task`); idempotent: an existing live label of that name (case-insensitive) is reused |
+| `label-task TITLE LABEL` | adds the label to the task, keeping its other labels; the label name is matched case-insensitively; fails if the task is not in the snapshot or the stored label id is stale (rerun `label`) |
+| `comment TITLE TEXT` | `comment_add` as owner; not idempotent: every run adds another comment |
+| `subtask PARENT_TITLE TITLE [--start YYYY-MM-DD] [--deadline YYYY-MM-DD]` | adds a subtask (start date today unless `--start`; with only `--deadline` the subtask is deadline-only); title becomes addressable; refuses a title already used by another live task (a deleted or stale stored entry is replaced), and a rerun with the same parent is a no-op (it reuses the live subtask) |
+| `project-rename NAME` | renames the e2e project (`project_update`); `setup` keeps finding it by its stored `project.id` |
 | `project-delete` | deletes the seeded project |
 | `remove-member` | removes the member from the workspace |
 | `ws2` | creates a second workspace with a project and a task |

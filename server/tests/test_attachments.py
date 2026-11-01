@@ -7,11 +7,12 @@ import concurrent.futures
 import uuid
 
 import pytest
+from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect, Request
 
 from balu.attachments import sanitize_content_type, sanitize_filename
 from balu.config import get_settings
-from balu.models import Attachment
+from balu.models import Attachment, Task
 from tests.conftest import auth_headers, cmd, register_user, sync
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"pretend-pixels" * 4
@@ -922,3 +923,138 @@ def test_losing_worker_touches_neither_session_nor_blob_and_claim_is_exclusive(t
     won = attachments_router._Claim()
     assert won.start() is True
     assert won.abandon() is False
+
+
+# Blobs go after the commit, never inside the transaction
+def _fail_next_commit(monkeypatch):
+    real = Session.commit
+    state = {"armed": True}
+
+    def commit(self):
+        if state["armed"]:
+            state["armed"] = False
+            raise RuntimeError("simulated commit failure")
+        return real(self)
+
+    monkeypatch.setattr(Session, "commit", commit)
+    return state
+
+
+def _task_with_attachment(client, user):
+    body = sync(client, user, commands=[cmd("task_add", temp_id="t1", title="Steuer")])
+    task_id = body["temp_id_mapping"]["t1"]
+    meta = _upload(client, user, task_id).json()
+    return task_id, meta["id"]
+
+
+@pytest.mark.parametrize("command_type", ["task_delete", "attachment_delete"])
+def test_failed_commit_keeps_blob_and_rows(client, user, data_dir, db, monkeypatch, command_type):
+    task_id, att_id = _task_with_attachment(client, user)
+    blob = _blob_dir(data_dir, user["workspace_id"]) / att_id
+    assert blob.is_file()
+
+    _fail_next_commit(monkeypatch)
+    target = task_id if command_type == "task_delete" else att_id
+    command = cmd(command_type, id=target)
+    body = sync(client, user, commands=[command])
+    assert body["sync_status"][command["uuid"]] != "ok"  # commit failed -> rejected
+
+    db.expire_all()
+    assert db.get(Task, uuid.UUID(task_id)).is_deleted is False
+    assert db.get(Attachment, uuid.UUID(att_id)).is_deleted is False
+    assert blob.is_file(), "blob was unlinked although the transaction never committed"
+
+
+def test_failed_commit_on_project_delete_keeps_blob(client, user, data_dir, db, monkeypatch):
+    body = sync(client, user, commands=[
+        cmd("project_add", temp_id="p", name="P"),
+        cmd("task_add", temp_id="t1", title="T", project_id="p"),
+    ])
+    task_id = body["temp_id_mapping"]["t1"]
+    meta = _upload(client, user, task_id).json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    assert blob.is_file()
+
+    _fail_next_commit(monkeypatch)
+    command = cmd("project_delete", id=body["temp_id_mapping"]["p"])
+    body = sync(client, user, commands=[command])
+    assert body["sync_status"][command["uuid"]] != "ok"
+    assert blob.is_file(), "blob was unlinked although the transaction never committed"
+
+
+
+
+def test_download_blob_unreadable_at_the_stat_is_not_found(client, user, data_dir, monkeypatch):
+    import os
+
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id).json()
+    assert (_blob_dir(data_dir, user["workspace_id"]) / meta["id"]).is_file()
+    real_stat = os.stat
+
+    def denied_stat(path, *args, **kwargs):
+        if str(path).endswith(meta["id"]):
+            raise PermissionError(path)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr("balu.routers.attachments.os.stat", denied_stat)
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 404
+
+
+def test_download_of_a_non_regular_file_is_not_found(client, user, data_dir):
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id).json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    blob.unlink()
+    blob.mkdir()
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 404
+
+
+def test_download_honours_a_range_request(client, user, data_dir):
+    # PDF and media viewers fetch byte ranges; the response must not advertise
+    # accept-ranges and then ignore them.
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id).json()
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers={**user["headers"], "Range": "bytes=0-9"},
+    )
+    assert got.status_code == 206
+    assert got.content == PNG[:10]
+    assert got.headers["content-range"] == f"bytes 0-9/{len(PNG)}"
+
+
+def test_download_headers_match_a_plain_file_response(client, user, data_dir):
+    from starlette.responses import FileResponse
+
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id, filename="sh\u00f6t.png").json()
+    blob = _blob_dir(data_dir, user["workspace_id"]) / meta["id"]
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 200
+    expected = FileResponse(
+        str(blob),
+        media_type="image/png",
+        filename="sh\u00f6t.png",
+        stat_result=blob.stat(),
+        headers={"X-Content-Type-Options": "nosniff"},
+    ).headers
+    for name in (
+        "content-type", "content-length", "content-disposition", "etag",
+        "last-modified", "accept-ranges", "x-content-type-options",
+    ):
+        assert got.headers[name] == expected[name], name
+    assert got.headers["content-length"] == str(len(PNG))
+    assert got.headers["content-disposition"].startswith("attachment;")
+    assert got.headers["x-content-type-options"] == "nosniff"

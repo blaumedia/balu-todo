@@ -1,7 +1,7 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
 import { useMemo, useRef, useState } from 'react';
-import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation } from 'expo-router';
 import Animated, { FadeOut, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -10,7 +10,7 @@ import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { completeTask, uncompleteTask } from '../lib/actions';
-import { relativeDate } from '../lib/format';
+import { metaLayout, moreLabelsText, rowDate, rowLabels } from '../lib/rowMeta';
 import { hapticComplete } from '../lib/haptics';
 import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
@@ -32,12 +32,14 @@ export interface TaskRowProps {
   commentCount?: number;
   /** Hide the project dot/name (e.g. inside a project view). */
   hideProject?: boolean;
+  /** Today list: a task due today needs no "Today" date chip. Overdue and future dates stay. */
+  hideTodayDate?: boolean;
   swipeable?: boolean;
   /** False for read-only members (viewers): the checkbox is inert and there are no swipe actions (§2). */
   writable: boolean;
 }
 
-export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, swipeable = true, writable }: TaskRowProps) {
+export function TaskRow({ task, today, projects, labels, members, commentCount = 0, hideProject, hideTodayDate, swipeable = true, writable }: TaskRowProps) {
   const theme = useTheme();
   const { t, locale } = useT();
   const openDetail = useApp((s) => s.openDetail);
@@ -137,13 +139,13 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
 
   // ── metadata chips ──
   const project = task.project_id ? projects.get(task.project_id) : undefined;
-  const primaryDate = task.start_date ?? task.deadline;
-  const dateInfo = primaryDate ? relativeDate(primaryDate, today, locale, t) : null;
-  const showDate = dateInfo && dateInfo.tone !== 'today';
+  // Like the web row: the today chip is hidden only in the Today list.
+  const date = rowDate(task, today, locale, t, hideTodayDate ?? false);
+  const dateInfo = date?.info ?? null;
   const dateColor =
     dateInfo?.tone === 'overdue' ? theme.danger : dateInfo?.tone === 'today' ? theme.accent : theme.textSecondary;
-  const isDeadlineOnly = task.start_date == null && task.deadline != null;
-  const taskLabels = task.label_ids.map((id) => labels.get(id)).filter(Boolean) as Label[];
+  const isDeadlineOnly = date?.isDeadlineOnly ?? false;
+  const { visible: shownLabels, overflow: hiddenLabels } = rowLabels(task.label_ids, labels);
   const assignee = task.assigned_to ? members?.get(task.assigned_to) : undefined;
   const hasComments = commentCount > 0;
 
@@ -152,18 +154,112 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     complete: t('row.complete'),
     schedule: t('schedule.title'),
   });
+  // The title is one line, so its laid-out height is its line height, which the
+  // system font scale changes; the checkbox is centred on it.
+  // Starts at the scaled line height so the checkbox does not jump after the
+  // first layout; onLayout then corrects it to the exact value.
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const [titleHeight, setTitleHeight] = useState(titleLineHeight * fontScale);
+  // The meta row is laid out deterministically. The shrinkable project/labels
+  // group is never inside a wrapping container (Yoga breaks a wrapping line by
+  // hypothetical size and then does not shrink its items): inline, one nowrap
+  // line where only that group shrinks; stacked (narrow screen or large font
+  // scale), that group on its own line and the fixed items in a line below that
+  // may wrap. Every fixed item is noShrink, so that wrapping is safe.
+  const stacked = metaLayout(windowWidth, fontScale) === 'stacked';
+  const dateEl = dateInfo ? (
+    <View style={[styles.metaItem, styles.noShrink]}>
+      {isDeadlineOnly && <Icon name="flag" size={12} color={dateColor} strokeWidth={2} />}
+      <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo.text}</Text>
+    </View>
+  ) : null;
+  const recurEl = task.recurrence ? (
+    <View style={styles.noShrink}>
+      <Icon name="repeat" size={13} color={theme.textTertiary} strokeWidth={2} />
+    </View>
+  ) : null;
+  const showProject = !hideProject && project != null;
+  const projectLabelsEl =
+    showProject || shownLabels.length > 0 ? (
+      <View style={styles.shrinkGroup}>
+        {showProject && project && (
+          <View style={[styles.metaItem, styles.projectChip]}>
+            <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
+            <Text style={[styles.metaText, styles.shrink, { color: theme.textSecondary }]} numberOfLines={1}>
+              {project.name}
+            </Text>
+          </View>
+        )}
+        {shownLabels.map((l, i) => (
+          <Text
+            key={l.id}
+            style={[styles.metaText, styles.labelChip, (showProject || i > 0) && styles.groupGap, { color: projectHex(l.color) }]}
+            numberOfLines={1}
+          >
+            @{l.name}
+          </Text>
+        ))}
+      </View>
+    ) : null;
+  // "+N" sits outside the clipping group (and never shrinks), so the count of
+  // hidden labels stays visible even when the project and labels are cut off.
+  const moreEl =
+    hiddenLabels > 0 ? (
+      <Text
+        accessibilityLabel={moreLabelsText(hiddenLabels, t)}
+        style={[styles.metaText, styles.noShrink, styles.groupGap, { color: theme.textTertiary }]}
+      >
+        +{hiddenLabels}
+      </Text>
+    ) : null;
+  const chipsEl = projectLabelsEl ? (
+    <View style={styles.chipsRow}>
+      {projectLabelsEl}
+      {moreEl}
+    </View>
+  ) : null;
+  const priorityEl =
+    task.priority === 1 || task.priority === 2 ? (
+      <View style={styles.noShrink}>
+        <Icon
+          name="flag"
+          size={13}
+          color={task.priority === 1 ? theme.priority1 : theme.priority2}
+          fill={task.priority === 1 ? theme.priority1 : theme.priority2}
+          strokeWidth={2}
+        />
+      </View>
+    ) : null;
+  const commentsEl = hasComments ? (
+    <View style={[styles.metaItem, styles.noShrink]}>
+      <Icon name="message-square" size={12} color={theme.textTertiary} strokeWidth={2} />
+      <Text style={[styles.metaText, { color: theme.textTertiary }]}>{commentCount}</Text>
+    </View>
+  ) : null;
+  const avatarEl = assignee ? (
+    <View style={[styles.avatar, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
+      <Text style={[styles.avatarText, { color: theme.accent }]}>{initials(assignee.name)}</Text>
+    </View>
+  ) : null;
+  const hasFixed = dateEl != null || recurEl != null || priorityEl != null || commentsEl != null || avatarEl != null;
+  // From what is actually rendered: priority 3 shows only as the checkbox ring,
+  // so it must not produce an empty meta line or switch the row to top alignment.
+  const hasMeta = chipsEl != null || hasFixed;
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
       // Only rows with swipe actions: the same two actions as swipe right / left.
       accessibilityActions={a11yActions}
       onAccessibilityAction={a11yActions ? onAccessibilityAction : undefined}
-      style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
+      style={[styles.row, hasMeta && styles.rowTop, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
-      <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
+      <View style={hasMeta ? { marginTop: (titleHeight - checkboxSize) / 2 } : undefined}>
+        <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
+      </View>
       <View style={styles.body}>
         <Text
           numberOfLines={1}
+          onLayout={(e) => setTitleHeight(e.nativeEvent.layout.height)}
           style={[
             styles.title,
             { color: checked ? theme.textTertiary : theme.textPrimary },
@@ -172,54 +268,28 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
         >
           {task.title}
         </Text>
-        {(showDate ||
-          (!hideProject && project) ||
-          task.priority > 0 ||
-          task.recurrence ||
-          taskLabels.length > 0 ||
-          assignee ||
-          hasComments) && (
+        {hasMeta && !stacked && (
           <View style={styles.meta}>
-            {showDate && (
-              <View style={styles.metaItem}>
-                {isDeadlineOnly && <Icon name="flag" size={12} color={dateColor} strokeWidth={2} />}
-                <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo!.text}</Text>
+            {dateEl}
+            {recurEl}
+            {chipsEl}
+            {priorityEl}
+            {commentsEl}
+            {avatarEl}
+          </View>
+        )}
+        {hasMeta && stacked && (
+          <View style={styles.metaStack}>
+            {chipsEl && <View style={styles.metaLine}>{chipsEl}</View>}
+            {hasFixed && (
+              <View style={styles.metaFixed}>
+                {dateEl}
+                {recurEl}
+                {priorityEl}
+                {commentsEl}
+                {avatarEl}
               </View>
             )}
-            {task.recurrence ? <Icon name="repeat" size={13} color={theme.textTertiary} strokeWidth={2} /> : null}
-            {!hideProject && project && (
-              <View style={styles.metaItem}>
-                <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
-                <Text style={[styles.metaText, { color: theme.textSecondary }]} numberOfLines={1}>
-                  {project.name}
-                </Text>
-              </View>
-            )}
-            {taskLabels.slice(0, 2).map((l) => (
-              <Text key={l.id} style={[styles.metaText, { color: projectHex(l.color) }]}>
-                @{l.name}
-              </Text>
-            ))}
-            {task.priority === 1 || task.priority === 2 ? (
-              <Icon
-                name="flag"
-                size={13}
-                color={task.priority === 1 ? theme.priority1 : theme.priority2}
-                fill={task.priority === 1 ? theme.priority1 : theme.priority2}
-                strokeWidth={2}
-              />
-            ) : null}
-            {hasComments ? (
-              <View style={styles.metaItem}>
-                <Icon name="message-square" size={12} color={theme.textTertiary} strokeWidth={2} />
-                <Text style={[styles.metaText, { color: theme.textTertiary }]}>{commentCount}</Text>
-              </View>
-            ) : null}
-            {assignee ? (
-              <View style={[styles.avatar, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
-                <Text style={[styles.avatarText, { color: theme.accent }]}>{initials(assignee.name)}</Text>
-              </View>
-            ) : null}
           </View>
         )}
       </View>
@@ -274,6 +344,9 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   );
 }
 
+const titleLineHeight = font.body * 1.25;
+const checkboxSize = 24; // Checkbox default size
+
 const styles = StyleSheet.create({
   row: {
     minHeight: rowMin,
@@ -284,18 +357,39 @@ const styles = StyleSheet.create({
     paddingVertical: space.s2,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  // Rows with a meta line top-align, so a wrapped meta line cannot pull the
+  // checkbox away from the title; the checkbox is centred on the title's first
+  // line (its line height scales with the system font scale).
+  rowTop: { alignItems: 'flex-start' },
   body: { flex: 1, gap: 2 },
-  title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: font.body * 1.25 },
+  title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: titleLineHeight },
   strike: { textDecorationLine: 'line-through' },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, flexWrap: 'nowrap' },
+  // Inline: one nowrap line; the fixed items are noShrink, so only the
+  // project/labels group gives way when the line is too wide.
+  meta: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', gap: space.s2 },
+  // Stacked: project/labels line above the fixed items line.
+  metaStack: { gap: 2 },
+  metaLine: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center' },
+  metaFixed: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.s2, rowGap: 2 },
+  // Project and labels: a plain nowrap group Yoga shrinks correctly. The project
+  // has the larger shrink factor and a 48dp floor; the group may shrink below its
+  // content (minWidth 0) and clips what still overflows.
+  chipsRow: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0 },
+  shrinkGroup: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0, overflow: 'hidden' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
+  projectChip: { flexShrink: 100, minWidth: 48 },
+  labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120 },
+  shrink: { flexShrink: 1, minWidth: 0 },
+  noShrink: { flexShrink: 0 },
+  groupGap: { marginLeft: space.s2 },
   metaText: { fontSize: font.caption, fontVariant: ['tabular-nums'] },
   dot: { width: 8, height: 8, borderRadius: 4 },
   avatar: {
     minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    minHeight: 18,
+    borderRadius: 12,
     paddingHorizontal: 3,
+    flexShrink: 0,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',

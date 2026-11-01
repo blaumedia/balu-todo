@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from starlette.requests import ClientDisconnect, Request
 
@@ -925,3 +927,46 @@ def test_disabled_probe_response_is_never_cacheable(client, user):
     resp = client.get("/api/v1/me/mcp?probe=true", headers=user["headers"])
     assert resp.json() == {"enabled": False}
     assert resp.headers["cache-control"] == "no-store"
+
+
+def test_update_task_refuses_placement_on_a_subtask(client, user, mcp_on):
+    key = mcp_key(client, user)
+    ws = user["workspace_id"]
+    first = sync(client, user, "*", [
+        cmd("project_add", temp_id="p1", name="Haushalt"),
+        cmd("project_add", temp_id="p2", name="Garten"),
+        cmd("task_add", temp_id="par", title="Parent", project_id="p1"),
+    ])
+    m = first["temp_id_mapping"]
+    second = sync(client, user, first["sync_token"], [
+        cmd("task_add", temp_id="s1", title="Sub", parent_task_id=m["par"]),
+    ])
+    sub = second["temp_id_mapping"]["s1"]
+    res = call(client, key, "update_task", {
+        "workspace_id": ws, "task_id": sub, "project_id": m["p2"],
+    })
+    assert res["isError"] is True
+    assert "parent" in payload(res)
+    ok = call(client, key, "update_task", {"workspace_id": ws, "task_id": sub, "notes": "n"})
+    assert ok["isError"] is False
+    # echoing the subtask's own (inherited) container alongside an edit succeeds
+    echo = call(client, key, "update_task", {
+        "workspace_id": ws, "task_id": sub, "notes": "m",
+        "project_id": m["p1"], "section_id": None,
+    })
+    assert echo["isError"] is False
+    # an echo-only call is a no-op, like on a top-level task, not "nothing to update"
+    echo_only = call(client, key, "update_task", {
+        "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
+    })
+    assert echo_only["isError"] is False, payload(echo_only)
+    view = json.loads(payload(echo_only))["updated"]
+    assert view["id"] == sub
+    assert view["project_id"] == m["p1"]
+    # a viewer's echo-only call is refused like any other write
+    viewer = _join(client, user, role="viewer")
+    denied = call(client, mcp_key(client, viewer), "update_task", {
+        "workspace_id": ws, "task_id": sub, "project_id": m["p1"],
+    })
+    assert denied["isError"] is True
+    assert "viewer role is read-only" in payload(denied)

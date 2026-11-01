@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from balu.models import Task
 from tests.conftest import cmd, sync
 
 
@@ -640,3 +641,366 @@ def test_computed_sort_order_is_capped_at_int32(client, user):
     assert body["sync_status"][second["uuid"]] == "ok"
     task = next(t for t in body["tasks"] if t["id"] == body["temp_id_mapping"]["b"])
     assert task["sort_order"] == 2**31 - 1
+
+
+# A subtask's project/section follow its parent (contract §3.3)
+def test_task_move_to_other_project_carries_subtasks(client, user):
+    body = sync(client, user, "*", [
+        cmd("project_add", temp_id="pa", name="A"),
+        cmd("project_add", temp_id="pb", name="B"),
+        cmd("section_add", temp_id="sa", project_id="pa", name="A-sec"),
+        cmd("task_add", temp_id="par", title="Parent", project_id="pa", section_id="sa"),
+    ])
+    m = body["temp_id_mapping"]
+    body = sync(client, user, body["sync_token"], [
+        cmd("task_add", temp_id="s1", title="Sub1", project_id=m["pa"], section_id=m["sa"],
+            parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s2", title="Sub2 (no project)", parent_task_id=m["par"]),
+    ])
+    m.update(body["temp_id_mapping"])
+
+    move = cmd("task_move", id=m["par"], project_id=m["pb"], section_id=None, sort_order=1000)
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+
+    tasks = {t["id"]: t for t in sync(client, user, "*")["tasks"]}
+    assert tasks[m["par"]]["project_id"] == m["pb"]
+    for key in ("s1", "s2"):
+        sub = tasks[m[key]]
+        assert sub["project_id"] == m["pb"], f"{key} stayed in {sub['project_id']!r}"
+        assert sub["section_id"] != m["sa"], f"{key} still points at the source project's section"
+
+
+def _tree(client, user):
+    body = sync(client, user, "*", [
+        cmd("project_add", temp_id="pa", name="A"),
+        cmd("project_add", temp_id="pb", name="B"),
+        cmd("section_add", temp_id="sa", project_id="pa", name="A-sec"),
+        cmd("section_add", temp_id="sb", project_id="pb", name="B-sec"),
+        cmd("task_add", temp_id="par", title="Parent", project_id="pa", section_id="sa"),
+        cmd("task_add", temp_id="par2", title="Parent2", project_id="pb", section_id="sb"),
+    ])
+    return body["temp_id_mapping"], body["sync_token"]
+
+
+def _sub_add(m):
+    return cmd("task_add", temp_id="s1", title="S", parent_task_id=m["par"])
+
+
+def _all(client, user):
+    return {t["id"]: t for t in sync(client, user, "*")["tasks"]}
+
+
+def test_task_move_cascade_follows_parent_section_and_bumps_subtask_version(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    assert _all(client, user)[m["s1"]]["project_id"] == m["pa"]  # task_add inherits
+    token = body["sync_token"]
+
+    move = cmd("task_move", id=m["par"], project_id=m["pb"], section_id=m["sb"])
+    body = sync(client, user, token, [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+    pulled = {t["id"]: t for t in body["tasks"]}
+    assert m["s1"] in pulled, "the subtask must be pulled by clients"
+    sub = _all(client, user)[m["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pb"], m["sb"])
+
+
+def test_task_move_cascade_leaves_deleted_subtasks_alone(client, user, db):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    body = sync(client, user, body["sync_token"], [cmd("task_delete", id=m["s1"])])
+    sync(client, user, body["sync_token"], [cmd("task_move", id=m["par"], project_id=m["pb"])])
+    db.expire_all()
+    assert str(db.get(Task, uuid.UUID(m["s1"])).project_id) == m["pa"]
+
+
+def test_reparenting_a_subtask_takes_the_new_parents_project_and_section(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    move = cmd("task_move", id=m["s1"], parent_task_id=m["par2"])
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+    sub = _all(client, user)[m["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pb"], m["sb"])
+
+
+def test_task_add_with_live_parent_ignores_the_sent_container(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [
+        cmd("task_add", temp_id="s1", title="S", parent_task_id=m["par"], project_id=m["pb"],
+            section_id=m["sb"]),
+    ])
+    sub = _all(client, user)[body["temp_id_mapping"]["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pa"], m["sa"])
+
+
+def test_task_move_of_a_subtask_ignores_sent_project_and_section(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    move = cmd("task_move", id=m["s1"], project_id=m["pb"], section_id=m["sb"])
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+    sub = _all(client, user)[m["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pa"], m["sa"])
+
+
+def test_reparenting_with_a_section_of_the_new_parent_is_not_rejected(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    move = cmd("task_move", id=m["s1"], parent_task_id=m["par2"], section_id=m["sb"])
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]] == "ok"
+    sub = _all(client, user)[m["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pb"], m["sb"])
+
+
+def test_task_with_live_subtasks_cannot_become_a_subtask(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [_sub_add(m)])
+    m.update(body["temp_id_mapping"])
+    move = cmd("task_move", id=m["par"], parent_task_id=m["par2"])
+    body = sync(client, user, body["sync_token"], [move])
+    assert body["sync_status"][move["uuid"]]["error_code"] == "invalid_args"
+    assert _all(client, user)[m["par"]]["parent_task_id"] is None
+
+
+def test_cascade_leaves_unchanged_subtasks_versions_alone(client, user, db):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [
+        cmd("task_add", temp_id="s1", title="S1", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s2", title="S2", parent_task_id=m["par"]),
+    ])
+    m.update(body["temp_id_mapping"])
+
+    def versions():
+        db.expire_all()
+        return {k: db.get(Task, uuid.UUID(m[k])).version for k in ("par", "s1", "s2")}
+
+    before = versions()
+    move = cmd("task_move", id=m["par"], project_id=m["pb"], section_id=m["sb"])
+    body = sync(client, user, body["sync_token"], [move])
+    after = versions()
+    assert after["s1"] > before["s1"] and after["s2"] > before["s2"]
+    # Moving to the container the subtasks are already in changes no subtask version.
+    again = cmd("task_move", id=m["par"], project_id=m["pb"], section_id=m["sb"])
+    sync(client, user, body["sync_token"], [again])
+    final = versions()
+    assert final["s1"] == after["s1"] and final["s2"] == after["s2"]
+    assert final["par"] > after["par"]
+
+
+def test_task_move_rejects_a_task_as_its_own_parent(client, user):
+    m, token = _tree(client, user)
+    mv = cmd("task_move", id=m["par"], parent_task_id=m["par"])
+    body = sync(client, user, token, [mv])
+    assert body["sync_status"][mv["uuid"]]["error_code"] == "invalid_args"
+    assert _all(client, user)[m["par"]]["parent_task_id"] is None
+
+
+def test_task_add_with_live_parent_is_not_relocated_by_a_deleted_sent_project(client, user):
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [cmd("project_delete", id=m["pb"])])
+    add = cmd("task_add", temp_id="s1", title="S", parent_task_id=m["par"],
+              project_id=m["pb"], section_id=m["sb"])
+    body = sync(client, user, body["sync_token"], [add])
+    assert body["sync_status"][add["uuid"]] == "ok"
+    assert "relocated" not in body or add["uuid"] not in (body.get("relocated") or {})
+    sub = _all(client, user)[body["temp_id_mapping"]["s1"]]
+    assert (sub["project_id"], sub["section_id"]) == (m["pa"], m["sa"])
+
+
+def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, user, db):
+    import importlib.util
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from sqlalchemy import text
+
+    from balu.db import get_engine
+
+    m, token = _tree(client, user)
+    body = sync(client, user, token, [
+        cmd("task_add", temp_id="s1", title="Mismatched", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s2", title="Matching", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s3", title="Deleted", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="s4", title="Mismatched too", parent_task_id=m["par"]),
+    ])
+    m.update(body["temp_id_mapping"])
+    sync(client, user, body["sync_token"], [cmd("task_delete", id=m["s3"])])
+    ws = user["workspace_id"]
+    # nesting deeper than one level, as older servers could create it
+    body = sync(client, user, "*", [
+        cmd("task_add", temp_id="g1", title="Grandchild"),
+        cmd("task_add", temp_id="g2", title="Great-grandchild"),
+        cmd("task_add", temp_id="e1", title="FormerParentS1ChildA"),
+        cmd("task_add", temp_id="e2", title="FormerParentS1ChildB"),
+        cmd("task_add", temp_id="f1", title="FormerParentS4ChildA"),
+        cmd("task_add", temp_id="f2", title="FormerParentS4ChildB"),
+        cmd("task_add", temp_id="d1", title="DeletedMiddle", parent_task_id=m["par"]),
+        cmd("task_add", temp_id="d2", title="HiddenBelowDeleted"),
+        cmd("task_add", temp_id="c1", title="CycleA"),
+        cmd("task_add", temp_id="c2", title="CycleB"),
+    ])
+    m.update(body["temp_id_mapping"])
+    # a second workspace holding only matching subtasks must not be bumped
+    other = _second_workspace(client, user)
+    resp = client.post(
+        f"/api/v1/workspaces/{other}/sync",
+        headers=user["headers"],
+        json={"sync_token": "*", "commands": [
+            cmd("task_add", temp_id="op", title="OtherParent"),
+            cmd("task_add", temp_id="os", title="OtherSub", parent_task_id="op"),
+        ]},
+    )
+    assert resp.status_code == 200, resp.text
+    with get_engine().begin() as conn:
+        # the pre-fix state: s1 and the deleted s3 diverged from the parent
+        conn.execute(text(
+            "UPDATE tasks SET project_id = :p, section_id = :sec WHERE id IN (:a, :b, :c)"
+        ), {"p": m["pb"], "sec": m["sb"], "a": m["s1"], "b": m["s3"], "c": m["s4"]})
+        conn.execute(text("UPDATE tasks SET parent_task_id = :par WHERE id = :g"),
+                     {"par": m["s2"], "g": m["g1"]})
+        conn.execute(text("UPDATE tasks SET parent_task_id = :par WHERE id = :g"),
+                     {"par": m["g1"], "g": m["g2"]})
+        conn.execute(text("UPDATE tasks SET sort_order = 10 WHERE id = :g"), {"g": m["g1"]})
+        conn.execute(text("UPDATE tasks SET sort_order = 20 WHERE id = :g"), {"g": m["g2"]})
+        # two more former parents (s1, s4) that share a sort_order, with grandchildren
+        # whose old sibling-relative sort_orders collide: 10 e1, 10 f1, 20 e2, 20 f2
+        for parent, child, order in (
+            ("s1", "e1", 10), ("s4", "f1", 10), ("s1", "e2", 20), ("s4", "f2", 20),
+        ):
+            conn.execute(
+                text("UPDATE tasks SET parent_task_id = :par, sort_order = :o WHERE id = :c"),
+                {"par": m[parent], "o": order, "c": m[child]},
+            )
+        # the former parents' own order decides the order of their groups: s2 first,
+        # then s1 and s4 (tied on sort_order, so by id)
+        for key, order in (("s2", 1), ("s1", 2), ("s4", 2)):
+            conn.execute(
+                text("UPDATE tasks SET sort_order = :o WHERE id = :t"), {"o": order, "t": m[key]}
+            )
+        # a live row below a deleted intermediate (deleted by a one-level cascade only)
+        conn.execute(text("UPDATE tasks SET is_deleted = true WHERE id = :d"), {"d": m["d1"]})
+        conn.execute(text(
+            "UPDATE tasks SET parent_task_id = :par, project_id = :p, section_id = :sec"
+            " WHERE id = :d"
+        ), {"par": m["d1"], "p": m["pb"], "sec": m["sb"], "d": m["d2"]})
+        # a parent cycle: unreachable from any top-level task
+        conn.execute(text("UPDATE tasks SET parent_task_id = :o, project_id = :p WHERE id = :t"),
+                     {"o": m["c2"], "p": m["pb"], "t": m["c1"]})
+        conn.execute(text("UPDATE tasks SET parent_task_id = :o, project_id = :p WHERE id = :t"),
+                     {"o": m["c1"], "p": m["pb"], "t": m["c2"]})
+        max_sort = conn.execute(text(
+            "SELECT MAX(sort_order) FROM tasks WHERE parent_task_id = :par AND is_deleted = false"
+            " AND id NOT IN (:g1, :g2, :e1, :e2, :f1, :f2)"
+        ), {"par": m["par"], "g1": m["g1"], "g2": m["g2"], "e1": m["e1"], "e2": m["e2"],
+            "f1": m["f1"], "f2": m["f2"]}).scalar_one()
+        before = {
+            str(r.id): tuple(r)[1:]
+            for r in conn.execute(text(
+                "SELECT id, parent_task_id, project_id, section_id, sort_order, version"
+                " FROM tasks WHERE id IN (:d2, :c1, :c2)"
+            ), {"d2": m["d2"], "c1": m["c1"], "c2": m["c2"]})
+        }
+        other_version = conn.execute(
+            text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
+        ).scalar_one()
+        ws_version = conn.execute(
+            text("SELECT version FROM workspaces WHERE id = :w"), {"w": ws}
+        ).scalar_one()
+        s2_version = conn.execute(
+            text("SELECT version FROM tasks WHERE id = :t"), {"t": m["s2"]}
+        ).scalar_one()
+
+    path = next(
+        (Path(__file__).resolve().parent.parent / "alembic" / "versions").glob(
+            "f6a7b8c9d0e1_*.py"
+        )
+    )
+    spec = importlib.util.spec_from_file_location("mig_f6a7", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    with get_engine().begin() as conn:
+        mod.op = SimpleNamespace(execute=lambda sql: conn.execute(text(str(sql))))
+        mod.upgrade()
+        mod.upgrade()  # idempotent: the second run changes nothing (and terminates on the cycle)
+
+    with get_engine().begin() as conn:
+        rows = {
+            str(r.id): r
+            for r in conn.execute(text(
+                "SELECT id, project_id, section_id, version, parent_task_id, sort_order,"
+                " is_deleted FROM tasks"
+            ))
+        }
+        new_ws_version = conn.execute(
+            text("SELECT version FROM workspaces WHERE id = :w"), {"w": ws}
+        ).scalar_one()
+        new_other_version = conn.execute(
+            text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
+        ).scalar_one()
+    # two mismatched subtasks plus the deep ones, one bump for the workspace
+    assert new_ws_version == ws_version + 1
+    assert new_other_version == other_version
+    s4 = rows[m["s4"]]
+    assert (str(s4.project_id), str(s4.section_id)) == (m["pa"], m["sa"])
+    assert s4.version == new_ws_version
+    s1 = rows[m["s1"]]
+    assert (str(s1.project_id), str(s1.section_id)) == (m["pa"], m["sa"])
+    assert s1.version == new_ws_version
+    assert rows[m["s2"]].version == s2_version
+    # flattened onto the top-level ancestor, then aligned
+    for g in ("g1", "g2", "e1", "e2", "f1", "f2"):
+        row = rows[m[g]]
+        assert str(row.parent_task_id) == m["par"]
+        assert (str(row.project_id), str(row.section_id)) == (m["pa"], m["sa"])
+        assert row.version == new_ws_version
+    # appended after the root's own subtasks, in their old relative order
+    assert rows[m["g1"]].sort_order == max_sort + 1000
+    assert rows[m["g2"]].sort_order == max_sort + 2000
+    # depth-first: each former parent's group stays together (no e/f interleaving),
+    # even with tied sort_orders on both levels
+    first, second = sorted((("e1", "e2"), ("f1", "f2")),
+                           key=lambda g: m["s1"] if g[0] == "e1" else m["s4"])
+    assert [rows[m[k]].sort_order for k in (*first, *second)] == [
+        max_sort + 3000, max_sort + 4000, max_sort + 5000, max_sort + 6000,
+    ]
+    assert str(rows[m["s3"]].project_id) == m["pb"]  # deleted: untouched
+    # a live row under a deleted intermediate is not resurrected; a cycle is left alone
+    for key in ("d2", "c1", "c2"):
+        row = rows[m[key]]
+        assert (
+            row.parent_task_id, row.project_id, row.section_id, row.sort_order, row.version
+        ) == before[m[key]]
+    assert rows[m["d1"]].is_deleted
+
+
+def test_task_reorder_skips_a_task_of_another_workspace(client, user):
+    other = _second_workspace(client, user)
+    resp = client.post(
+        f"/api/v1/workspaces/{other}/sync",
+        headers=user["headers"],
+        json={"sync_token": "*", "commands": [cmd("task_add", temp_id="x", title="Foreign")]},
+    )
+    assert resp.status_code == 200, resp.text
+    foreign = resp.json()["temp_id_mapping"]["x"]
+    body = sync(client, user, "*", [cmd("task_add", temp_id="a", title="A")])
+    a = body["temp_id_mapping"]["a"]
+    reorder = cmd("task_reorder", items=[
+        {"id": foreign, "sort_order": 9000}, {"id": a, "sort_order": 4000},
+    ])
+    body = sync(client, user, body["sync_token"], [reorder])
+    assert body["sync_status"][reorder["uuid"]] == "ok"
+    assert _all(client, user)[a]["sort_order"] == 4000
+    check = client.post(
+        f"/api/v1/workspaces/{other}/sync",
+        headers=user["headers"],
+        json={"sync_token": "*", "commands": []},
+    ).json()
+    assert next(t for t in check["tasks"] if t["id"] == foreign)["sort_order"] != 9000

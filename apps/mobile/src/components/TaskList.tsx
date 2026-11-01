@@ -9,12 +9,14 @@ export function TaskItems({
   maps,
   today,
   hideProject,
+  hideTodayDate,
   swipeable = true,
 }: {
   tasks: Task[];
   maps: ReplicaMaps;
   today: IsoDate;
   hideProject?: boolean;
+  hideTodayDate?: boolean;
   swipeable?: boolean;
 }) {
   const writable = useWritable();
@@ -30,6 +32,7 @@ export function TaskItems({
           members={maps.members}
           commentCount={maps.commentCounts.get(task.id) ?? 0}
           hideProject={hideProject}
+          hideTodayDate={hideTodayDate}
           swipeable={swipeable}
           writable={writable}
         />
