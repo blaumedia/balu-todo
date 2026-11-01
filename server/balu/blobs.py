@@ -35,7 +35,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from .attachments import attachments_root
+from .db import describe_transient_error
 
 logger = logging.getLogger("balu.blobs")
 
@@ -51,6 +54,27 @@ CHUNK_SIZE = 1000
 #: `--apply` refuses when more than this share of the candidates are orphans.
 MAX_ORPHAN_RATIO = 0.5
 _STAMP_FORMAT = "%Y%m%dT%H%M%SZ"
+
+
+class QuarantineError(RuntimeError):
+    """The quarantine directory cannot be used safely."""
+
+
+def _canonical_uuid(name: str) -> uuid.UUID:
+    """Parse only the spelling the server writes (lowercase, dashed); else ValueError."""
+    parsed = uuid.UUID(name)
+    if str(parsed) != name:
+        raise ValueError(name)
+    return parsed
+
+
+def _quarantine_root() -> Path:
+    qdir = attachments_root() / QUARANTINE_DIR
+    if os.path.islink(qdir):
+        raise QuarantineError(
+            f"{qdir} is a symlink: refusing to write or delete through it"
+        )
+    return qdir
 
 
 @dataclass
@@ -82,13 +106,13 @@ def _scan(root: Path, min_age_seconds: int) -> list[Candidate]:
     with os.scandir(root) as top:
         for ws_entry in top:
             try:
-                ws_id = uuid.UUID(ws_entry.name)
+                ws_id = _canonical_uuid(ws_entry.name)
                 if ws_entry.is_symlink() or not ws_entry.is_dir(follow_symlinks=False):
                     continue
                 with os.scandir(ws_entry.path) as inner:
                     for entry in inner:
                         try:
-                            att_id = uuid.UUID(entry.name)
+                            att_id = _canonical_uuid(entry.name)
                             if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
                                 continue
                             st = entry.stat(follow_symlinks=False)
@@ -152,7 +176,7 @@ def find_orphans(min_age_seconds: int = MIN_AGE_SECONDS) -> SweepReport:
 def quarantine(report: SweepReport, now: datetime | None = None) -> int:
     """Move the orphans of `report` into a fresh quarantine batch; return how many moved."""
     stamp = (now or datetime.now(UTC)).strftime(_STAMP_FORMAT)
-    batch = attachments_root() / QUARANTINE_DIR / stamp
+    batch = _quarantine_root() / stamp
     moved = 0
     for c in report.orphans:
         target_dir = batch / str(c.workspace_id)
@@ -167,13 +191,19 @@ def quarantine(report: SweepReport, now: datetime | None = None) -> int:
     return moved
 
 
-def purge_quarantine(older_than_days: int, now: datetime | None = None) -> tuple[int, int]:
-    """Delete quarantine batches older than N days; return (files, bytes)."""
-    qdir = attachments_root() / QUARANTINE_DIR
+def purge_quarantine(
+    older_than_days: int, now: datetime | None = None
+) -> tuple[int, int, int]:
+    """Delete quarantine batches older than N days; return (files, bytes, left_over).
+
+    Only files that are really gone are counted; `left_over` is how many files
+    of the selected batches could not be removed.
+    """
+    qdir = _quarantine_root()
     if not qdir.is_dir():
-        return 0, 0
+        return 0, 0, 0
     cutoff = (now or datetime.now(UTC)).timestamp() - older_than_days * 86400
-    files = size = 0
+    files = size = left = 0
     with os.scandir(qdir) as it:
         batches = [e for e in it if e.is_dir(follow_symlinks=False)]
     for entry in batches:
@@ -183,29 +213,54 @@ def purge_quarantine(older_than_days: int, now: datetime | None = None) -> tuple
             continue
         if when.timestamp() >= cutoff:
             continue
+        found: list[tuple[str, int]] = []
         for dirpath, _dirs, names in os.walk(entry.path):
             for name in names:
+                path = os.path.join(dirpath, name)
                 try:
-                    size += os.lstat(os.path.join(dirpath, name)).st_size
-                    files += 1
+                    found.append((path, os.lstat(path).st_size))
                 except OSError:
                     continue
         shutil.rmtree(entry.path, ignore_errors=True)
-    return files, size
+        for path, nbytes in found:
+            if os.path.lexists(path):
+                left += 1
+            else:
+                files += 1
+                size += nbytes
+    return files, size, left
 
 
 def _sweep(args: argparse.Namespace) -> int:
     if args.purge_quarantine:
+        if args.apply or args.force:
+            print("--purge-quarantine cannot be combined with --apply or --force", file=sys.stderr)
+            return 2
         if args.older_than_days is None or args.older_than_days < 0:
             print("--purge-quarantine needs --older-than-days N (N >= 0)", file=sys.stderr)
             return 2
-        files, size = purge_quarantine(args.older_than_days)
+        try:
+            files, size, left = purge_quarantine(args.older_than_days)
+        except QuarantineError as exc:
+            print(f"refusing: {exc}", file=sys.stderr)
+            return 1
         print(f"purged {files} quarantined file(s), {size} byte(s)")
+        if left:
+            print(f"{left} file(s) could not be removed and are still there", file=sys.stderr)
+            return 1
         return 0
     if args.older_than_days is not None:
         print("--older-than-days only applies with --purge-quarantine", file=sys.stderr)
         return 2
-    report = find_orphans()
+    try:
+        report = find_orphans()
+    except SQLAlchemyError as exc:
+        print(
+            f"cannot read the attachments table, nothing was changed: "
+            f"{describe_transient_error(exc)}",
+            file=sys.stderr,
+        )
+        return 1
     print(
         f"candidate files: {report.candidates}; orphans: {len(report.orphans)} "
         f"({report.orphan_bytes} byte(s)); live attachment rows: "
@@ -217,7 +272,11 @@ def _sweep(args: argparse.Namespace) -> int:
     if not args.apply:
         print("dry run: nothing changed (add --apply to quarantine the orphans)")
         return 0
-    moved = quarantine(report)
+    try:
+        moved = quarantine(report)
+    except QuarantineError as exc:
+        print(f"refusing: {exc}", file=sys.stderr)
+        return 1
     print(f"moved {moved} orphan file(s) to {QUARANTINE_DIR}/ inside the attachments root")
     return 0
 

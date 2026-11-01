@@ -111,8 +111,9 @@ error names the revision to use). In order:
    downgrade <revision>`, where `<revision>` is the revision the release notes name
    (for the release that added `f6a7b8c9d0e1`: `e5f6a7b8c9d0`). The command prints the
    current and the target revision and refuses, without `--yes`, any target below the
-   image's previous head (`base`, `-2`, a typo): those walks can drop tables such as
-   `attachments`.
+   image's head or previous head (`base`, `-2`, a typo; `-1` counts from the database's
+   current revision, so it passes only while the database is at the image's head): those
+   walks can drop tables such as `attachments`.
 2. Pin the older image tag in `docker-compose.yml`, then `docker compose pull` and
    `docker compose up -d`.
 
@@ -123,13 +124,14 @@ newer revision stamped in the database.
 **Orphan attachment blobs.** A crash between a delete's commit and the file removal can
 leave bytes nothing points at. That is harmless disk usage and no routine job is needed;
 nothing sweeps automatically (an automatic sweep would wipe every blob on an empty or
-mismatched database). To reclaim the space, run inside the container
-`python -m balu.blobs sweep`: a dry run printing counts and total bytes. `--apply` moves
+mismatched database). To reclaim the space, run
+`docker compose exec app python -m balu.blobs sweep`: a dry run printing counts and total bytes. `--apply` moves
 files older than 1 h with no live attachment row into `attachments/.orphans/<timestamp>/`
-instead of deleting them, and refuses when the attachments table has no live rows or when
+instead of deleting them (`docker compose exec app python -m balu.blobs sweep --apply`),
+and refuses when the attachments table has no live rows or when
 more than 50% of the candidate files are orphans (`--force` overrides). After checking
-that nothing is missing, `python -m balu.blobs sweep --purge-quarantine --older-than-days N`
-deletes quarantined batches older than N days.
+that nothing is missing, `docker compose exec app python -m balu.blobs sweep
+--purge-quarantine --older-than-days N` deletes quarantined batches older than N days.
 
 `BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** - compose refuses to
 start without them, and the server refuses to boot on a weak (<32 char) or

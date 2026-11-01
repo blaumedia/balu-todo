@@ -195,3 +195,79 @@ def test_the_app_no_longer_sweeps_at_startup():
 
     assert not hasattr(balu.attachments, "sweep_orphan_blobs")
     assert not hasattr(balu.main, "_start_orphan_sweep")
+
+
+def test_purge_counts_only_removed_files_and_fails_when_some_remain(
+    data_dir, capsys, monkeypatch
+):
+    q = data_dir / "attachments" / ".orphans"
+    old = q / (datetime.now(UTC) - timedelta(days=40)).strftime(blobs._STAMP_FORMAT) / "ws"
+    old.mkdir(parents=True)
+    (old / "f").write_bytes(b"abc")
+    monkeypatch.setattr(blobs.shutil, "rmtree", lambda *a, **k: None)  # removal fails
+    assert blobs.main(["sweep", "--purge-quarantine", "--older-than-days", "30"]) == 1
+    captured = capsys.readouterr()
+    assert "purged 0 quarantined file(s), 0 byte(s)" in captured.out
+    assert "1 file(s) could not be removed" in captured.err
+    assert (old / "f").exists()
+
+
+def test_a_symlinked_quarantine_is_refused_for_apply_and_purge(
+    client, user, data_dir, capsys, tmp_path_factory
+):
+    d, lives, _ = _setup(client, user, data_dir)
+    orphan = _orphan(d)
+    outside = tmp_path_factory.mktemp("outside")
+    old = outside / (datetime.now(UTC) - timedelta(days=40)).strftime(blobs._STAMP_FORMAT)
+    old.mkdir()
+    (old / "f").write_bytes(b"abc")
+    (data_dir / "attachments" / ".orphans").symlink_to(outside, target_is_directory=True)
+    assert blobs.main(["sweep", "--apply"]) == 1
+    assert orphan.exists() and not list(outside.glob("*/*/*"))
+    assert blobs.main(["sweep", "--purge-quarantine", "--older-than-days", "30"]) == 1
+    assert (old / "f").exists()
+    assert "symlink" in capsys.readouterr().err
+
+
+def test_only_canonical_uuid_names_are_candidates(client, user, data_dir):
+    d, lives, _ = _setup(client, user, data_dir)
+    odd = [
+        d / str(uuid.uuid4()).upper(),
+        d / uuid.uuid4().hex,
+        d / ("{" + str(uuid.uuid4()) + "}"),
+    ]
+    for f in odd:
+        f.write_bytes(b"x")
+        _age(f, 7200)
+    odd_ws = d.parent / str(uuid.uuid4()).upper()
+    odd_ws.mkdir()
+    (odd_ws / str(uuid.uuid4())).write_bytes(b"x")
+    _age(odd_ws / next(odd_ws.iterdir()).name, 7200)
+    report = blobs.find_orphans()
+    assert report.candidates == len(lives)
+    assert not report.orphans
+
+
+def test_contradictory_flags_are_rejected(data_dir, capsys):
+    base = ["sweep", "--purge-quarantine", "--older-than-days", "30"]
+    assert blobs.main([*base, "--apply"]) == 2
+    assert blobs.main([*base, "--force"]) == 2
+    assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_a_database_failure_is_a_short_message_and_exit_1(
+    client, user, data_dir, capsys, monkeypatch
+):
+    from sqlalchemy.exc import SQLAlchemyError
+
+    d, lives, _ = _setup(client, user, data_dir)
+    orphan = _orphan(d)
+
+    def boom(ids):
+        raise SQLAlchemyError("SELECT secret FROM attachments")
+
+    monkeypatch.setattr(blobs, "_live_ids", boom)
+    assert blobs.main(["sweep", "--apply"]) == 1
+    err = capsys.readouterr().err
+    assert "nothing was changed" in err and "SELECT" not in err
+    assert orphan.exists()

@@ -984,20 +984,20 @@ def test_failed_commit_on_project_delete_keeps_blob(client, user, data_dir, db, 
 
 
 
-def test_download_blob_vanishing_before_the_stat_is_not_found(client, user, data_dir, monkeypatch):
+def test_download_blob_unreadable_at_the_stat_is_not_found(client, user, data_dir, monkeypatch):
     import os
 
     task_id = _add_task(client, user)
     meta = _upload(client, user, task_id).json()
-    (_blob_dir(data_dir, user["workspace_id"]) / meta["id"]).unlink()
+    assert (_blob_dir(data_dir, user["workspace_id"]) / meta["id"]).is_file()
     real_stat = os.stat
 
-    def racing_stat(path, *args, **kwargs):
+    def denied_stat(path, *args, **kwargs):
         if str(path).endswith(meta["id"]):
-            raise FileNotFoundError(path)
+            raise PermissionError(path)
         return real_stat(path, *args, **kwargs)
 
-    monkeypatch.setattr("balu.routers.attachments.os.stat", racing_stat)
+    monkeypatch.setattr("balu.routers.attachments.os.stat", denied_stat)
     got = client.get(
         f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
         headers=user["headers"],
