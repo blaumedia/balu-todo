@@ -21,3 +21,7 @@ def _jobs(name: str) -> dict:
 @pytest.mark.parametrize("job", ["backend", "clients"])
 def test_gate_job_identical_in_ci_and_release(job):
     assert _jobs("ci.yml")[job] == _jobs("release.yml")[job]
+
+
+def test_release_image_job_needs_the_gate():
+    assert {"backend", "clients"} <= set(_jobs("release.yml")["image"]["needs"])
