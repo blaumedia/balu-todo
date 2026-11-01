@@ -16,23 +16,30 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-SER = os.environ.get("ANDROID_SERIAL")
-if not SER:
+_SERIAL = os.environ.get("ANDROID_SERIAL")
+if not _SERIAL:
     raise SystemExit(
         "set ANDROID_SERIAL to your own emulator (adb devices); these scripts never pick a device"
     )
+SER: str = _SERIAL
 REMOTE = "/sdcard/balu-e2e-ui.xml"
 
 
-def adb(*a: str) -> str:
-    return subprocess.run(["adb", "-s", SER, *a], capture_output=True, text=True).stdout
+def adb(*a: str, check: bool = True) -> str:
+    try:
+        r = subprocess.run(["adb", "-s", SER, *a], capture_output=True, text=True, check=check)
+    except subprocess.CalledProcessError as err:
+        raise SystemExit(f"adb failed for {SER} ({' '.join(a[:2])}): exit {err.returncode}") from None
+    except FileNotFoundError:
+        raise SystemExit("adb not found on PATH") from None
+    return r.stdout
 
 
 def dump() -> ET.Element:
     for _ in range(5):  # uiautomator fails with "could not get idle state" while the UI animates
-        adb("shell", "uiautomator", "dump", REMOTE)
-        xml = adb("exec-out", "cat", REMOTE)
-        adb("shell", "rm", "-f", REMOTE)
+        adb("shell", "uiautomator", "dump", REMOTE, check=False)
+        xml = adb("exec-out", "cat", REMOTE, check=False)
+        adb("shell", "rm", "-f", REMOTE, check=False)
         if "<?xml" in xml:
             return ET.fromstring(xml[xml.index("<?xml"):])
         time.sleep(1)
@@ -45,8 +52,14 @@ def nodes(root: ET.Element):
             yield n
 
 
-def center(bounds: str) -> tuple[int, int]:
-    x1, y1, x2, y2 = map(int, re.findall(r"\d+", bounds))
+def nums(bounds: str | None) -> list[int]:
+    return [int(x) for x in re.findall(r"\d+", bounds or "")]
+
+
+def center(bounds: str | None) -> tuple[int, int]:
+    if not bounds:
+        raise SystemExit("node has no bounds")
+    x1, y1, x2, y2 = nums(bounds)
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
@@ -62,6 +75,13 @@ def main() -> int:
     cmd = argv[0]
     desc = "--desc" in argv
     args = [x for x in argv[1:] if x != "--desc"]
+    need = {"list": 0, "state": 0, "type": 0, "tap": 1, "has": 1, "dump": 1, "swipe": 2}
+    if cmd not in need:
+        raise SystemExit(__doc__)
+    if len(args) < need[cmd] or (cmd != "type" and len(args) > need[cmd]):
+        raise SystemExit(f"usage error: {cmd} takes {need[cmd]} argument(s)\n{__doc__}")
+    if cmd == "swipe" and args[1] not in ("left", "right"):
+        raise SystemExit("swipe direction must be left or right")
     if cmd == "type":
         text = " ".join(args)
         if not re.fullmatch(r"[A-Za-z0-9@._+:/ -]*", text):
@@ -104,7 +124,7 @@ def main() -> int:
         if not hits:
             print("ROW NOT FOUND", args[0])
             return 2
-        x1, y1, x2, y2 = map(int, re.findall(r"\d+", hits[0].get("bounds")))
+        x1, y1, x2, y2 = nums(hits[0].get("bounds"))
         y = (y1 + y2) // 2
         w = x2 - x1
         a, b = x1 + int(0.85 * w), x1 + int(0.15 * w)
@@ -114,7 +134,7 @@ def main() -> int:
         print("swiped", args[1], "y", y)
     elif cmd == "state":
         top = max(
-            (int(re.findall(r"\d+", n.get("bounds"))[3]) for n in root.iter("node")), default=0
+            (nums(n.get("bounds"))[3] for n in root.iter("node")), default=0
         )
         sel = [
             n.get("content-desc")
@@ -123,7 +143,7 @@ def main() -> int:
         ]
         headers = [
             n.get("text") for n in nodes(root)
-            if n.get("text") and int(re.findall(r"\d+", n.get("bounds"))[1]) < top * 0.14
+            if n.get("text") and nums(n.get("bounds"))[1] < top * 0.14
         ]
         focus = re.search(r"mCurrentFocus=.*", adb("shell", "dumpsys", "window"))
         print("selected", sel)

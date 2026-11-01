@@ -17,20 +17,38 @@ if [ "$PROJECT" = "balu" ]; then
   exit 2
 fi
 
+MARKER=$STATE/.balu-e2e-state
+
 ensure_env() {
+  # Adopt a directory only when it is new, empty or already ours, so `purge` can
+  # never be pointed at an unrelated directory by a stray BALU_E2E_STATE.
+  if [ ! -f "$MARKER" ] && [ -d "$STATE" ] && [ -n "$(ls -A "$STATE")" ]; then
+    echo "refusing to use $STATE: not empty and not created by stack.sh" >&2
+    exit 1
+  fi
   mkdir -p "$STATE"
   chmod 700 "$STATE"
+  : > "$MARKER"
+  (umask 077; printf 'services:\n  app:\n    env_file: !reset []\n' > "$OVERRIDE")
   if [ ! -f "$ENVF" ]; then
     (umask 077; printf 'BALU_SECRET_KEY=%s\nBALU_DB_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 16)" > "$ENVF")
   fi
 }
 
+# The override drops the checkout's root .env from the app container, so real SMTP,
+# Telegram and BALU_DEV values never reach the throwaway stack (`!reset` needs compose >= 2.24).
+OVERRIDE=$STATE/override.yml
+
 dc() {
-  docker compose -p "$PROJECT" -f "$ROOT/docker-compose.yml" --env-file "$ENVF" "$@"
+  docker compose -p "$PROJECT" -f "$ROOT/docker-compose.yml" -f "$OVERRIDE" --env-file "$ENVF" "$@"
 }
 
 cmd=${1:-}
 [ $# -gt 0 ] && shift
+if [ "$cmd" = "purge" ] && [ ! -f "$MARKER" ]; then
+  echo "not purging $STATE: no marker file created by stack.sh" >&2
+  exit 1
+fi
 ensure_env
 
 case "$cmd" in
@@ -56,10 +74,8 @@ case "$cmd" in
     ;;
   purge)
     dc down -v
-    case "$STATE" in
-      */balu-e2e/"$PROJECT") rm -rf "$STATE" ;;
-      *) if [ -n "${BALU_E2E_STATE:-}" ]; then rm -rf "$STATE"; fi ;;
-    esac
+    # Only a directory this script created (it holds the .balu-e2e-state marker) is removed.
+    rm -rf "$STATE"
     echo "purged"
     ;;
   ps)

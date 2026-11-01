@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import os
+import re
 import socketserver
 import sys
 import time
@@ -30,6 +32,7 @@ import balu_e2e as e
 
 CTL = e.STATE / "ctl"
 LOG = e.STATE / "proxy.log"
+INVITE_PATH = re.compile(r"(/invite/)[^/?#\s]+", re.IGNORECASE)  # as server main.py
 NAMES = ("dark", "dark_on_403", "me_empty")
 
 
@@ -41,13 +44,14 @@ def make_handler(upstream: str, log):
     class H(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.0"
 
-        def log_message(self, *a):
+        def log_message(self, format, *args):
             pass
 
         def _go(self):
             path = self.path.split("?")[0]
+            shown = INVITE_PATH.sub(r"\1<redacted>", path)
             if is_on("dark"):
-                log.write(f"{time.strftime('%H:%M:%S')} {self.command} {path} DARK\n")
+                log.write(f"{time.strftime('%H:%M:%S')} {self.command} {shown} DARK\n")
                 self.close_connection = True
                 self.connection.close()
                 return
@@ -66,6 +70,13 @@ def make_handler(upstream: str, log):
                     status, data, rh = r.status, r.read(), r.headers
             except urllib.error.HTTPError as err:
                 status, data, rh = err.code, err.read(), err.headers
+            except (urllib.error.URLError, OSError):
+                log.write(f"{time.strftime('%H:%M:%S')} {self.command} {shown} 502\n")
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                return
             is_me = self.command == "GET" and path == "/api/v1/me" and status == 200
             if is_me and is_on("me_empty"):
                 j = json.loads(data)
@@ -73,7 +84,7 @@ def make_handler(upstream: str, log):
                 data = json.dumps(j).encode()
             if status == 403 and "/sync" in path and is_on("dark_on_403"):
                 (CTL / "dark").touch()
-            log.write(f"{time.strftime('%H:%M:%S')} {self.command} {path} {status}\n")
+            log.write(f"{time.strftime('%H:%M:%S')} {self.command} {shown} {status}\n")
             self.send_response(status)
             for k, v in rh.items():
                 if k.lower() in ("transfer-encoding", "connection", "content-length"):
@@ -97,7 +108,8 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 def serve(a) -> int:
     e.state_dir()
     CTL.mkdir(mode=0o700, exist_ok=True)
-    log = open(LOG, "a", buffering=1)
+    log = open(os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), "a", buffering=1)
+    LOG.chmod(0o600)
     Server(("127.0.0.1", a.listen), make_handler(a.upstream, log)).serve_forever()
     return 0
 

@@ -45,6 +45,14 @@ def task_add(title: str, project_temp: str | None = None) -> dict:
     return {"type": "task_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": args}
 
 
+def ok(status: int) -> int:
+    return 0 if 200 <= status < 300 else 1
+
+
+def synced(status: int, body: dict) -> int:
+    return 0 if ok(status) == 0 and e.statuses(body) == ["ok"] else 1
+
+
 def cmd_health(_a) -> int:
     s = e.health()
     print("healthz", s)
@@ -66,8 +74,12 @@ def cmd_setup(a) -> int:
     else:
         s, inv = e.authed("owner", "POST", f"/workspaces/{ws}/invites", {"role": a.member_role})
         print("invite", s)
+        if s not in (200, 201):
+            raise SystemExit(f"invite: HTTP {s}")
         s2, _ = e.authed("member", "POST", "/invites/accept", {"token": inv["invite"]["token"]})
         print("accept", s2)
+        if s2 not in (200, 201):
+            raise SystemExit(f"accept: HTTP {s2}")
     s, snap = e.sync("owner", ws, [])
     existing = [
         p for p in snap.get("projects", [])
@@ -101,14 +113,14 @@ def cmd_setup(a) -> int:
     e.save("tasks.json", json.dumps(ids))
     print("seed", s, e.statuses(b))
     print("tasks", len(tasks_map()))
-    return 0
+    return 0 if s == 200 and e.statuses(b) == ["ok"] else 1
 
 
 def cmd_role(a) -> int:
     path = f"/workspaces/{ws_id()}/members/{e.load('member.uid')}"
     s, _ = e.authed("owner", "PATCH", path, {"role": a.role})
     print("set role", a.role, "->", s)
-    return 0
+    return ok(s)
 
 
 def cmd_bulk(a) -> int:
@@ -121,7 +133,7 @@ def cmd_bulk(a) -> int:
             known[c["args"]["title"]] = mapping[c["temp_id"]]
     e.save("tasks.json", json.dumps(known))
     print("bulk", s, "tasks", len(known))
-    return 0
+    return synced(s, b)
 
 
 def cmd_edit_task(a) -> int:
@@ -134,27 +146,27 @@ def cmd_edit_task(a) -> int:
     cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
     s, b = e.sync("owner", ws_id(), [cmd])
     print("task_update", a.title, a.field, "->", s, e.statuses(b))
-    return 0
+    return synced(s, b)
 
 
 def cmd_delete_task(a) -> int:
     cmd = {"type": "task_delete", "uuid": e.new_uuid(), "args": {"id": task_id(a.title)}}
     s, b = e.sync("owner", ws_id(), [cmd])
     print("task_delete", a.title, "->", s, e.statuses(b))
-    return 0
+    return synced(s, b)
 
 
 def cmd_project_delete(_a) -> int:
     cmd = {"type": "project_delete", "uuid": e.new_uuid(), "args": {"id": e.load("project.id")}}
     s, b = e.sync("owner", ws_id(), [cmd])
     print("project_delete ->", s, e.statuses(b))
-    return 0
+    return synced(s, b)
 
 
 def cmd_remove_member(_a) -> int:
     s, _ = e.authed("owner", "DELETE", f"/workspaces/{ws_id()}/members/{e.load('member.uid')}")
     print("remove member ->", s)
-    return 0
+    return ok(s)
 
 
 def cmd_ws2(_a) -> int:
@@ -177,14 +189,14 @@ def cmd_ws2(_a) -> int:
     ]
     s, b = e.sync("owner", ws2, commands)
     print("seed", s, e.statuses(b))
-    return 0
+    return synced(s, b)
 
 
 def cmd_sync_probe(a) -> int:
     s, b = e.sync(a.role, ws_id(), [])
     live = [t for t in b.get("tasks", []) if not t.get("is_deleted")]
     print(a.role, "sync", s, "tasks", len(live), "projects", len(b.get("projects", [])))
-    return 0
+    return ok(s)
 
 
 def cmd_me(a) -> int:

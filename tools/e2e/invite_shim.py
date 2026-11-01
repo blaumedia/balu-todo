@@ -3,7 +3,8 @@
 
 Serves GET /invite/<role> as a 302 to the real invite URL (token saved by
 `api.py invite <role>`). The token is read here, server-side, so it never shows up
-in an agent transcript or in a browser-side script. Serves nothing else; no logging.
+in a helper's output or in a browser-side script. The browser tool's page URL after the
+redirect still shows the token. Serves nothing else; no logging.
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parts = self.path.strip("/").split("/")
         if len(parts) == 2 and parts[0] == "invite" and re.fullmatch(r"[a-z]+", parts[1]):
-            path = e.STATE / f"invite-{parts[1]}.token"
+            path = e.run_dir() / f"invite-{parts[1]}.token"
             if path.exists():
                 self.send_response(302)
                 self.send_header("Location", f"{PUBLIC}/invite/{path.read_text().strip()}")
@@ -30,7 +31,7 @@ class H(http.server.BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
-    def log_message(self, *a):
+    def log_message(self, format, *args):
         pass
 
 

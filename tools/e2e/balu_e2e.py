@@ -1,7 +1,7 @@
 """Shared helpers for the e2e CLIs (stdlib only).
 
-State (generated passwords, tokens, ids) lives in ~/.cache/balu-e2e/<project>/ with
-mode 700/600. Nothing here prints a password, a token or a request/response body.
+State (generated passwords, tokens, ids) lives in ~/.cache/balu-e2e/<project>/<run>/
+(one directory per BALU_E2E_RUN) with mode 700/600. Nothing here prints a password, a token or a request/response body.
 """
 from __future__ import annotations
 
@@ -31,8 +31,15 @@ def state_dir() -> Path:
     return STATE
 
 
+def run_dir() -> Path:
+    path = state_dir() / RUN
+    path.mkdir(exist_ok=True)
+    path.chmod(0o700)
+    return path
+
+
 def save(name: str, value: str) -> None:
-    path = state_dir() / name
+    path = run_dir() / name
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         os.fchmod(fd, 0o600)
@@ -42,7 +49,7 @@ def save(name: str, value: str) -> None:
 
 
 def load(name: str) -> str:
-    path = state_dir() / name
+    path = run_dir() / name
     if not path.exists():
         raise SystemExit(f"missing {name} in the state dir: run api.py setup first")
     return path.read_text().strip()
@@ -50,7 +57,7 @@ def load(name: str) -> str:
 
 def password(role: str) -> str:
     name = f"{role}.pw"
-    if not (state_dir() / name).exists():
+    if not (run_dir() / name).exists():
         alphabet = string.ascii_letters + string.digits
         save(name, "".join(secrets.choice(alphabet) for _ in range(24)))
     return load(name)
@@ -123,7 +130,7 @@ def login(role: str) -> str:
 
 
 def token(role: str) -> str:
-    path = state_dir() / f"{role}.tok"
+    path = run_dir() / f"{role}.tok"
     if path.exists() and time.time() - path.stat().st_mtime < TOKEN_MAX_AGE:
         return path.read_text().strip()
     return login(role)

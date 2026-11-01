@@ -6,7 +6,7 @@ runbook. Python is stdlib only (3.11+), shell is POSIX `sh`.
 
 ## 1. What this is and where the state lives
 
-State lives in `~/.cache/balu-e2e/<project>/` (mode 700). It holds the generated
+State lives in `~/.cache/balu-e2e/<project>/<run>/` (mode 700; `stack.env` and the other stack files sit one level up). It holds the generated
 passwords, tokens, ids and `stack.env`. **Never cat it.** No script here prints a
 password, an access or refresh token, an invite token or a request/response body.
 
@@ -19,6 +19,9 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `BALU_E2E_STATE` | state directory |
 | `BALU_E2E_RUN` | run id, default today; used in emails `e2e-<run>-<role>@example.com` |
 | `BALU_E2E_BASE` | API base URL override |
+| `BALU_E2E_PUBLIC_BASE` | base URL `invite_shim.py` redirects to (default `http://localhost:<BALU_PORT>`) |
+| `BALU_ANDROID_PACKAGE` | app id for `android/cold.sh` (default `com.blaumedia.balutodo`) |
+| `METRO_PORT` | Metro port for `android/cold.sh --dev-client` (default 8081) |
 | `ANDROID_SERIAL` | required for everything under `android/` |
 
 ## 2. Stack
@@ -28,7 +31,12 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 - Health is `GET /healthz`, not `/api/v1/health`.
 - The image is built, not live-mounted. Run `up` again after code changes.
 - Never use the project `balu` (the dev data); `stack.sh` refuses it.
-- Cleanup is `stack.sh purge` (removes containers, volumes and the state dir).
+- Cleanup is `stack.sh purge` (removes containers, volumes and the state dir). It deletes
+  the state dir only if it carries the `.balu-e2e-state` marker `stack.sh` wrote, and `up`
+  refuses a non-empty `BALU_E2E_STATE` without it.
+- The app container does **not** read the checkout's root `.env`: `stack.sh` adds an override
+  (`env_file: !reset []`, compose >= 2.24) so real SMTP/Telegram/`BALU_DEV` values stay out.
+- A non-2xx response makes the `api.py` subcommands exit 1.
 - `task TITLE` prints one task row, `tokens` prints refresh-token counts per account.
 
 ## 3. API helpers
@@ -69,11 +77,14 @@ header of `proxy.py`).
 
 `api.py invite viewer`, then `invite_shim.py` (port 8099), then open
 `http://127.0.0.1:8099/invite/viewer` in Playwright. The shim redirects to the real
-invite URL, so the token never appears in a transcript.
+invite URL, so the helpers never type or print the token. The browser tool still reports the
+page URL after the redirect, which contains the token: treat that output as sensitive.
 
 ## 6. Android emulator runbook
 
-- **Clone an AVD, never reuse one another agent runs:**
+- **Clone an AVD, never reuse one another agent runs.** The base `BaluE2EMobile` AVD is
+  assumed to exist; create it with e.g. `avdmanager create avd -n BaluE2EMobile -k "system-images;android-34;google_apis;arm64-v8a"`.
+  `cp -cR` is macOS/APFS only (use `cp -R` elsewhere):
 
   ```sh
   cd ~/.android/avd
