@@ -175,7 +175,9 @@ Field semantics (these ARE the product decisions - implement precisely):
   sent; `task_move` of a parent bumps and rewrites its live subtasks (so clients pull
   them); `task_move` that sets `parent_task_id` gives the task the new parent's project and
   section, and on a subtask the move's own `project_id`/`section_id` are overridden the
-  same way. Existing data was aligned by migration `f6a7b8c9d0e1`.
+  same way. A task that has live subtasks cannot itself become a subtask (`invalid_args`).
+  Existing data was aligned by migration `f6a7b8c9d0e1`, which bumps the workspace version
+  and the realigned subtasks so clients pull them.
 - `label_ids` order is not meaningful.
 - `assigned_to` must be a member of the workspace.
 
@@ -412,7 +414,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `section_delete` | `id` - its tasks move to the project body (section_id → null) |
 | `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. If the target project, section or parent task was deleted meanwhile, the task is filed elsewhere instead of rejected (§5.5). |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
-| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` - container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). |
+| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` - container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). Subtasks follow their parent: moving a parent moves its subtasks, and a subtask's own `project_id`/`section_id` are ignored (§3.3). |
 | `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) - see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
 | `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed after the commit, best-effort) |

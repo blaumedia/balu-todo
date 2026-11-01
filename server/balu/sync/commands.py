@@ -535,39 +535,48 @@ def h_task_add(ctx: Ctx, args: dict) -> dict:
     # `section_id` is not checked at all when the requested project is deleted).
     relocated: list[str] = []
 
-    project_id = None
-    requested_project_id = None
-    if args.get("project_id") is not None:
-        project = _get_including_deleted(ctx, Project, args["project_id"], "project")
-        requested_project_id = project.id
-        if project.is_deleted:
-            relocated.append("project_deleted")
-        else:
-            project_id = project.id
-
-    section_id = None
-    project_deleted = "project_deleted" in relocated
-    if args.get("section_id") is not None and not project_deleted:
-        section = _get_including_deleted(ctx, Section, args["section_id"], "section")
-        _check_section_in_project(section, requested_project_id)  # raises with no project (I4)
-        if section.is_deleted:
-            relocated.append("section_deleted")
-        else:
-            section_id = section.id
-    # With the project deleted the task goes to the Inbox whatever the section is, so
-    # the section id is not looked up: it may be an unresolvable temp id whose
-    # section_add failed because of that same deleted project.
-
-    parent_task_id = None
+    # A live parent decides the container (contract §3.3): the sent project and
+    # section are ignored, so they are neither looked up nor can they relocate.
+    live_parent: Task | None = None
+    parent_deleted = False
     if args.get("parent_task_id") is not None:
         parent = _get_including_deleted(ctx, Task, args["parent_task_id"], "task")
         if parent.is_deleted:
-            relocated.append("parent_deleted")
+            parent_deleted = True
         else:
-            parent_task_id = _check_parent(ctx, parent.id)
-            # A subtask follows its parent's container (contract §3.3).
-            project_id = parent.project_id
-            section_id = parent.section_id
+            _check_parent(ctx, parent.id)
+            live_parent = parent
+
+    project_id = None
+    section_id = None
+    parent_task_id = None
+    if live_parent is not None:
+        parent_task_id = live_parent.id
+        project_id = live_parent.project_id
+        section_id = live_parent.section_id
+    else:
+        requested_project_id = None
+        if args.get("project_id") is not None:
+            project = _get_including_deleted(ctx, Project, args["project_id"], "project")
+            requested_project_id = project.id
+            if project.is_deleted:
+                relocated.append("project_deleted")
+            else:
+                project_id = project.id
+
+        project_deleted = "project_deleted" in relocated
+        if args.get("section_id") is not None and not project_deleted:
+            section = _get_including_deleted(ctx, Section, args["section_id"], "section")
+            _check_section_in_project(section, requested_project_id)  # raises with no project (I4)
+            if section.is_deleted:
+                relocated.append("section_deleted")
+            else:
+                section_id = section.id
+        # With the project deleted the task goes to the Inbox whatever the section is, so
+        # the section id is not looked up: it may be an unresolvable temp id whose
+        # section_add failed because of that same deleted project.
+    if parent_deleted:
+        relocated.append("parent_deleted")
 
     task = Task(
         id=uuid.uuid4(),
@@ -612,8 +621,20 @@ def h_task_update(ctx: Ctx, args: dict) -> dict:
 def h_task_move(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     if "parent_task_id" in args:
-        task.parent_task_id = _check_parent(ctx, args.get("parent_task_id"))
-    if "project_id" in args:
+        new_parent_id = _check_parent(ctx, args.get("parent_task_id"))
+        if new_parent_id is not None and ctx.session.execute(
+            select(Task.id).where(
+                Task.parent_task_id == task.id, Task.is_deleted.is_(False)
+            ).limit(1)
+        ).first() is not None:
+            raise CommandError(
+                "invalid_args", "a task with subtasks cannot become a subtask"
+            )
+        task.parent_task_id = new_parent_id
+    # A subtask's container is its parent's (applied below): a sent project_id or
+    # section_id is ignored, not validated against the task's old project.
+    is_subtask = task.parent_task_id is not None
+    if "project_id" in args and not is_subtask:
         task.project_id = (
             _get_project(ctx, args["project_id"]).id if args.get("project_id") else None
         )
@@ -621,7 +642,7 @@ def h_task_move(ctx: Ctx, args: dict) -> dict:
         # unless this same command sets a matching one.
         if "section_id" not in args:
             task.section_id = None
-    if "section_id" in args:
+    if "section_id" in args and not is_subtask:
         if args.get("section_id"):
             section = _get_section(ctx, args["section_id"])
             _check_section_in_project(section, task.project_id)
@@ -1178,8 +1199,15 @@ def process_commands(
             # Fire-and-forget: post-commit so rows are durable; never affects status.
             dispatch_events(sm, user_id, ctx.events, event_sender)
             # Best-effort (remove_blob logs failures), and only now the rows are durable.
+            # One failure must never turn the committed ok into an error.
             for blob_workspace_id, attachment_id in ctx.blob_deletions:
-                remove_blob(blob_workspace_id, attachment_id)
+                try:
+                    remove_blob(blob_workspace_id, attachment_id)
+                except Exception:
+                    logger.warning(
+                        "removing blob of attachment %s failed (workspace %s)",
+                        attachment_id, blob_workspace_id, exc_info=True,
+                    )
         except CommandError as exc:
             session.rollback()
             status = {"error_code": exc.code, "error": exc.message}

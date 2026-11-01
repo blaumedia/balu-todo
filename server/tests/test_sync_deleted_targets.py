@@ -726,7 +726,7 @@ def _sort_orders(body):
 
 
 # ---------------------------------------------------------------------------
-# one soft-deleted / unknown id rejects the whole task_reorder
+# a soft-deleted / unknown id in task_reorder is skipped; the rest is applied
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("bad", ["deleted", "unknown"])
 def test_task_reorder_with_one_dead_id_still_reorders_the_rest(client, user, bad):
