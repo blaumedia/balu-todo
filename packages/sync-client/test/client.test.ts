@@ -769,6 +769,24 @@ describe("outage recovery (contract §6.7)", () => {
     }
   });
 
+  it("a browser offline event leaves an existing error status alone", async () => {
+    const target = new EventTarget();
+    vi.stubGlobal("addEventListener", target.addEventListener.bind(target));
+    vi.stubGlobal("removeEventListener", target.removeEventListener.bind(target));
+    try {
+      const server = makeErrorServer(400, { detail: { code: "bad_request", message: "x" } });
+      const c = track(
+        createSyncClient(base({ fetch: server.fetch, retryBaseMs: 1_000_000, autoSyncMs: 1_000_000 })),
+      );
+      c.start();
+      await vi.waitFor(() => expect(c.getStatus()).toBe("error"));
+      target.dispatchEvent(new Event("offline"));
+      expect(c.getStatus()).toBe("error");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("the retry does not poll from a hidden page with nothing queued", async () => {
     vi.stubGlobal(
       "document",
