@@ -6,7 +6,22 @@ import { markReplaceNext, useUrlSync } from "../src/lib/useUrlSync.js";
 
 const today = { kind: "list", list: "today" } as const;
 const upcoming = { kind: "list", list: "upcoming" } as const;
-const tick = () => new Promise((r) => setTimeout(r, 30));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Real history.back() calls (through the spy) and the popstate events they
+// caused. jsdom delivers a traversal asynchronously, and on a loaded CI runner
+// that can take longer than a fixed delay, so tick() waits until every real
+// back() has produced its pop (bounded), then lets effects settle.
+let realBacks = 0;
+let pops = 0;
+const onPopCount = () => {
+  pops += 1;
+};
+const tick = async () => {
+  await sleep(30);
+  const deadline = Date.now() + 2000;
+  while (pops < realBacks && Date.now() < deadline) await sleep(10);
+  await sleep(10);
+};
 
 describe("useUrlSync - reader history wiring", () => {
   let push: ReturnType<typeof vi.spyOn>;
@@ -19,16 +34,24 @@ describe("useUrlSync - reader history wiring", () => {
     renderHook(() => useUrlSync());
     push = vi.spyOn(globalThis.history, "pushState");
     replace = vi.spyOn(globalThis.history, "replaceState");
-    back = vi.spyOn(globalThis.history, "back");
+    realBacks = 0;
+    pops = 0;
+    const realBack = globalThis.history.back.bind(globalThis.history);
+    back = vi.spyOn(globalThis.history, "back").mockImplementation(() => {
+      realBacks += 1;
+      realBack();
+    });
   }
   const calls = () => ({ push: push.mock.calls.length, replace: replace.mock.calls.length, back: back.mock.calls.length });
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    globalThis.addEventListener("popstate", onPopCount);
   });
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    globalThis.removeEventListener("popstate", onPopCount);
   });
 
   it("open pushes one marked entry; close pops it and keeps focusedIndex", async () => {
