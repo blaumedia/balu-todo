@@ -6,10 +6,12 @@ match are untouched. Nesting deeper than one level (grandchildren, created by
 older servers) is first flattened: such a live row becomes a direct subtask of
 its top-level ancestor and is appended after that ancestor's subtasks (sort_order
 = the ancestor's highest live subtask sort_order + 1000 * n, the contract's
-"max + 1000" rule). Only live rows are walked: a live row under a deleted
-ancestor was hidden before and stays untouched, it is not resurrected. Rows in a
-parent cycle are unreachable from a top-level task and stay unchanged. Sync tokens stay valid across an upgrade, so clients would
-never pull the corrected rows unless their version moves: every affected workspace
+"max + 1000" rule), in depth-first order of the old sort_orders so that the rows
+of one former parent stay together. Only live rows are walked: a live row under
+a deleted ancestor was hidden before and stays untouched, it is not
+resurrected. Rows in a parent cycle are unreachable from a top-level task and
+stay unchanged. Sync tokens stay valid across an upgrade, so clients would never
+pull the corrected rows unless their version moves: every affected workspace
 gets one version bump (as ctx.bump() does) and its realigned subtasks carry it.
 
 ROLLBACK: this revision's downgrade changes no data, but an image without this
@@ -48,13 +50,15 @@ def upgrade() -> None:
     # so the alignment below sees one level only. A deleted row ends the walk:
     # live rows below it were hidden before and stay as they are. Starting from
     # the roots keeps the walk finite on any data (a parent cycle has no root).
+    # `path` carries the sort_order values from the root down, so ordering by it
+    # is depth-first and keeps each former parent's rows together.
     op.execute(
         """
-        WITH RECURSIVE chain(id, root_id) AS (
-            SELECT id, id FROM tasks
+        WITH RECURSIVE chain(id, root_id, path) AS (
+            SELECT id, id, ARRAY[]::integer[] FROM tasks
             WHERE parent_task_id IS NULL AND is_deleted = false
             UNION ALL
-            SELECT t.id, c.root_id
+            SELECT t.id, c.root_id, c.path || t.sort_order
             FROM tasks AS t
             JOIN chain AS c ON t.parent_task_id = c.id
             WHERE t.is_deleted = false
@@ -67,7 +71,7 @@ def upgrade() -> None:
                                  WHERE k.parent_task_id = r.id AND k.is_deleted = false), 0)
                        + 1000 * ROW_NUMBER() OVER (
                            PARTITION BY r.id, (s.parent_task_id <> r.id)
-                           ORDER BY s.sort_order, s.id)
+                           ORDER BY c.path, s.id)
                    END AS new_sort_order
             FROM tasks AS s
             JOIN chain AS c ON c.id = s.id

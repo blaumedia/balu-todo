@@ -838,6 +838,10 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     body = sync(client, user, "*", [
         cmd("task_add", temp_id="g1", title="Grandchild"),
         cmd("task_add", temp_id="g2", title="Great-grandchild"),
+        cmd("task_add", temp_id="e1", title="FormerParentS1ChildA"),
+        cmd("task_add", temp_id="e2", title="FormerParentS1ChildB"),
+        cmd("task_add", temp_id="f1", title="FormerParentS4ChildA"),
+        cmd("task_add", temp_id="f2", title="FormerParentS4ChildB"),
         cmd("task_add", temp_id="d1", title="DeletedMiddle", parent_task_id=m["par"]),
         cmd("task_add", temp_id="d2", title="HiddenBelowDeleted"),
         cmd("task_add", temp_id="c1", title="CycleA"),
@@ -866,6 +870,20 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
                      {"par": m["g1"], "g": m["g2"]})
         conn.execute(text("UPDATE tasks SET sort_order = 10 WHERE id = :g"), {"g": m["g1"]})
         conn.execute(text("UPDATE tasks SET sort_order = 20 WHERE id = :g"), {"g": m["g2"]})
+        # two more former parents (s1, s4) with grandchildren whose old sibling-relative
+        # sort_orders interleave: 10 e1, 15 f1, 20 e2, 25 f2
+        for parent, child, order in (
+            ("s1", "e1", 10), ("s4", "f1", 15), ("s1", "e2", 20), ("s4", "f2", 25),
+        ):
+            conn.execute(
+                text("UPDATE tasks SET parent_task_id = :par, sort_order = :o WHERE id = :c"),
+                {"par": m[parent], "o": order, "c": m[child]},
+            )
+        # the former parents' own order decides the order of their groups: s2, s1, s4
+        for key, order in (("s2", 1), ("s1", 2), ("s4", 3)):
+            conn.execute(
+                text("UPDATE tasks SET sort_order = :o WHERE id = :t"), {"o": order, "t": m[key]}
+            )
         # a live row below a deleted intermediate (deleted by a one-level cascade only)
         conn.execute(text("UPDATE tasks SET is_deleted = true WHERE id = :d"), {"d": m["d1"]})
         conn.execute(text(
@@ -879,8 +897,9 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
                      {"o": m["c1"], "p": m["pb"], "t": m["c2"]})
         max_sort = conn.execute(text(
             "SELECT MAX(sort_order) FROM tasks WHERE parent_task_id = :par AND is_deleted = false"
-            " AND id NOT IN (:g1, :g2)"
-        ), {"par": m["par"], "g1": m["g1"], "g2": m["g2"]}).scalar_one()
+            " AND id NOT IN (:g1, :g2, :e1, :e2, :f1, :f2)"
+        ), {"par": m["par"], "g1": m["g1"], "g2": m["g2"], "e1": m["e1"], "e2": m["e2"],
+            "f1": m["f1"], "f2": m["f2"]}).scalar_one()
         before = {
             str(r.id): tuple(r)[1:]
             for r in conn.execute(text(
@@ -925,7 +944,7 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
         new_other_version = conn.execute(
             text("SELECT version FROM workspaces WHERE id = :w"), {"w": other}
         ).scalar_one()
-    # two mismatched subtasks plus two deep ones, one bump for the workspace
+    # two mismatched subtasks plus the deep ones, one bump for the workspace
     assert new_ws_version == ws_version + 1
     assert new_other_version == other_version
     s4 = rows[m["s4"]]
@@ -935,7 +954,8 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     assert (str(s1.project_id), str(s1.section_id)) == (m["pa"], m["sa"])
     assert s1.version == new_ws_version
     assert rows[m["s2"]].version == s2_version
-    for g in ("g1", "g2"):  # flattened onto the top-level ancestor, then aligned
+    # flattened onto the top-level ancestor, then aligned
+    for g in ("g1", "g2", "e1", "e2", "f1", "f2"):
         row = rows[m[g]]
         assert str(row.parent_task_id) == m["par"]
         assert (str(row.project_id), str(row.section_id)) == (m["pa"], m["sa"])
@@ -943,6 +963,10 @@ def test_migration_f6a7b8c9d0e1_realigns_subtasks_and_bumps_versions(client, use
     # appended after the root's own subtasks, in their old relative order
     assert rows[m["g1"]].sort_order == max_sort + 1000
     assert rows[m["g2"]].sort_order == max_sort + 2000
+    # depth-first: each former parent's group stays together (no e/f interleaving)
+    assert [rows[m[k]].sort_order for k in ("e1", "e2", "f1", "f2")] == [
+        max_sort + 3000, max_sort + 4000, max_sort + 5000, max_sort + 6000,
+    ]
     assert str(rows[m["s3"]].project_id) == m["pb"]  # deleted: untouched
     # a live row under a deleted intermediate is not resurrected; a cycle is left alone
     for key in ("d2", "c1", "c2"):
