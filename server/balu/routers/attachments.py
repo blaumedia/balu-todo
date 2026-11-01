@@ -481,8 +481,15 @@ def download_attachment(
         # volume. Nothing to serve, and nothing the caller can do about it.
         raise not_found("attachment not found")
 
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        # Removed between the check above and now (a concurrent delete).
+        raise not_found("attachment not found") from None
+
     return FileResponse(
         str(path),
+        stat_result=stat_result,
         media_type=attachment.content_type,
         # `filename=` makes this `Content-Disposition: attachment`, so a stored
         # `text/html` upload is downloaded rather than rendered in the origin

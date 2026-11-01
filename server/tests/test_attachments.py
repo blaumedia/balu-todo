@@ -982,3 +982,55 @@ def test_failed_commit_on_project_delete_keeps_blob(client, user, data_dir, db, 
     assert blob.is_file(), "blob was unlinked although the transaction never committed"
 
 
+
+
+def test_download_blob_vanishing_after_the_check_is_not_found(client, user, data_dir, monkeypatch):
+    from pathlib import Path
+
+    task_id = _add_task(client, user)
+    meta = _upload(client, user, task_id).json()
+    (_blob_dir(data_dir, user["workspace_id"]) / meta["id"]).unlink()
+    # the is_file check passes, the file is gone by the time it is opened
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    got = client.get(
+        f"/api/v1/workspaces/{user['workspace_id']}/attachments/{meta['id']}/file",
+        headers=user["headers"],
+    )
+    assert got.status_code == 404
+
+
+def _age(path, seconds: int) -> None:
+    import os
+    import time
+
+    t = time.time() - seconds
+    os.utime(path, (t, t))
+
+
+def test_orphan_sweep_removes_only_old_blobs_without_a_live_row(client, user, data_dir, db):
+    from balu.attachments import sweep_orphan_blobs
+
+    ws = user["workspace_id"]
+    task_id = _add_task(client, user)
+    live = _upload(client, user, task_id).json()
+    gone = _upload(client, user, task_id).json()
+    sync(client, user, "*", [cmd("attachment_delete", id=gone["id"])])
+    d = _blob_dir(data_dir, ws)
+    # attachment_delete removes the blob itself; recreate it as a crashed removal would leave it
+    deleted_blob = d / gone["id"]
+    deleted_blob.write_bytes(b"x")
+    orphan = d / str(uuid.uuid4())
+    orphan.write_bytes(b"x")
+    young = d / str(uuid.uuid4())
+    young.write_bytes(b"x")
+    stray = d / "not-a-uuid"
+    stray.write_bytes(b"x")
+    for f in (d / live["id"], deleted_blob, orphan, stray):
+        _age(f, 7200)
+
+    assert sweep_orphan_blobs() == 2
+    assert (d / live["id"]).exists()
+    assert young.exists()
+    assert stray.exists()
+    assert not orphan.exists()
+    assert not deleted_blob.exists()

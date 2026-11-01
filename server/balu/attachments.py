@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -94,3 +95,64 @@ def remove_workspace_blobs(workspace_id: uuid.UUID) -> None:
     them.
     """
     shutil.rmtree(workspace_dir(workspace_id), ignore_errors=True)
+
+
+#: A blob is written before its row commits, so a young file without a live row
+#: may be an upload in flight. An upload is bounded by the size cap and writes
+#: continuously (each write refreshes the mtime); an hour is far beyond that.
+ORPHAN_MIN_AGE_SECONDS = 3600
+
+
+def sweep_orphan_blobs(min_age_seconds: int = ORPHAN_MIN_AGE_SECONDS) -> int:
+    """Remove blob files with no live attachment row (best-effort), return the count.
+
+    Covers a process that died between a delete's commit and the file removal.
+    Only files older than `min_age_seconds` are considered, and anything that
+    does not look like `{workspace_uuid}/{attachment_uuid}` is left alone.
+    """
+    from .db import get_sessionmaker
+    from .models import Attachment
+
+    root = attachments_root()
+    if not root.is_dir():
+        return 0
+    candidates: list[tuple[uuid.UUID, uuid.UUID, Path]] = []
+    cutoff = time.time() - min_age_seconds
+    for ws_dir in root.iterdir():
+        try:
+            ws_id = uuid.UUID(ws_dir.name)
+            if not ws_dir.is_dir():
+                continue
+            for f in ws_dir.iterdir():
+                try:
+                    att_id = uuid.UUID(f.name)
+                    if f.is_file() and f.stat().st_mtime < cutoff:
+                        candidates.append((ws_id, att_id, f))
+                except (ValueError, OSError):
+                    continue
+        except (ValueError, OSError):
+            continue
+    if not candidates:
+        return 0
+    db = get_sessionmaker()()
+    try:
+        live = {
+            row[0]
+            for row in db.query(Attachment.id)
+            .filter(Attachment.id.in_([c[1] for c in candidates]), Attachment.is_deleted.is_(False))
+            .all()
+        }
+    finally:
+        db.close()
+    removed = 0
+    for _ws_id, att_id, f in candidates:
+        if att_id in live:
+            continue
+        try:
+            f.unlink()
+            removed += 1
+        except OSError:
+            logger.warning("could not remove orphan blob %s", f, exc_info=True)
+    if removed:
+        logger.info("orphan blob sweep removed %d file(s)", removed)
+    return removed
