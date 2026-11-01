@@ -11,7 +11,7 @@ import {
   pendingAfter,
   revealScrollDeltaWithTarget,
   settleAction,
-  shouldRevealOnTargetResize,
+  targetResizeAction,
   touchingAfter,
 } from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
@@ -53,7 +53,9 @@ function contentNode(scrollable: RevealScrollable): unknown {
 // it scrolls the focused input (plus REVEAL_RESERVE) above the IME, only if it
 // (or the reveal target) is covered and only if it is inside this scroll view.
 // Attach `targetRef` to a view (e.g. a short form) whose bottom must also end
-// up above the IME while typing in any of its inputs; the focused input stays
+// up above the IME while typing in any of its inputs, and `onTargetLayout` to
+// the same view's onLayout, so it is revealed again when it grows while the
+// keyboard is open; the focused input stays
 // visible, below `topInset` (the status bar on an edge-to-edge screen), even if
 // both cannot fit.
 export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) {
@@ -167,9 +169,11 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
   const onTargetLayout = useCallback(
     (e: LayoutChangeEvent) => {
       const next = e.nativeEvent.layout.height;
-      const grew = shouldRevealOnTargetResize(targetHeight.current, next, keyboardHeight.current, touching.current);
+      const action = targetResizeAction(targetHeight.current, next, keyboardHeight.current, touching.current);
       targetHeight.current = next;
-      if (grew) reveal(keyboardHeight.current, false);
+      // 'defer': the pending branch of onTouchEnd reveals it (a drag drops it).
+      if (action === 'defer') pending.current = true;
+      else if (action === 'reveal') reveal(keyboardHeight.current, false);
     },
     [reveal],
   );

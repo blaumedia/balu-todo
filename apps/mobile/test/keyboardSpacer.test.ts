@@ -6,7 +6,7 @@ import {
   revealScrollDeltaWithTarget,
   settleAction,
   settledKeyboardHeight,
-  shouldRevealOnTargetResize,
+  targetResizeAction,
   touchingAfter,
 } from '../src/lib/keyboardSpacer';
 
@@ -127,19 +127,23 @@ describe('revealScrollDeltaWithTarget', () => {
   });
 });
 
-describe('shouldRevealOnTargetResize', () => {
+describe('targetResizeAction', () => {
   it('reveals when the target grew under an open keyboard', () => {
-    expect(shouldRevealOnTargetResize(300, 420, 800, false)).toBe(true);
+    expect(targetResizeAction(300, 420, 800, false)).toBe('reveal');
+  });
+
+  it('defers to the touch end when a finger is down', () => {
+    expect(targetResizeAction(300, 420, 800, true)).toBe('defer');
   });
 
   it('ignores the first layout, a shrink and an unchanged height', () => {
-    expect(shouldRevealOnTargetResize(undefined, 420, 800, false)).toBe(false);
-    expect(shouldRevealOnTargetResize(420, 300, 800, false)).toBe(false);
-    expect(shouldRevealOnTargetResize(420, 420, 800, false)).toBe(false);
+    expect(targetResizeAction(undefined, 420, 800, false)).toBe('none');
+    expect(targetResizeAction(420, 300, 800, false)).toBe('none');
+    expect(targetResizeAction(420, 420, 800, false)).toBe('none');
   });
 
-  it('never moves the content with the keyboard closed or a finger down', () => {
-    expect(shouldRevealOnTargetResize(300, 420, 0, false)).toBe(false);
-    expect(shouldRevealOnTargetResize(300, 420, 800, true)).toBe(false);
+  it('never moves the content with the keyboard closed', () => {
+    expect(targetResizeAction(300, 420, 0, false)).toBe('none');
+    expect(targetResizeAction(300, 420, 0, true)).toBe('none');
   });
 });
