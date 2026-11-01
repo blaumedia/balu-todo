@@ -36,7 +36,7 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://balu:balu@postgres:5432/balu_test
         run: |
           uv sync --frozen
-          uv run ruff check .
+          uv run ruff check . ../tools/e2e
           uv run pytest -q
 
   clients:
