@@ -29,7 +29,7 @@ export default function Onboarding() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
-  const keyboardReveal = useKeyboardReveal();
+  const keyboardReveal = useKeyboardReveal({ topInset: insets.top });
   const serverUrl = useApp((s) => s.serverUrl);
   const setServerUrl = useApp((s) => s.setServerUrl);
   // "Change server" clears the stored URL; keep the last value so the input

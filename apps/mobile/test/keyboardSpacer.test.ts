@@ -113,6 +113,11 @@ describe('revealScrollDeltaWithTarget', () => {
     expect(revealScrollDeltaWithTarget(500, 40, 100, 2000, 600, 2300)).toBe(500);
   });
 
+  it('stops the focused input below a non-zero top limit (status bar on edge-to-edge)', () => {
+    // target needs 900; with the top limit at 32 the input (y 500) may travel only 468
+    expect(revealScrollDeltaWithTarget(500, 40, 100, 2000, 600, 2300, 32)).toBe(468);
+  });
+
   it('never scrolls less than the plain input reveal', () => {
     // input covered needs 340; the target alone would need only 100
     expect(revealScrollDeltaWithTarget(1500, 40, 100, 2000, 600, 1500)).toBe(

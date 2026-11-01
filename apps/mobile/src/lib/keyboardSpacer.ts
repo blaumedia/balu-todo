@@ -46,7 +46,8 @@ export function revealScrollDelta(
 }
 
 // Like revealScrollDelta, but also brings a "reveal target" (the bottom edge of a
-// short form, e.g. its submit button) above the keyboard, so the button stays
+// whole short form, including any links under its submit button) above the
+// keyboard, so the button stays
 // visible while typing in any field. `targetBottom` is the target's bottom edge
 // from measureInWindow (same coordinate system as `inputWindowY`); `topLimit` is
 // the window y the focused input must not scroll above. The focused input wins:

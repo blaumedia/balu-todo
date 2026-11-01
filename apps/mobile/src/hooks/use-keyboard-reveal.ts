@@ -4,6 +4,7 @@ import {
   TextInput,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type View,
 } from 'react-native';
 import { pendingAfter, revealScrollDeltaWithTarget, settleAction, touchingAfter } from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
@@ -13,6 +14,9 @@ import { rootViewRef } from '../lib/rootViewRef';
 const REVEAL_RESERVE = 140;
 // dp of clearance kept between a reveal target's bottom edge and the keyboard.
 const TARGET_MARGIN = 12;
+// dp kept between the top inset (status bar) and a focused input that a reveal
+// target pulls up.
+const TOP_MARGIN = 8;
 
 interface RevealScrollable {
   scrollTo?(opts: { y?: number; animated?: boolean }): void;
@@ -38,13 +42,14 @@ function contentNode(scrollable: RevealScrollable): unknown {
 // AndroidKeyboardSpacer does not trigger a scroll either. Attach `ref`,
 // `onScroll` (or setOffset), `onTouchStart`, `onTouchEnd` and `onTouchCancel` to
 // the scroll view and pass `onKeyboardSettled` to <AndroidKeyboardSpacer>: when
-// the IME has opened, or a
-// tap moves focus to another input while it is open, it scrolls the focused
-// input (plus REVEAL_RESERVE) above the IME, only if it is covered and only if
-// it is inside this scroll view. Attach `targetRef` to a view (e.g. a short
-// form) whose bottom must also end up above the IME while typing in any of its
-// inputs; the focused input stays visible even if both cannot fit.
-export function useKeyboardReveal() {
+// the IME has opened, or a tap moves focus to another input while it is open,
+// it scrolls the focused input (plus REVEAL_RESERVE) above the IME, only if it
+// (or the reveal target) is covered and only if it is inside this scroll view.
+// Attach `targetRef` to a view (e.g. a short form) whose bottom must also end
+// up above the IME while typing in any of its inputs; the focused input stays
+// visible, below `topInset` (the status bar on an edge-to-edge screen), even if
+// both cannot fit.
+export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) {
   // An object ref (not a callback ref): draggable-flatlist only auto-scrolls
   // while dragging if `"current" in ref` (review 76485a61 N1).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,8 +60,7 @@ export function useKeyboardReveal() {
   const touching = useRef(false);
   const pending = useRef(false);
   const lastRevealed = useRef<unknown>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const targetRef = useRef<any>(null);
+  const targetRef = useRef<View>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const android = Platform.OS === 'android';
 
@@ -109,6 +113,7 @@ export function useKeyboardReveal() {
                       rootY + rootH,
                       kh,
                       targetBottom,
+                      rootY + topInset + TOP_MARGIN,
                     );
                     if (delta <= 0) return;
                     const next = offset.current + delta;
@@ -118,10 +123,8 @@ export function useKeyboardReveal() {
                       scrollable.scrollToOffset?.({ offset: next, animated: true });
                   };
                   const target = targetRef.current;
-                  if (target?.measureInWindow)
-                    target.measureInWindow((_tx: number, ty: number, _tw: number, th: number) =>
-                      apply(ty + th + TARGET_MARGIN),
-                    );
+                  if (target)
+                    target.measureInWindow((_tx, ty, _tw, th) => apply(ty + th + TARGET_MARGIN));
                   else apply(undefined);
                 });
               });
