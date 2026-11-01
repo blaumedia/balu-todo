@@ -49,7 +49,9 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
   `BALU_MCP_ENABLED=true` for the app service through the compose override in the state dir
   (the base `docker-compose.yml` forwards no variables and the root `.env` is dropped, so
   this is the only way in). It recreates just the app container, without a rebuild; the flag
-  persists across `up`. Check with `GET /api/v1/me/mcp?probe=true` (`{"enabled": true|false}`).
+  persists across `up`. Check with an authenticated `GET /api/v1/me/mcp?probe=true`
+  (session bearer token, e.g. from `api.py`; a plain curl gets 401): the body is
+  `{"enabled": false}` while off, and carries `endpoint` and `key` as well while on.
 - A non-2xx response makes the `api.py` subcommands exit 1.
 - `task TITLE` prints one task row, `tokens` prints refresh-token counts per account.
 
@@ -111,7 +113,8 @@ page URL after the redirect, which contains the token: treat that output as sens
   Start it with `emulator -avd <Clone> -port <free even port 5554-5682> -no-snapshot-save &`
   and `export ANDROID_SERIAL=emulator-<port>`.
 - **The shared `Medium_Phone` AVD may carry a stale logged-in app.** After cloning, run
-  `adb -s <own serial> shell pm clear com.blaumedia.balutodo` before testing.
+  `adb -s <own serial> shell pm clear "${BALU_ANDROID_PACKAGE:-com.blaumedia.balutodo}"`
+  before testing.
 - **Never touch other emulators:** no `adb kill-server`, no `adb emu kill` without your
   own `-s`, no install or uninstall on a serial you did not start.
 - Server URL in the app: `http://10.0.2.2:<port>`.
