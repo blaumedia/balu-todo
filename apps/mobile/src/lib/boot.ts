@@ -204,6 +204,22 @@ function showBootNotice(state: 'reconnecting' | 'noWorkspace'): void {
   st.setBoot(state);
 }
 
+/** Past the cold-start gate: a screen of the app may be showing, so the router must be moved. */
+function pastColdStartGate(): boolean {
+  const boot = useApp.getState().boot;
+  return boot === 'ready' || boot === 'reconnecting' || boot === 'noWorkspace';
+}
+
+/** Take every pushed screen down and land on the login step (what the index gate does on a cold start). */
+function navigateToOnboarding(): void {
+  try {
+    if (router.canDismiss()) router.dismissAll();
+    router.replace('/onboarding');
+  } catch {
+    /* router not ready */
+  }
+}
+
 /**
  * /me answered with no workspace: show the notice and keep asking with a backoff
  * until it lists one, the user logs out, or the session is refused. Runs on its
@@ -218,7 +234,10 @@ function holdForWorkspace(serverUrl: string, api: ApiClient): void {
       if (!waiting()) return;
       try {
         if (!(await establishSession(serverUrl, api, null, false, waiting))) {
-          if (waiting()) useApp.getState().setBoot('onboarding');
+          if (waiting()) {
+            useApp.getState().setBoot('onboarding');
+            navigateToOnboarding(); // boot was 'noWorkspace', so a screen is showing
+          }
         }
         return;
       } catch (e) {
@@ -274,7 +293,9 @@ async function landOutside(lostId: string): Promise<void> {
   }
   if (!ok) {
     teardownSync();
+    const pastGate = pastColdStartGate();
     useApp.getState().setBoot('onboarding');
+    if (pastGate) navigateToOnboarding(); // earlier boot phases: the index gate redirects on its own
   } else {
     resetToWorkspaceRoot();
   }
@@ -404,16 +425,11 @@ export async function expireSession(): Promise<void> {
   const st = useApp.getState();
   // The notice screens may sit on the tabs or on the index gate (a cold start with no
   // workspace); replacing to /onboarding from the gate is harmless, it goes there anyway.
-  const pastGate = st.boot === 'ready' || st.boot === 'reconnecting' || st.boot === 'noWorkspace';
+  const pastGate = pastColdStartGate();
   st.reset();
   st.setLoginNotice('sessionExpired');
   if (!pastGate) return; // earlier boot phases: the index gate redirects on its own
-  try {
-    if (router.canDismiss()) router.dismissAll();
-    router.replace('/onboarding');
-  } catch {
-    /* router not ready */
-  }
+  navigateToOnboarding();
 }
 
 setSessionExpiredHandler(() => {

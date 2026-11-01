@@ -15,6 +15,7 @@ const fake = vi.hoisted(() => ({
   alerts: [] as Array<[string, string]>,
   getMe: (async () => ({})) as () => Promise<any>,
   authed: true,
+  pickNothing: false,
   logouts: 0,
   teardowns: 0,
   remindersStopped: 0,
@@ -39,6 +40,10 @@ const fakeApi = {
   },
 };
 
+vi.mock('@balu/domain', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@balu/domain')>();
+  return { ...orig, pickMembership: (...a: Parameters<typeof orig.pickMembership>) => (fake.pickNothing ? undefined : orig.pickMembership(...a)) };
+});
 vi.mock('react-native', () => ({
   Alert: { alert: (title: string, body: string) => fake.alerts.push([title, body]) },
 }));
@@ -141,6 +146,7 @@ beforeEach(() => {
   fake.kv.clear();
   fake.alerts = [];
   fake.authed = true;
+  fake.pickNothing = false;
   fake.logouts = 0;
   fake.teardowns = 0;
   fake.remindersStopped = 0;
@@ -400,6 +406,41 @@ describe('accounts without a workspace (what-if 6)', () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(calls).toBe(1);
     expect(useApp.getState().boot).toBe('onboarding');
+  });
+});
+
+describe('leaving for onboarding past the gate (review 026272d7)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('/me stops listing a workspace while waiting: dismisses and replaces to /onboarding', async () => {
+    vi.useFakeTimers();
+    fake.canDismiss = true;
+    useApp.setState({ memberships: [mem('lost')] } as any);
+    fake.getMe = async () => me();
+    await moveOffLostWorkspace('lost');
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    expect(fake.nav).toEqual([]);
+    fake.pickNothing = true; // /me answers with a workspace the pick cannot use: establishSession returns false
+    fake.getMe = async () => me('a');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('landOutside without a client: navigates once past the gate', async () => {
+    useApp.setState({ serverUrl: null, boot: 'ready' } as any);
+    fake.canDismiss = true;
+    await moveOffLostWorkspace('lost');
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual(['dismissAll', 'replace:/onboarding']);
+  });
+
+  it('landOutside before the cold-start gate: no navigation', async () => {
+    useApp.setState({ serverUrl: null, boot: 'loading' } as any);
+    fake.canDismiss = true;
+    await moveOffLostWorkspace('lost');
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(fake.nav).toEqual([]);
   });
 });
 
