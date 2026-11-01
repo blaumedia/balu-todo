@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import mimetypes
+import os
 import sys
 
 import balu_e2e as e
@@ -176,6 +178,40 @@ def cmd_delete_task(a) -> int:
     return synced(s, b)
 
 
+def cmd_attach(a) -> int:
+    """Upload FILE to a task as the owner (CONTRACT 3.7.1: multipart task_id + file)."""
+    try:
+        with open(a.file, "rb") as f:
+            blob = f.read()
+    except OSError as err:
+        raise SystemExit(f"cannot read {a.file}: {err.strerror}") from None
+    boundary = "balu-e2e-" + e.new_uuid()
+    name = os.path.basename(a.file).replace('"', "")
+    ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    body = (
+        (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"task_id\"\r\n\r\n"
+            f"{task_id(a.title)}\r\n"
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; "
+            f"filename=\"{name}\"\r\nContent-Type: {ctype}\r\n\r\n"
+        ).encode()
+        + blob
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+    s, b = e.authed(
+        "owner",
+        "POST",
+        f"/workspaces/{ws_id()}/attachments",
+        raw=(body, f"multipart/form-data; boundary={boundary}"),
+    )
+    att = b.get("attachment", b)
+    print(
+        "attach", a.title, "->", s,
+        att.get("filename", ""), att.get("content_type", ""), att.get("size_bytes", ""),
+    )
+    return ok(s)
+
+
 def cmd_project_delete(_a) -> int:
     cmd = {"type": "project_delete", "uuid": e.new_uuid(), "args": {"id": e.load("project.id")}}
     s, b = e.sync("owner", ws_id(), [cmd])
@@ -256,6 +292,10 @@ def main() -> int:
     s = sub.add_parser("delete-task")
     s.add_argument("title")
     s.set_defaults(fn=cmd_delete_task)
+    s = sub.add_parser("attach")
+    s.add_argument("title")
+    s.add_argument("file")
+    s.set_defaults(fn=cmd_attach)
     sub.add_parser("project-delete").set_defaults(fn=cmd_project_delete)
     sub.add_parser("remove-member").set_defaults(fn=cmd_remove_member)
     sub.add_parser("ws2").set_defaults(fn=cmd_ws2)

@@ -4,10 +4,10 @@
 ANDROID_SERIAL is required: these scripts never pick a device. Password fields
 (password="true") are skipped by find/list/has and blanked in `dump`.
 
-  ui.py list | tap REGEX [--desc] | has REGEX [--desc] | dump FILE
-  ui.py swipe DESC_REGEX left|right | state | type TEXT
+  ui.py list [--full] | tap REGEX [--desc] | has REGEX [--desc] | dump FILE
+  ui.py swipe DESC_REGEX left|right | scroll up|down | state | type TEXT
   ui.py desc REGEX   print the content-desc of every node whose content-desc matches
-                     (e.g. the sync status: desc 'Synced|Syncing|Offline|Sync failed|Synchron')
+                     (e.g. the sync status, EN and DE: desc '^(Sync|Offline)')
 
 adb comes from $ANDROID_HOME/platform-tools when ANDROID_HOME is set, else from PATH.
 """
@@ -36,9 +36,11 @@ _HOME = os.environ.get("ANDROID_HOME")
 ADB = os.path.join(_HOME, "platform-tools", "adb") if _HOME else "adb"
 
 
-def adb(*a: str, check: bool = True) -> str:
+def adb(*a: str, check: bool = True, stdin: str | None = None) -> str:
     try:
-        r = subprocess.run([ADB, "-s", SER, *a], capture_output=True, text=True, check=check)
+        r = subprocess.run(
+            [ADB, "-s", SER, *a], capture_output=True, text=True, check=check, input=stdin
+        )
     except subprocess.CalledProcessError as err:
         raise SystemExit(
             f"adb failed for {SER} ({' '.join(a[:2])}): exit {err.returncode}"
@@ -87,14 +89,31 @@ def main() -> int:
         raise SystemExit(__doc__)
     cmd = argv[0]
     desc = "--desc" in argv
-    args = [x for x in argv[1:] if x != "--desc"]
-    need = {"list": 0, "state": 0, "type": 1, "tap": 1, "has": 1, "dump": 1, "swipe": 2, "desc": 1}
+    full = "--full" in argv
+    args = [x for x in argv[1:] if x not in ("--desc", "--full")]
+    need = {
+        "list": 0, "state": 0, "type": 1, "tap": 1, "has": 1,
+        "dump": 1, "swipe": 2, "scroll": 1, "desc": 1,
+    }
     if cmd not in need:
         raise SystemExit(__doc__)
     if len(args) < need[cmd] or (cmd != "type" and len(args) > need[cmd]):
         raise SystemExit(f"usage error: {cmd} takes {need[cmd]} argument(s)\n{__doc__}")
     if cmd == "swipe" and args[1] not in ("left", "right"):
         raise SystemExit("swipe direction must be left or right")
+    if cmd == "scroll":
+        if args[0] not in ("up", "down"):
+            raise SystemExit("scroll direction must be up or down")
+        m = re.search(r"(\d+)x(\d+)", adb("shell", "wm", "size"))
+        if not m:
+            raise SystemExit("cannot read the screen size (adb shell wm size)")
+        w, h = int(m.group(1)), int(m.group(2))
+        a, b = int(0.7 * h), int(0.3 * h)  # "down" moves the content up (finger swipes up)
+        if args[0] == "up":
+            a, b = b, a
+        adb("shell", "input", "swipe", str(w // 2), str(a), str(w // 2), str(b), "350")
+        print("scrolled", args[0])
+        return 0
     if cmd == "type":
         text = " ".join(args)
         if not re.fullmatch(r"[A-Za-z0-9@._+:/ -]*", text):
@@ -107,9 +126,11 @@ def main() -> int:
         for n in nodes(root):
             t, d = n.get("text", ""), n.get("content-desc", "")
             if t or d:
+                if not full:
+                    t, d = t[:70], d[:80]
                 print(
                     f"{n.get('bounds')} en={n.get('enabled')} clk={n.get('clickable')} "
-                    f"sel={n.get('selected', '')} text={t[:70]!r} desc={d[:80]!r}"
+                    f"sel={n.get('selected', '')} text={t!r} desc={d!r}"
                 )
     elif cmd == "tap":
         hits = find(root, args[0], desc)

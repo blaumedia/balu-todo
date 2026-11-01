@@ -72,6 +72,7 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `bulk N` | adds N tasks |
 | `edit-task TITLE FIELD VALUE` | `task_update` as owner |
 | `delete-task TITLE` | `task_delete` as owner |
+| `attach TITLE FILE` | uploads FILE to the task as owner (multipart, CONTRACT 3.7.1); exit 1 on non-2xx |
 | `project-delete` | deletes the seeded project |
 | `remove-member` | removes the member from the workspace |
 | `ws2` | creates a second workspace with a project and a task |
@@ -106,9 +107,11 @@ page URL after the redirect, which contains the token: treat that output as sens
 - **Tools:** `adb` and `emulator` come from `$ANDROID_HOME/platform-tools` and
   `$ANDROID_HOME/emulator`. `android/ui.py`, `login.py` and `cold.sh` use
   `$ANDROID_HOME/platform-tools/adb` when `ANDROID_HOME` is set, else `adb` from `PATH`.
-- **Clone an AVD, never reuse one another agent runs.** The base AVD is `Medium_Phone`.
-  Its ini file name is not necessarily the AVD name (here `Medium_Phone_API_35.ini`): find it
-  with `ls ~/.android/avd/*.ini` and read `path=` in it to get the `.avd` directory.
+- **Clone an AVD, never reuse one another agent runs.** The AVD name is the ini file name
+  (`emulator -list-avds`), not the `.avd` directory name: on the reference machine the base is
+  `Medium_Phone_API_35` (ini `Medium_Phone_API_35.ini`, directory `Medium_Phone.avd` from its
+  `path=`), and `emulator -avd Medium_Phone` would fail. Find the ini with
+  `ls ~/.android/avd/*.ini` and read `path=` in it to get the `.avd` directory.
   `cp -cR` is macOS/APFS only (use `cp -R` elsewhere):
 
   ```sh
@@ -121,19 +124,25 @@ page URL after the redirect, which contains the token: treat that output as sens
   Then set `AvdId=<Clone>` and `avd.ini.displayname=<Clone>` in `<Clone>.avd/config.ini`.
   Start it with `emulator -avd <Clone> -port <free even port 5554-5682> -no-snapshot-save &`
   and `export ANDROID_SERIAL=emulator-<port>`.
-- **The base `Medium_Phone` AVD may carry a stale logged-in app.** After cloning, run
+- **The base AVD may carry a stale logged-in app.** After cloning, run
   `adb -s <own serial> shell pm clear "${BALU_ANDROID_PACKAGE:-com.blaumedia.balutodo}"`
   before testing.
 - **Never touch other emulators:** no `adb kill-server`, no `adb emu kill` without your
   own `-s`, no install or uninstall on a serial you did not start.
 - Server URL in the app: `http://10.0.2.2:<port>`.
 - **Release build for offline or cold-start tests**, because the dev client needs Metro
-  to load the bundle: `cd apps/mobile && npx expo run:android --variant release --device <Clone>`.
-  `expo prebuild` (run by this command) rewrites `apps/mobile/package.json` and creates
-  `apps/mobile/android`: afterwards run `git checkout apps/mobile/package.json` and
-  `rm -rf apps/mobile/android`.
-  `npx expo run:android --help` lists `--variant <name>` (default debug) and
-  `-d, --device [device]`, plus `--no-bundler`, `--binary <path>` and `--app-id`.
+  to load the bundle. Prefer Gradle over `expo run:android --variant release`: the latter
+  launches the app through the dev-client deep link (`exp+balu://expo-development-client`) and
+  prints `Waiting on http://localhost:8081`, which a release build does not serve.
+  ```sh
+  cd apps/mobile
+  npx expo prebuild --platform android
+  (cd android && ANDROID_HOME=$HOME/Library/Android/sdk JAVA_HOME=/opt/homebrew/opt/openjdk@17 ./gradlew :app:assembleRelease)
+  adb -s <own serial> install -r android/app/build/outputs/apk/release/app-release.apk
+  ```
+  `expo prebuild` rewrites `apps/mobile/package.json` and creates `apps/mobile/android` and
+  `.expo`: afterwards run `git checkout apps/mobile/package.json` and
+  `rm -rf apps/mobile/android apps/mobile/.expo`.
 - **Dev-client deep link:**
   `android/cold.sh --dev-client "balu://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081"`.
 - App deep links use the scheme `balu://` (`apps/mobile/app.json:8`).
@@ -145,12 +154,25 @@ page URL after the redirect, which contains the token: treat that output as sens
 - uiautomator dumps never contain password-field text (`ui.py` filters `password="true"`
   nodes). Do not bypass `ui.py` for dumps.
 - The header sync indicator is a dot with no text, but its status is its content-desc:
-  `android/ui.py desc 'Synced|Syncing|Offline|Sync failed|Synchron'` (EN/DE labels).
+  `android/ui.py desc '^(Sync|Offline)'` (all EN and DE labels).
+- **Mobile offline detection waits for the poll.** The app has no network event, so airplane
+  mode shows `Offline` only at the next sync attempt (30 to 55 s); allow for it.
+- **German before login:** the pre-login language is the stored device preference, not the
+  system locale (`set-app-locales` and `system_locales` do nothing). Log in once, Settings,
+  Deutsch, log out, then "Server ändern" shows the German onboarding.
+- **German on web:** accounts default to `en` and the browser language is only adopted at
+  registration, so switch the account to Deutsch in Settings first.
+- **Playwright for web checks** is not a repo dependency. Use one from the npx cache
+  (`ls ~/.npm/_npx/*/node_modules/playwright`) or install it outside the repo
+  (`npx -y playwright install chromium` in a temp directory); keep the script in `/tmp` and read
+  the password in-process from the state dir, never print it.
 - Web notices a lost connection from the browser `offline` event right away; a throttled
   network that stays "up" is only noticed at the next failed request.
 
-Scripts: `android/ui.py` (list, tap, has, dump, swipe, state, type), `android/login.py ROLE`,
-`android/cold.sh`. `ui.py` also has `desc REGEX`.
+Scripts: `android/ui.py` (list, tap, has, dump, swipe, scroll, state, type), `android/login.py ROLE`,
+`android/cold.sh`. `ui.py` also has `desc REGEX`, `list --full` (no text truncation) and
+`scroll up|down` (swipe computed from `wm size`). `login.py` sends the password to the
+device shell on stdin, so it is never in a host process argument list.
 
 ## 7. What was deliberately not committed
 

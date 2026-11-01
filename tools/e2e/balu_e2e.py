@@ -141,9 +141,19 @@ def new_uuid() -> str:
     return str(uuid.uuid4())
 
 
-def req(method: str, path: str, body=None, token: str | None = None) -> tuple[int, dict]:
-    data = json.dumps(body).encode() if body is not None else None
-    headers = {"Content-Type": "application/json"}
+def req(
+    method: str,
+    path: str,
+    body=None,
+    token: str | None = None,
+    raw: tuple[bytes, str] | None = None,
+) -> tuple[int, dict]:
+    """JSON request, or with `raw=(bytes, content_type)` a prebuilt body (multipart)."""
+    if raw is not None:
+        data, ctype = raw
+    else:
+        data, ctype = (json.dumps(body).encode() if body is not None else None), "application/json"
+    headers = {"Content-Type": ctype}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(  # nosec B310 - scheme checked above
@@ -203,10 +213,12 @@ def token(role: str) -> str:
     return login(role)
 
 
-def authed(role: str, method: str, path: str, body=None) -> tuple[int, dict]:
-    s, b = req(method, path, body, token(role))
+def authed(
+    role: str, method: str, path: str, body=None, raw: tuple[bytes, str] | None = None
+) -> tuple[int, dict]:
+    s, b = req(method, path, body, token(role), raw)
     if s == 401:
-        s, b = req(method, path, body, login(role))
+        s, b = req(method, path, body, login(role), raw)
     return s, b
 
 

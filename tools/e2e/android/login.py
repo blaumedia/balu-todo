@@ -30,6 +30,15 @@ def type_text(text: str) -> None:
     ui.adb("shell", "input", "text", text.replace(" ", "%s"))
 
 
+def type_password(pw: str) -> None:
+    # The password goes to the device shell on stdin, so it is in no host process argv
+    # (`ps` on the host shows only the fixed command). It is still an argument of
+    # `input text` inside the emulator, which only this device's own shell can list.
+    if not pw.isalnum():
+        raise SystemExit("password has characters this typing path does not handle")
+    ui.adb("shell", 'read -r p; input text "$p"', stdin=pw + "\n")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("role", choices=["owner", "member"])
@@ -43,7 +52,7 @@ def main() -> int:
     # TAB moves focus to the password field; ui.py hides password nodes, so it cannot be tapped
     ui.adb("shell", "input", "keyevent", "61")
     time.sleep(1)
-    type_text(pw)
+    type_password(pw)
     time.sleep(1)
     ui.adb("shell", "input", "keyevent", "4")  # BACK closes the keyboard
     time.sleep(1)
