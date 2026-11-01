@@ -1,0 +1,13 @@
+# gitleaks config for this repo: the default rules plus allowlists for known,
+# reviewed false positives. Keep each entry as narrow as possible and say why.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "The fixed, non-secret signing key the server test suite sets (conftest.py, test_config.py)"
+# Matches only this exact value. No `paths` on purpose: in --no-git mode (how
+# pi-lens runs gitleaks) a path in an allowlist skips the whole file, whatever
+# `condition` says, which would hide any real secret in those files.
+regexes = [
+  '''^test-secret-key-at-least-32-bytes-long-000$''',
+]

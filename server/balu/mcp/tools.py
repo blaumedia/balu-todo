@@ -25,6 +25,7 @@ from ..projects import archived_project_ids, outside_archived_projects
 from ..routers.workspaces import get_membership
 from ..schemas.sync import Command
 from ..sync.commands import TransientDbError, process_commands
+from ..sync.engine import ROLE_RANK
 from ..sync.serialize import iso_date, iso_dt
 
 #: Cap on rows a single ``list_tasks`` call may return, so a model that omits
@@ -492,6 +493,18 @@ def t_update_task(ctx: ToolContext, args: dict) -> dict:
     # transactions, so a reference the second one rejects must not get past the
     # first (see `_apply`).
     field_args = _task_field_args(ctx, ws_id, args)
+    if task.parent_task_id is not None:
+        # Echoing the subtask's own container is harmless (an LLM copying the task
+        # view back); only a differing value is a move attempt.
+        for key, current in (("project_id", task.project_id), ("section_id", task.section_id)):
+            if key in args:
+                sent = _uuid_arg(args, key, required=False)
+                if sent != current:
+                    raise ToolError("subtasks follow their parent's project; move the parent")
+        sent_container_echo = any(k in args for k in ("project_id", "section_id"))
+        args = {k: v for k, v in args.items() if k not in ("project_id", "section_id")}
+    else:
+        sent_container_echo = False
     # project/section live on `task_move`, not `task_update` - moving also has to
     # drop a section that no longer belongs to the new project, which that handler
     # already does.
@@ -503,6 +516,12 @@ def t_update_task(ctx: ToolContext, args: dict) -> dict:
     if move_args:
         commands.append(command("task_move", move_args))
     if not commands:
+        if sent_container_echo:
+            # Only the subtask's own container was echoed: a no-op, like the same
+            # call on a top-level task - which still goes through the role check.
+            if ROLE_RANK.get(role, 0) < ROLE_RANK["member"]:
+                raise ToolError("viewer role is read-only")
+            return {"updated": _task_view(task, _names(ctx, ws_id))}
         raise ToolError("nothing to update: pass at least one field")
 
     _apply(ctx, ws_id, role, commands)

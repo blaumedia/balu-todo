@@ -161,6 +161,12 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
         section_id: (str(a["section_id"]) ?? null) as string | null,
         parent_task_id: (str(a["parent_task_id"]) ?? null) as string | null,
       };
+      // A subtask follows its parent's container (contract §3.3), like the server.
+      const parentTask = container.parent_task_id ? replica.tasks.get(container.parent_task_id) : undefined;
+      if (parentTask && !parentTask.is_deleted) {
+        container.project_id = parentTask.project_id;
+        container.section_id = parentTask.section_id;
+      }
       const siblings = [...replica.tasks.values()].filter(
         (t) =>
           !t.is_deleted &&
@@ -210,6 +216,9 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
     case "task_move": {
       const t = replica.tasks.get(id);
       if (!t) break;
+      // A task cannot be its own parent: the server rejects it (invalid_args), so
+      // skip it here too instead of hiding the task as a subtask of itself.
+      if (a.parent_task_id != null && str(a.parent_task_id) === t.id) break;
       patch(t, a, ["project_id", "section_id", "parent_task_id", "sort_order"]);
       // A section always belongs to one project, so moving between projects
       // without naming a new section clears it — same as the server (I4).
@@ -218,6 +227,25 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
         !Object.prototype.hasOwnProperty.call(a, "section_id")
       ) {
         t.section_id = null;
+      }
+      // A subtask follows its parent's container, and a task's subtasks follow it
+      // (contract §3.3), same as the server's h_task_move.
+      const parentTask = t.parent_task_id ? replica.tasks.get(t.parent_task_id) : undefined;
+      if (parentTask) {
+        t.project_id = parentTask.project_id;
+        t.section_id = parentTask.section_id;
+      } else {
+        for (const st of replica.tasks.values()) {
+          if (
+            st.parent_task_id === t.id &&
+            !st.is_deleted &&
+            (st.project_id !== t.project_id || st.section_id !== t.section_id)
+          ) {
+            st.project_id = t.project_id;
+            st.section_id = t.section_id;
+            st.updated_at = now;
+          }
+        }
       }
       t.updated_at = now;
       break;
@@ -299,7 +327,7 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
       const items = Array.isArray(a["items"]) ? (a["items"] as Array<{ id: string; sort_order: number }>) : [];
       for (const it of items) {
         const t = replica.tasks.get(it.id);
-        if (t) {
+        if (t && !t.is_deleted) {
           t.sort_order = it.sort_order;
           t.updated_at = now;
         }

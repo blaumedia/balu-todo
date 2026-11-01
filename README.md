@@ -103,6 +103,36 @@ whole deployment; the schema migrates itself on startup. Configuration via env:
 full list with comments is [`.env.example`](.env.example), and every one of them reaches
 the container through `env_file`. Upgrading is `docker compose pull && docker compose up -d`.
 
+**Rolling back** to an older image is safe only if the newer release's migrations are
+undone first, otherwise the older image cannot boot ("Can't locate revision"; the
+error names the revision to use). In order:
+
+1. With the NEW container still running: `docker compose exec app python -m balu.migrate
+   downgrade <revision>`, where `<revision>` is the revision the release notes name
+   (for the release that added `f6a7b8c9d0e1`: `e5f6a7b8c9d0`). The command prints the
+   current and the target revision and refuses, without `--yes`, any target other than
+   the image's head or its previous head (`base`, `-2`, a typo, an abbreviated id; `-1`
+   counts from the database's current revision, so it passes only while the database is
+   at the image's head): those walks can drop tables such as `attachments`.
+2. Pin the older image tag in `docker-compose.yml`, then `docker compose pull` and
+   `docker compose up -d`.
+
+Do not restart the new container between 1 and 2: with `restart: unless-stopped` it
+migrates straight back to head. Do not use `BALU_AUTO_MIGRATE=0` for this: it leaves the
+newer revision stamped in the database.
+
+**Orphan attachment blobs.** A crash between a delete's commit and the file removal can
+leave bytes nothing points at. That is harmless disk usage and no routine job is needed;
+nothing sweeps automatically (an automatic sweep would wipe every blob on an empty or
+mismatched database). To reclaim the space, run
+`docker compose exec app python -m balu.blobs sweep`: a dry run printing counts and total bytes. `--apply` moves
+files older than 1 h with no live attachment row into `attachments/.orphans/<timestamp>/`
+instead of deleting them (`docker compose exec app python -m balu.blobs sweep --apply`),
+and refuses when the attachments table has no live rows or when
+more than 50% of the candidate files are orphans (`--force` overrides). After checking
+that nothing is missing, `docker compose exec app python -m balu.blobs sweep
+--purge-quarantine --older-than-days N` deletes quarantined batches older than N days.
+
 `BALU_SECRET_KEY` and `BALU_DB_PASSWORD` have **no defaults** - compose refuses to
 start without them, and the server refuses to boot on a weak (<32 char) or
 placeholder signing key. For a throwaway local run you can set `BALU_DEV=1` to

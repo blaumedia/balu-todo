@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import stat
 import threading
 import uuid
 from pathlib import Path
@@ -476,13 +478,22 @@ def download_attachment(
         raise not_found("attachment not found")
 
     path = blob_path(ws_id, attachment.id)
-    if not path.is_file():
-        # Row without bytes: a torn upload or a restored database on an empty
-        # volume. Nothing to serve, and nothing the caller can do about it.
+    # One stat: a row without bytes (a torn upload, or a restored database on an
+    # empty volume), a vanished file and a non-regular file all end up as the
+    # same 404. FileResponse then serves the path with this stat, which keeps
+    # Range support (PDF/media viewers). A delete landing between this stat and
+    # the open inside FileResponse can still abort the body; blobs are removed
+    # only after the delete commits, so that window is a few milliseconds of a
+    # concurrent delete, accepted over losing Range requests.
+    try:
+        stat_result = os.stat(path)
+    except OSError:
+        raise not_found("attachment not found") from None
+    if not stat.S_ISREG(stat_result.st_mode):
         raise not_found("attachment not found")
-
     return FileResponse(
         str(path),
+        stat_result=stat_result,
         media_type=attachment.content_type,
         # `filename=` makes this `Content-Disposition: attachment`, so a stored
         # `text/html` upload is downloaded rather than rendered in the origin

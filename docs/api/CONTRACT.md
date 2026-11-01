@@ -169,7 +169,16 @@ Field semantics (these ARE the product decisions - implement precisely):
   an append after `2147483647` is never lost), but clamped items then tie: their relative
   order is unspecified, and clients should renumber the container.
 - Subtasks: one level only in v1 - server rejects a `parent_task_id` pointing at a task
-  that itself has a parent (`invalid_args`).
+  that itself has a parent, or at the task itself, and making a task that has live subtasks
+  a subtask (`invalid_args`).
+- A subtask's `project_id` and `section_id` always equal its parent's. The server enforces
+  it: `task_add` with a live parent takes the parent's project and section whatever it was
+  sent; `task_move` of a parent bumps and rewrites its live subtasks (so clients pull
+  them); `task_move` that sets `parent_task_id` gives the task the new parent's project and
+  section, and on a subtask the move's own `project_id`/`section_id` are overridden the
+  same way. A task that has live subtasks cannot itself become a subtask (`invalid_args`).
+  Existing data was aligned by migration `f6a7b8c9d0e1`, which bumps the workspace version
+  and the realigned subtasks so clients pull them.
 - `label_ids` order is not meaningful.
 - `assigned_to` must be a member of the workspace.
 
@@ -406,11 +415,11 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `section_delete` | `id` - its tasks move to the project body (section_id → null) |
 | `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. If the target project, section or parent task was deleted meanwhile, the task is filed elsewhere instead of rejected (§5.5). |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
-| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` - container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). |
+| `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` - container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). Subtasks follow their parent: moving a parent moves its subtasks, and a subtask's own `project_id`/`section_id` are ignored (§3.3). |
 | `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) - see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
-| `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed) |
-| `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` - bulk, single container expected |
+| `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed after the commit, best-effort) |
+| `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` - bulk, single container expected. Items whose task is deleted, unknown or in another workspace are skipped (the rest is applied); a malformed item is `invalid_args`; if no item resolves the command is `ok` and applies nothing (the workspace version still advances) (§5.5) |
 | `label_add` | `temp_id`, `name`, `color?` |
 | `label_update` | `id`, any of `name, color, sort_order` |
 | `label_delete` | `id` - removed from all tasks |
@@ -468,9 +477,14 @@ whenever any command in a flush was rejected, then reports the failures to the a
   not lose the task. Known limitation: a `parent_task_id` that cannot be resolved (for
   example the temp id of a parent `task_add` that was rejected for another reason) is
   still `not_found`.
+  With a live parent the sent `project_id`/`section_id` are ignored entirely (not
+  looked up, so they neither relocate nor reject; §3.3).
 - Concurrent `task_move` + `task_complete` → both apply (orthogonal fields).
 - Reorder races: `task_reorder` is bulk LWW; a stale reorder may interleave orders -
-  acceptable, next reorder heals it. No exotic merging in v1.
+  acceptable, next reorder heals it. No exotic merging in v1. For the same reason a
+  `task_reorder` containing a deleted, unknown or foreign task id is not rejected: that
+  item is skipped and the others are applied; with no resolvable item it answers `ok` as
+  a no-op (a rejection would make the client discard and full-sync the whole reordering).
 
 ## 6. Client obligations (what `@balu/sync-client` implements)
 
