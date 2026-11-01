@@ -90,6 +90,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * True when a failed MCP call means the server no longer offers MCP at all (a 404),
+ * as opposed to any other failure. The settings UIs hide the section on it.
+ */
+export function isMcpUnavailable(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
 /** Internal: the lease was lost between taking it and using it; take it again. */
 class LeaseLost extends Error {}
 
@@ -674,7 +682,7 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
         const res = await authed<McpSettings | { enabled: false }>("/me/mcp?probe=true", { method: "GET" });
         return res.enabled ? (res as McpSettings) : null;
       } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return null;
+        if (isMcpUnavailable(e)) return null;
         throw e;
       }
     },

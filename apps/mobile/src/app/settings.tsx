@@ -1,3 +1,4 @@
+import { isMcpUnavailable } from '@balu/api-client';
 import type { Locale, McpSettings, Theme } from '@balu/domain';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -100,7 +101,11 @@ export default function SettingsScreen() {
         setMcp(next);
         setMcpRevealed(false);
       })
-      .catch(() => Alert.alert(t('auth.errorGeneric')));
+      .catch((e) => {
+        // MCP was switched off while Settings was open: hide the section, no error.
+        if (isMcpUnavailable(e)) setMcp(null);
+        else Alert.alert(t('auth.errorGeneric'));
+      });
   };
 
   const generateMcpKey = () => {

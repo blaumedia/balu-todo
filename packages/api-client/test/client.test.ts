@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient, type AsyncKV } from "../src/index.js";
+import { ApiError, createApiClient, isMcpUnavailable, type AsyncKV } from "../src/index.js";
 
 function memoryKV(): AsyncKV {
   const m = new Map<string, string>();
@@ -1049,5 +1049,15 @@ describe("tokenSubject", () => {
     expect(tokenSubject("a1")).toBeNull();
     expect(tokenSubject("h.!!!.s")).toBeNull();
     expect(tokenSubject(null)).toBeNull();
+  });
+});
+
+describe("isMcpUnavailable", () => {
+  it("is true only for an ApiError with status 404", () => {
+    expect(isMcpUnavailable(new ApiError("not_found", "Not found", 404))).toBe(true);
+    expect(isMcpUnavailable(new ApiError("rate_limited", "Slow down", 429))).toBe(false);
+    expect(isMcpUnavailable(new ApiError("server_error", "Boom", 500))).toBe(false);
+    expect(isMcpUnavailable(new TypeError("network"))).toBe(false);
+    expect(isMcpUnavailable({ status: 404 })).toBe(false);
   });
 });
