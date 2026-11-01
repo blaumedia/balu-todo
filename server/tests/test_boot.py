@@ -7,8 +7,8 @@ import logging
 import pytest
 from alembic.script.revision import ResolutionError
 from alembic.util.exc import CommandError
-from sqlalchemy import text
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from balu import migrate
 from balu.db import get_engine
