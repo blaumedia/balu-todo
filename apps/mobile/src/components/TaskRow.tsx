@@ -156,21 +156,16 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   });
   // The title is one line, so its laid-out height is its line height, which the
   // system font scale changes; the checkbox is centred on it.
-  const [titleHeight, setTitleHeight] = useState(titleLineHeight);
-  const hasMeta =
-    dateInfo != null ||
-    (!hideProject && project != null) ||
-    task.priority > 0 ||
-    !!task.recurrence ||
-    shownLabels.length > 0 ||
-    assignee != null ||
-    hasComments;
-  // The meta row is laid out deterministically (no wrapping container, which
-  // Yoga breaks by hypothetical size and then does not shrink): inline, one
-  // nowrap line where only the project/labels group shrinks; stacked (narrow
-  // screen or large font scale), that group on its own line and the fixed items
-  // in a wrapping line below. Every fixed item is noShrink, so wrapping is safe.
+  // Starts at the scaled line height so the checkbox does not jump after the
+  // first layout; onLayout then corrects it to the exact value.
   const { width: windowWidth, fontScale } = useWindowDimensions();
+  const [titleHeight, setTitleHeight] = useState(titleLineHeight * fontScale);
+  // The meta row is laid out deterministically. The shrinkable project/labels
+  // group is never inside a wrapping container (Yoga breaks a wrapping line by
+  // hypothetical size and then does not shrink its items): inline, one nowrap
+  // line where only that group shrinks; stacked (narrow screen or large font
+  // scale), that group on its own line and the fixed items in a line below that
+  // may wrap. Every fixed item is noShrink, so that wrapping is safe.
   const stacked = metaLayout(windowWidth, fontScale) === 'stacked';
   const dateEl = dateInfo ? (
     <View style={[styles.metaItem, styles.noShrink]}>
@@ -195,8 +190,12 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
             </Text>
           </View>
         )}
-        {shownLabels.map((l) => (
-          <Text key={l.id} style={[styles.metaText, styles.labelChip, { color: projectHex(l.color) }]} numberOfLines={1}>
+        {shownLabels.map((l, i) => (
+          <Text
+            key={l.id}
+            style={[styles.metaText, styles.labelChip, (showProject || i > 0) && styles.groupGap, { color: projectHex(l.color) }]}
+            numberOfLines={1}
+          >
             @{l.name}
           </Text>
         ))}
@@ -234,6 +233,9 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     </View>
   ) : null;
   const hasFixed = dateEl != null || recurEl != null || priorityEl != null || commentsEl != null || avatarEl != null;
+  // From what is actually rendered: priority 3 shows only as the checkbox ring,
+  // so it must not produce an empty meta line or switch the row to top alignment.
+  const hasMeta = projectLabelsEl != null || hasFixed;
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
@@ -366,7 +368,7 @@ const styles = StyleSheet.create({
   shrinkGroup: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0, overflow: 'hidden' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
   projectChip: { flexShrink: 100, minWidth: 48 },
-  labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120, marginLeft: space.s2 },
+  labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120 },
   shrink: { flexShrink: 1, minWidth: 0 },
   noShrink: { flexShrink: 0 },
   groupGap: { marginLeft: space.s2 },
