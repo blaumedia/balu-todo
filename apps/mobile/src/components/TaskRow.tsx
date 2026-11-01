@@ -154,18 +154,32 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     complete: t('row.complete'),
     schedule: t('schedule.title'),
   });
+  // The title is one line, so its laid-out height is its line height, which the
+  // system font scale changes; the checkbox is centred on it.
+  const [titleHeight, setTitleHeight] = useState(titleLineHeight);
+  const hasMeta =
+    dateInfo != null ||
+    (!hideProject && project != null) ||
+    task.priority > 0 ||
+    !!task.recurrence ||
+    shownLabels.length > 0 ||
+    assignee != null ||
+    hasComments;
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
       // Only rows with swipe actions: the same two actions as swipe right / left.
       accessibilityActions={a11yActions}
       onAccessibilityAction={a11yActions ? onAccessibilityAction : undefined}
-      style={[styles.row, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
+      style={[styles.row, hasMeta && styles.rowTop, { backgroundColor: theme.bg, borderBottomColor: theme.border }]}
     >
-      <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
+      <View style={hasMeta ? { marginTop: (titleHeight - checkboxSize) / 2 } : undefined}>
+        <Checkbox checked={checked} priority={task.priority} onToggle={writable ? completeWithLinger : undefined} />
+      </View>
       <View style={styles.body}>
         <Text
           numberOfLines={1}
+          onLayout={(e) => setTitleHeight(e.nativeEvent.layout.height)}
           style={[
             styles.title,
             { color: checked ? theme.textTertiary : theme.textPrimary },
@@ -174,13 +188,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
         >
           {task.title}
         </Text>
-        {(dateInfo ||
-          (!hideProject && project) ||
-          task.priority > 0 ||
-          task.recurrence ||
-          shownLabels.length > 0 ||
-          assignee ||
-          hasComments) && (
+        {hasMeta && (
           <View style={styles.meta}>
             {dateInfo && (
               <View style={[styles.metaItem, styles.noShrink]}>
@@ -189,6 +197,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
               </View>
             )}
             {task.recurrence ? <Icon name="repeat" size={13} color={theme.textTertiary} strokeWidth={2} /> : null}
+            <View style={styles.shrinkGroup}>
             {!hideProject && project && (
               <View style={[styles.metaItem, styles.projectChip]}>
                 <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
@@ -205,11 +214,12 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
             {hiddenLabels > 0 ? (
               <Text
                 accessibilityLabel={moreLabelsText(hiddenLabels, t)}
-                style={[styles.metaText, styles.noShrink, { color: theme.textTertiary }]}
+                style={[styles.metaText, styles.noShrink, styles.groupGap, { color: theme.textTertiary }]}
               >
                 +{hiddenLabels}
               </Text>
             ) : null}
+            </View>
             {task.priority === 1 || task.priority === 2 ? (
               <Icon
                 name="flag"
@@ -284,6 +294,9 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   );
 }
 
+const titleLineHeight = font.body * 1.25;
+const checkboxSize = 24; // Checkbox default size
+
 const styles = StyleSheet.create({
   row: {
     minHeight: rowMin,
@@ -294,21 +307,30 @@ const styles = StyleSheet.create({
     paddingVertical: space.s2,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  // Rows with a meta line top-align, so a wrapped meta line cannot pull the
+  // checkbox away from the title; the checkbox is centred on the title's first
+  // line (its line height scales with the system font scale).
+  rowTop: { alignItems: 'flex-start' },
   body: { flex: 1, gap: 2 },
-  title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: font.body * 1.25 },
+  title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: titleLineHeight },
   strike: { textDecorationLine: 'line-through' },
-  // Wraps so the fixed items (comments, avatar) never leave the screen on a
-  // 320dp phone or with large text; a row that fits stays on one line.
+  // Only this outer row wraps, and only when the fixed items (date, icons,
+  // comments, avatar) plus the shrunken project/labels group do not fit, so the
+  // fixed items never leave the screen on a 320dp phone or with large text.
   meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, rowGap: 2, flexWrap: 'wrap' },
-  // Chips that may be long (project, labels) shrink with an ellipsis; the date,
-  // icons, count, comments and avatar never do. The project gives way first
-  // (large shrink factor, floor of 48dp), so short labels like "@home" stay whole
-  // while the project ellipsizes; labels shrink only once the project is at its floor.
+  // Project and labels live in a nowrap group capped at the line width, so only
+  // the outer row wraps (the group moves above the fixed items when it is too wide)
+  // and the date, icons, count, comments and avatar never leave the screen. Inside
+  // the group the project has the larger shrink factor and a 48dp floor; on device
+  // (Yoga) a project already at its cap is not always shrunk further, so the group
+  // clips what still overflows instead of drawing it over the fixed items.
+  shrinkGroup: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
   projectChip: { flexShrink: 100, minWidth: 48 },
-  labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120 },
+  labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120, marginLeft: space.s2 },
   shrink: { flexShrink: 1, minWidth: 0 },
   noShrink: { flexShrink: 0 },
+  groupGap: { marginLeft: space.s2 },
   metaText: { fontSize: font.caption, fontVariant: ['tabular-nums'] },
   dot: { width: 8, height: 8, borderRadius: 4 },
   avatar: {

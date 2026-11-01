@@ -28,8 +28,9 @@ export function moreLabelsText(n: number, t: (k: TranslationKey) => string): str
  * The date chip of a row: start date, else deadline. The accent "today" chip of
  * a start date is dropped only when hideToday is set (the Today list, where it
  * is redundant); a deadline due today always shows, since Today also lists rows
- * that merely start earlier, and overdue and future dates always show. isDeadlineOnly marks a task
- * with a deadline but no start date, so the chip can carry the deadline icon.
+ * that merely start earlier, and overdue and future dates always show.
+ * isDeadlineOnly marks a task with a deadline but no start date, so the chip
+ * can carry the deadline icon.
  */
 export function rowDate(
   task: Pick<Task, 'start_date' | 'deadline'>,
