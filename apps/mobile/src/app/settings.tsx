@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidKeyboardSpacer } from '../components/AndroidKeyboardSpacer';
 import { Button } from '../components/Button';
 import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
@@ -253,8 +254,9 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         // iOS only: keeps the inline delete confirmation above the keyboard.
-        // Android manages the soft keyboard through the window softInputMode and
-        // ignores this prop, so it stays gated rather than set unconditionally.
+        // Android ignores this prop, and with mandatory edge-to-edge (SDK 54) its
+        // window does not resize for the keyboard either - the
+        // AndroidKeyboardSpacer below makes the content scrollable above the IME.
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
         {/* Account */}
@@ -535,6 +537,7 @@ export default function SettingsScreen() {
 
         <Button title={t('settings.logout')} variant="secondary" danger onPress={doLogout} disabled={leavingUi} style={{ marginTop: space.s6 }} />
         <View style={{ height: space.s8 }} />
+        {Platform.OS === 'android' ? <AndroidKeyboardSpacer bottomInset={insets.bottom} /> : null}
       </ScrollView>
     </View>
   );

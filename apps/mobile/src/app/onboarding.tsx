@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AndroidKeyboardSpacer } from '../components/AndroidKeyboardSpacer';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { useT, type TranslationKey } from '../i18n';
@@ -50,6 +51,7 @@ export default function Onboarding() {
         ) : (
           <ServerStep initialValue={lastServerUrl.current ?? ''} onConfirm={setServerUrl} />
         )}
+        {Platform.OS === 'android' ? <AndroidKeyboardSpacer bottomInset={insets.bottom} /> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
