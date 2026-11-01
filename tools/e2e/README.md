@@ -73,6 +73,10 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `edit-task TITLE FIELD VALUE` | `task_update` as owner |
 | `delete-task TITLE` | `task_delete` as owner |
 | `attach TITLE FILE` | uploads FILE to the task as owner (multipart, CONTRACT 3.7.1); exit 1 on non-2xx |
+| `label NAME` | creates a label as owner (id remembered for `label-task`) |
+| `label-task TITLE LABEL` | adds the label to the task, keeping its other labels |
+| `comment TITLE TEXT` | `comment_add` as owner |
+| `subtask PARENT_TITLE TITLE [--due YYYY-MM-DD]` | adds a subtask (start date today unless `--due`); title becomes addressable |
 | `project-delete` | deletes the seeded project |
 | `remove-member` | removes the member from the workspace |
 | `ws2` | creates a second workspace with a project and a task |

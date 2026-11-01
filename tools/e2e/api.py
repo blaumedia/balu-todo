@@ -213,6 +213,72 @@ def cmd_attach(a) -> int:
     return ok(s)
 
 
+def labels_map() -> dict:
+    try:
+        return json.loads(e.load("labels.json"))
+    except SystemExit:
+        return {}
+
+
+def cmd_label(a) -> int:
+    """Create a label NAME as the owner (CONTRACT 4: label_add); remembered for label-task."""
+    tmp = e.new_temp_id()
+    cmd = {"type": "label_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": {"name": a.name}}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    mapping = b.get("temp_id_mapping", {})
+    if tmp in mapping:
+        known = labels_map()
+        known[a.name] = mapping[tmp]
+        e.save("labels.json", json.dumps(known))
+    print("label_add", a.name, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_label_task(a) -> int:
+    """Add label LABEL (created with `label`) to a task, keeping its other labels."""
+    lid = labels_map().get(a.label)
+    if not lid:
+        raise SystemExit(f"unknown label: {a.label}")
+    tid = task_id(a.title)
+    _, snap = e.sync("owner", ws_id(), [])
+    cur = [t for t in snap.get("tasks", []) if t.get("id") == tid]
+    have = list(cur[0].get("label_ids", [])) if cur else []
+    if lid not in have:
+        have.append(lid)
+    args = {"id": tid, "label_ids": have}
+    cmd = {"type": "task_update", "uuid": e.new_uuid(), "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("label-task", a.title, a.label, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_comment(a) -> int:
+    cmd = {
+        "type": "comment_add",
+        "uuid": e.new_uuid(),
+        "temp_id": e.new_temp_id(),
+        "args": {"task_id": task_id(a.title), "body": a.text},
+    }
+    s, b = e.sync("owner", ws_id(), [cmd])
+    print("comment_add", a.title, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
+def cmd_subtask(a) -> int:
+    parent = task_id(a.parent)
+    tmp = e.new_temp_id()
+    args = {"title": a.title, "parent_task_id": parent, "start_date": a.due or today()}
+    cmd = {"type": "task_add", "uuid": e.new_uuid(), "temp_id": tmp, "args": args}
+    s, b = e.sync("owner", ws_id(), [cmd])
+    mapping = b.get("temp_id_mapping", {})
+    if tmp in mapping:
+        known = tasks_map()
+        known[a.title] = mapping[tmp]
+        e.save("tasks.json", json.dumps(known))
+    print("subtask", a.title, "of", a.parent, "->", s, e.statuses(b))
+    return synced(s, b)
+
+
 def cmd_project_delete(_a) -> int:
     cmd = {"type": "project_delete", "uuid": e.new_uuid(), "args": {"id": e.load("project.id")}}
     s, b = e.sync("owner", ws_id(), [cmd])
@@ -297,6 +363,22 @@ def main() -> int:
     s.add_argument("title")
     s.add_argument("file")
     s.set_defaults(fn=cmd_attach)
+    s = sub.add_parser("label")
+    s.add_argument("name")
+    s.set_defaults(fn=cmd_label)
+    s = sub.add_parser("label-task")
+    s.add_argument("title")
+    s.add_argument("label")
+    s.set_defaults(fn=cmd_label_task)
+    s = sub.add_parser("comment")
+    s.add_argument("title")
+    s.add_argument("text")
+    s.set_defaults(fn=cmd_comment)
+    s = sub.add_parser("subtask")
+    s.add_argument("parent")
+    s.add_argument("title")
+    s.add_argument("--due", default=None, metavar="YYYY-MM-DD")
+    s.set_defaults(fn=cmd_subtask)
     sub.add_parser("project-delete").set_defaults(fn=cmd_project_delete)
     sub.add_parser("remove-member").set_defaults(fn=cmd_remove_member)
     sub.add_parser("ws2").set_defaults(fn=cmd_ws2)
