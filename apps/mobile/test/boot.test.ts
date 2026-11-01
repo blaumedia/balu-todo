@@ -141,6 +141,7 @@ import {
   expireSession,
   fallBackToKnownWorkspace,
   handleAccessLost,
+  landAfterDelete,
   logout,
   moveOffLostWorkspace,
   navigateToOnboarding,
@@ -636,7 +637,6 @@ describe('logout', () => {
 
   it('still resets the session when the purge fails', async () => {
     fake.purgeFails = true;
-    fake.canDismiss = true;
     useApp.setState({ boot: 'ready' } as any);
     await expect(logout()).rejects.toThrow('sqlite');
     expect(useApp.getState().boot).toBe('onboarding');
@@ -667,22 +667,80 @@ describe('navigateToOnboarding', () => {
 describe('fallBackToKnownWorkspace', () => {
   it('opens the first surviving workspace on a live session', () => {
     useApp.setState({ boot: 'ready' } as any);
-    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe(true);
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('opened');
     expect(useApp.getState().workspace?.id).toBe('a');
     expect(fake.inited).toEqual(['a']);
   });
 
   it('does not revive a session that a 401 expired meanwhile', () => {
     useApp.setState({ boot: 'onboarding' } as any); // user and memberships still set
-    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe(false);
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('expired');
     expect(useApp.getState().boot).toBe('onboarding');
     expect(fake.inited).toEqual([]);
   });
 
-  it('returns false when no other workspace is known', () => {
-    useApp.setState({ boot: 'ready', memberships: [mem('lost')] } as any);
-    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe(false);
+  it('does not revive a session whose tokens are gone while the store still looks live', () => {
+    // expireSession resets the store only after awaiting the logout request.
+    useApp.setState({ boot: 'ready' } as any);
+    fake.authed = false;
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('expired');
     expect(fake.inited).toEqual([]);
+  });
+
+  it('leaves a session alone that is no longer on the deleted workspace', () => {
+    useApp.setState({ boot: 'ready', workspace: ws('b') } as any);
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('moved');
+    expect(open()).toBe('b');
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('returns none when no other workspace is known', () => {
+    useApp.setState({ boot: 'ready', memberships: [mem('lost')] } as any);
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('none');
+    expect(fake.inited).toEqual([]);
+  });
+});
+
+describe('landAfterDelete', () => {
+  it('lands through /me', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('landed');
+    expect(open()).toBe('a');
+  });
+
+  it('holds for a workspace instead of opening a stale survivor when /me lists none', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    fake.getMe = async () => me();
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('held');
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    expect(fake.inited).toEqual([]);
+    useApp.getState().setBoot('onboarding'); // stops the background wait
+  });
+
+  it('falls back to a known workspace when /me is unreachable', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    fake.getMe = async () => {
+      throw new Error('offline');
+    };
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('landed');
+    expect(fake.inited).toEqual(['a']);
+  });
+
+  it('reports an expired session without a failure verdict', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    fake.authed = false;
+    fake.getMe = async () => {
+      throw new Error('offline');
+    };
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('expired');
+  });
+
+  it('reports failed when nothing is known', async () => {
+    useApp.setState({ boot: 'ready', memberships: [mem('lost')] } as any);
+    fake.getMe = async () => {
+      throw new Error('offline');
+    };
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('failed');
   });
 });
 

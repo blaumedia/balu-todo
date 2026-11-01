@@ -228,18 +228,53 @@ export function navigateToOnboarding(): void {
 /**
  * Last resort after the workspace `goneId` was deleted and /me stays unreachable:
  * switch locally to a workspace the store already knows. Reads the store now, not
- * a copy taken when the caller rendered: a 401 in between has expired the session
- * (user cleared, boot 'onboarding'), and setSession would revive boot 'ready'
- * with no tokens. Returns whether a workspace was opened.
+ * a copy taken when the caller rendered. Guards on the token state as well as on
+ * boot/user: the api-client clears its tokens synchronously before it reports an
+ * expired session, while expireSession only resets the store after awaiting the
+ * logout request, so boot and user can still look live in that window and
+ * setSession would revive 'ready' (and start a sync client) with no tokens.
+ * Returns why nothing was opened, or 'opened'; 'moved' means the session is no
+ * longer on `goneId` (a concurrent access-loss recovery already landed it).
  */
-export function fallBackToKnownWorkspace(serverUrl: string, goneId: string): boolean {
+export function fallBackToKnownWorkspace(
+  serverUrl: string,
+  goneId: string,
+): 'opened' | 'moved' | 'expired' | 'none' {
   const st = useApp.getState();
-  if (st.boot !== 'ready' || !st.user) return false;
+  if (st.boot !== 'ready' || !st.user || !getApi()?.isAuthenticated()) return 'expired';
+  if (st.workspace?.id !== goneId) return 'moved';
   const survivors = st.memberships.filter((m) => m.workspace.id !== goneId);
-  if (!survivors[0]) return false;
+  if (!survivors[0]) return 'none';
   st.setSession(st.user, survivors, survivors[0].workspace);
   initSync(serverUrl, survivors[0].workspace.id, st.user.id);
-  return true;
+  return 'opened';
+}
+
+/**
+ * Land somewhere after the open workspace `goneId` was deleted: two tries at
+ * /me, then the locally known fallback. 'held' means /me lists no workspace
+ * (the notice is up and holdForWorkspace keeps asking, as landOutside does), so
+ * the caller must not fall back to a stale survivor. 'expired' means a 401 ended
+ * the session (the login screen explains it); 'failed' means nowhere to go.
+ */
+export async function landAfterDelete(
+  serverUrl: string,
+  api: ApiClient,
+  goneId: string,
+): Promise<'landed' | 'held' | 'expired' | 'failed'> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      if (await establishSession(serverUrl, api)) return 'landed';
+    } catch (e) {
+      if (e instanceof NoWorkspaceError) {
+        holdForWorkspace(serverUrl, api);
+        return 'held';
+      }
+    }
+  }
+  const r = fallBackToKnownWorkspace(serverUrl, goneId);
+  if (r === 'opened' || r === 'moved') return 'landed';
+  return r === 'expired' ? 'expired' : 'failed';
 }
 
 /**

@@ -22,7 +22,7 @@ import { Icon, type IconName } from '../components/Icon';
 import { StackHeader } from '../components/StackHeader';
 import { SectionHeader } from '../components/ui';
 import { clearExpectedAccessLoss, expectAccessLoss, getApi, purgeWorkspaceStorage } from '../lib/clients';
-import { establishSession, fallBackToKnownWorkspace, logout, switchWorkspace } from '../lib/boot';
+import { landAfterDelete, logout, switchWorkspace } from '../lib/boot';
 import { chooseLocale } from '../lib/localeChoice';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
 import { useT } from '../i18n';
@@ -185,22 +185,13 @@ export default function SettingsScreen() {
       // optional. No preferred id: the remembered last-used id is the doomed
       // one, so pickMembership falls through to the first remaining workspace -
       // or to the fresh default the server minted when this was the last.
-      let ok = false;
-      for (let attempt = 0; attempt < 2 && !ok; attempt++) {
-        try {
-          ok = await establishSession(serverUrl, api);
-        } catch {
-          ok = false;
-        }
-      }
       // Last resort when the server stays unreachable: switch locally to a
       // workspace we already know about, so the app is never left syncing
       // against the deleted one until the next cold start.
-      // Decided on the live store (not this render's user/memberships): a 401 on
-      // the way has already expired the session.
-      if (!ok) ok = fallBackToKnownWorkspace(serverUrl, doomedId);
+      const landed = await landAfterDelete(serverUrl, api, doomedId);
       void purgeWorkspaceStorage(doomedId);
-      if (!ok) Alert.alert(t('workspace.deleteError'));
+      // 'expired': the login screen carries the notice, and the delete worked.
+      if (landed === 'failed') Alert.alert(t('workspace.deleteError'));
       cancelDelete();
       // Same hygiene as a switch: everything under this screen still belongs to
       // the workspace that no longer exists.
