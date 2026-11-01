@@ -1060,21 +1060,36 @@ describe('accounts without a workspace (what-if 6)', () => {
     expect([a, b]).toEqual(['landed', 'landed']);
   });
 
-  it("a superseded old-epoch hold resolves 'left' and a joiner shares that outcome", async () => {
+  it("a logout resolves the hold and its joiner 'left' too", async () => {
     vi.useFakeTimers();
     fake.getMe = async () => me();
     useApp.setState({ boot: 'ready' } as any);
-    const old = holdForWorkspace('https://x', fakeApi as any);
+    const first = holdForWorkspace('https://x', fakeApi as any);
     const joiner = holdForWorkspace('https://x', fakeApi as any);
     let a: string | null = null;
     let b: string | null = null;
-    void old.then((o) => (a = o));
+    void first.then((o) => (a = o));
     void joiner.then((o) => (b = o));
-    // a new session started meanwhile: the old loop's epoch is stale
     const lo = logout();
     await vi.advanceTimersByTimeAsync(10);
     await lo;
     expect([a, b]).toEqual(['left', 'left']);
+  });
+
+  it("a hold taken over by a newer one at the same epoch wakes and resolves 'left'", async () => {
+    vi.useFakeTimers();
+    fake.getMe = async () => me();
+    useApp.setState({ boot: 'ready' } as any);
+    const older = holdForWorkspace('https://x', fakeApi as any);
+    let a: string | null = null;
+    void older.then((o) => (a = o));
+    await vi.advanceTimersByTimeAsync(10); // the older loop is asleep in its backoff
+    // A 'reconnecting' notice ended the older hold's notice; a new trigger takes over.
+    useApp.setState({ boot: 'reconnecting' } as any);
+    const newer = holdForWorkspace('https://x', fakeApi as any);
+    void newer;
+    await vi.advanceTimersByTimeAsync(10); // well under the first ~1 s backoff
+    expect(a).toBe('left');
   });
 });
 
