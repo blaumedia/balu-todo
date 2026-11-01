@@ -10,8 +10,13 @@ import { decideHistoryOp, readerState, readerUnder } from "./historyOp.js";
  * to reader transitions, which follow their own push/pop/replace rules.
  */
 let replaceNext = false;
-/** Set just before our own history.back() so its popstate is not treated as user navigation. */
-let expectReaderPop = false;
+/**
+ * Set just before our own history.back() to the URL that pop must land on, so
+ * its popstate is not treated as user navigation. A popstate landing anywhere
+ * else is a real user navigation; the flag is cleared by every popstate and
+ * when the hook unmounts, so it cannot swallow a later Back.
+ */
+let expectReaderPop: string | null = null;
 export function markReplaceNext(): void {
   replaceNext = true;
 }
@@ -51,7 +56,7 @@ export function useUrlSync(): void {
     // "back" pops the reader entry we pushed; the popstate handler below
     // recognises it via expectReaderPop and leaves the state alone.
     if (op === "back") {
-      expectReaderPop = true;
+      expectReaderPop = readerUnder(hist.state);
       hist.back();
     } else if (op === "push") hist.pushState(fullscreenTaskId ? readerState(loc.pathname + loc.search) : null, "", next);
     else if (op === "replace-reader") hist.replaceState(readerState(readerUnder(hist.state) ?? ""), "", next);
@@ -63,16 +68,17 @@ export function useUrlSync(): void {
   // what the effect above would build, so it writes nothing: no echo loop.
   useEffect(() => {
     function onPop(): void {
-      if (expectReaderPop) {
+      const expected = expectReaderPop;
+      expectReaderPop = null;
+      const here = globalThis.location ? globalThis.location.pathname + globalThis.location.search : null;
+      if (expected !== null && here === expected) {
         // Our own back() from a reader close: state already holds the intended
         // target (and focusedIndex/focusDeadline), so never overwrite it with
         // the older entry's route. If newer state landed meanwhile, realign
-        // the address bar to it.
-        expectReaderPop = false;
+        // the address bar to it (keeping the marker when that is a reader URL).
         const cur = useApp.getState();
-        const loc = globalThis.location;
         const want = buildAppUrl(cur.view, cur.selectedTaskId, cur.fullscreenTaskId);
-        if (loc && loc.pathname + loc.search !== want) globalThis.history.replaceState(null, "", want);
+        if (here !== want) globalThis.history.replaceState(cur.fullscreenTaskId ? readerState(here) : null, "", want);
         return;
       }
       const st = useApp.getState();
@@ -93,6 +99,9 @@ export function useUrlSync(): void {
       useApp.setState({ view: route.view, selectedTaskId: route.taskId, fullscreenTaskId: route.fullscreenTaskId, focusDeadline: false, focusedIndex: -1 });
     }
     globalThis.addEventListener("popstate", onPop);
-    return () => globalThis.removeEventListener("popstate", onPop);
+    return () => {
+      globalThis.removeEventListener("popstate", onPop);
+      expectReaderPop = null;
+    };
   }, []);
 }

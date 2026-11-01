@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { decideHistoryOp, readerState, type HistoryInput } from "../src/lib/historyOp.js";
-const READER_STATE = readerState("/today?task=t1");
 import { parseAppUrl, type ViewSel } from "../src/lib/url.js";
+
+const READER_STATE = readerState("/today?task=t1");
 
 const today: ViewSel = { kind: "list", list: "today" };
 const upcoming: ViewSel = { kind: "list", list: "upcoming" };

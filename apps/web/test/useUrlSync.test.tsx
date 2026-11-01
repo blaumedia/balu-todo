@@ -61,6 +61,21 @@ describe("useUrlSync - reader history wiring", () => {
     expect(useApp.getState().focusDeadline).toBe(true);
   });
 
+  it("a user-initiated Back after a close still updates the store", async () => {
+    mount("/upcoming");
+    act(() => useApp.setState({ view: today }));
+    act(() => useApp.setState({ selectedTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: "t1" }));
+    act(() => useApp.setState({ fullscreenTaskId: null }));
+    await act(tick);
+    expect(globalThis.location.pathname + globalThis.location.search).toBe("/today?task=t1");
+    act(() => globalThis.history.back());
+    await act(tick);
+    expect(globalThis.location.pathname).toBe("/upcoming");
+    expect(useApp.getState().view).toEqual(upcoming);
+    expect(useApp.getState().selectedTaskId).toBeNull();
+  });
+
   it("closing a deep-linked reader replaces, never back()", () => {
     mount("/task/t1", null, "t1");
     replace.mockClear();

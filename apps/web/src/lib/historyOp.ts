@@ -45,7 +45,8 @@ export interface HistoryInput {
  * via history.state). Closing never pushes: a reader we opened pops its own
  * entry (Back never reopens it) only when the target URL is exactly the one
  * underneath (recorded in the marker, so it also holds after a reload); every
- * other close, including a deep-linked reader, replaces the URL. Other changes push only when the view path changes.
+ * other close, including a deep-linked reader, replaces the URL. Other changes
+ * push only when the view path changes.
  */
 export function decideHistoryOp(i: HistoryInput): HistoryOp {
   const next = buildAppUrl(i.view, i.selectedTaskId, i.fullscreenTaskId);
