@@ -89,9 +89,13 @@ def cmd_setup(a) -> int:
         e.save("project.id", existing[0]["id"])
         # an interrupted setup may have left no tasks.json: rebuild it from the snapshot
         known = tasks_map()
+        seen: set[str] = set()
         for t in snap.get("tasks", []):
             if t.get("project_id") == existing[0]["id"] and not t.get("is_deleted"):
-                known.setdefault(t["title"], t["id"])
+                # the snapshot wins over a stale tasks.json; first seen per title
+                if t["title"] not in seen:
+                    seen.add(t["title"])
+                    known[t["title"]] = t["id"]
         e.save("tasks.json", json.dumps(known))
         print("project exists")
         return 0

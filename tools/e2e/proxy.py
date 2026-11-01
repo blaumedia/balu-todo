@@ -62,11 +62,11 @@ def make_handler(upstream: str, log):
                 for k, v in self.headers.items()
                 if k.lower() not in ("host", "connection", "content-length")
             }
-            request = urllib.request.Request(
+            request = urllib.request.Request(  # nosec B310 - upstream checked by require_local
                 upstream + self.path, data=body, method=self.command, headers=hdrs
             )
             try:
-                with urllib.request.urlopen(request, timeout=90) as r:
+                with urllib.request.urlopen(request, timeout=90) as r:  # nosec B310
                     status, data, rh = r.status, r.read(), r.headers
             except urllib.error.HTTPError as err:
                 status, data, rh = err.code, err.read(), err.headers
@@ -106,6 +106,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def serve(a) -> int:
+    e.require_local(a.upstream, "--upstream")
     e.state_dir()
     CTL.mkdir(mode=0o700, exist_ok=True)
     fd = os.open(LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)

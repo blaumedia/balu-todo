@@ -26,25 +26,35 @@ if sys.version_info < (3, 11):  # noqa: UP036
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+_LOWER = bytes(c + 32 if 65 <= c <= 90 else c for c in range(256))
+
+
 def _sanitized(name: str) -> str:
-    # same rule as stack.sh: lowercase, every other byte outside [a-z0-9_-] becomes '-'
+    # same rule as stack.sh (LC_ALL=C tr): ASCII-lowercase, every byte outside [a-z0-9_-] -> '-'
     return "".join(
-        c if re.fullmatch(r"[a-z0-9_-]", c) else "-" * len(c.encode()) for c in name.lower()
+        chr(c) if re.fullmatch(r"[a-z0-9_-]", chr(c)) else "-"
+        for c in name.encode().translate(_LOWER)
     )
 
 
 PROJECT = os.environ.get("BALU_E2E_PROJECT") or f"balu-e2e-{_sanitized(REPO_ROOT.name)}"
 # BALU_E2E_PORT first so the dev stack's BALU_PORT (root .env, direnv) does not leak in
 PORT = int(os.environ.get("BALU_E2E_PORT") or os.environ.get("BALU_PORT") or "8090")
-BASE = os.environ.get("BALU_E2E_BASE", f"http://127.0.0.1:{PORT}")
-if urllib.parse.urlsplit(BASE).scheme not in {"http", "https"}:
-    raise SystemExit("BALU_E2E_BASE must be an http(s) URL")
-_HOST = urllib.parse.urlsplit(BASE).hostname or ""
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
-if _HOST not in _LOCAL_HOSTS and os.environ.get("BALU_E2E_ALLOW_REMOTE") != "1":
-    raise SystemExit(
-        f"refusing non-local BALU_E2E_BASE host {_HOST!r} (set BALU_E2E_ALLOW_REMOTE=1)"
-    )
+
+
+def require_local(url: str, what: str = "BALU_E2E_BASE") -> str:
+    """Exit unless url is http(s) on a local host (or BALU_E2E_ALLOW_REMOTE=1)."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in {"http", "https"}:
+        raise SystemExit(f"{what} must be an http(s) URL")
+    host = parts.hostname or ""
+    if host not in _LOCAL_HOSTS and os.environ.get("BALU_E2E_ALLOW_REMOTE") != "1":
+        raise SystemExit(f"refusing non-local {what} host {host!r} (set BALU_E2E_ALLOW_REMOTE=1)")
+    return url
+
+
+BASE = require_local(os.environ.get("BALU_E2E_BASE", f"http://127.0.0.1:{PORT}"))
 API = BASE + "/api/v1"
 STATE = Path(os.environ.get("BALU_E2E_STATE") or Path.home() / ".cache" / "balu-e2e" / PROJECT)
 RUN = os.environ.get("BALU_E2E_RUN") or time.strftime("%Y%m%d")
@@ -100,15 +110,21 @@ def password(role: str) -> str:
     path = run_dir() / f"{role}.pw"
     alphabet = string.ascii_letters + string.digits
     value = "".join(secrets.choice(alphabet) for _ in range(24))
+    # Write a temp file, then publish it with os.link (atomic, fails if the target exists): a
+    # racing reader never sees a partial or empty file and a crash leaves no empty .pw behind.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        # O_EXCL: of two racing processes only one writes, the other reads that password
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        return load(path.name)
-    try:
-        os.write(fd, value.encode("utf-8"))
+        try:
+            os.write(fd, value.encode("utf-8"))
+        finally:
+            os.close(fd)
+        try:
+            os.link(tmp, path)
+        except FileExistsError:
+            return load(path.name)
     finally:
-        os.close(fd)
+        tmp.unlink(missing_ok=True)
     return value
 
 

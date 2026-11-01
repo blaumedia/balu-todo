@@ -21,7 +21,7 @@ The default project is `balu-e2e-<checkout dir>`. Environment variables:
 | `BALU_E2E_STATE` | state directory |
 | `BALU_E2E_RUN` | run id (`[A-Za-z0-9_-]+`), default today; used in emails `e2e-<run>-<role>@example.com` |
 | `BALU_E2E_BASE` | API base URL override |
-| `BALU_E2E_PUBLIC_BASE` | base URL `invite_shim.py` redirects to (default `http://localhost:<BALU_PORT>`) |
+| `BALU_E2E_PUBLIC_BASE` | base URL `invite_shim.py` redirects to (default `http://localhost:<BALU_E2E_PORT>`) |
 | `BALU_ANDROID_PACKAGE` | app id for `android/cold.sh` (default `com.blaumedia.balutodo`) |
 | `METRO_PORT` | Metro port for `android/cold.sh --dev-client` (default 8081) |
 | `ANDROID_SERIAL` | required for everything under `android/` |

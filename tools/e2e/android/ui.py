@@ -9,10 +9,15 @@ ANDROID_SERIAL is required: these scripts never pick a device. Password fields
 """
 from __future__ import annotations
 
+import sys
+
+# these scripts use 3.10+ syntax and do not import balu_e2e, so they check the version themselves
+if sys.version_info < (3, 11):  # noqa: UP036 - ruff targets the server's Python, this runs on python3
+    raise SystemExit("tools/e2e needs Python 3.11+")
+
 import os
 import re
 import subprocess
-import sys
 import time
 import xml.etree.ElementTree as ET
 

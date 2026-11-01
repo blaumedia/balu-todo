@@ -6,21 +6,16 @@ set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
-# Default name: lowercase, every other character outside [a-z0-9_-] becomes '-' (same rule as
-# balu_e2e.py and the server Makefile).
-DEFAULT_PROJECT=balu-e2e-$(basename "$ROOT" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_\n-' '-')
+# Default name: ASCII-lowercase, every byte outside [a-z0-9_-] becomes '-' (LC_ALL=C makes tr
+# byte-wise; same rule as balu_e2e.py and the server Makefile).
+DEFAULT_PROJECT=balu-e2e-$(basename "$ROOT" | LC_ALL=C tr 'A-Z' 'a-z' | LC_ALL=C tr -c 'a-z0-9_\n-' '-')
 PROJECT=${BALU_E2E_PROJECT:-$DEFAULT_PROJECT}
 # `purge` deletes the project's volumes, so only a name that cannot be a dev project is accepted.
+PROJECT_MSG="BALU_E2E_PROJECT must start with balu-e2e- and match [a-z0-9_-]+ (purge deletes the project's volumes; compose needs lowercase)"
 case "$PROJECT" in
-  balu-e2e-*[!abcdefghijklmnopqrstuvwxyz0123456789_-]* | balu-e2e-)
-    echo "BALU_E2E_PROJECT must start with balu-e2e- and match [a-z0-9_-]+ (purge deletes the project's volumes; compose needs lowercase)" >&2
-    exit 2
-    ;;
+  balu-e2e-*[!abcdefghijklmnopqrstuvwxyz0123456789_-]* | balu-e2e-) echo "$PROJECT_MSG" >&2; exit 2 ;;
   balu-e2e-*) ;;
-  *)
-    echo "BALU_E2E_PROJECT must start with balu-e2e- and match [a-z0-9_-]+ (purge deletes the project's volumes; compose needs lowercase)" >&2
-    exit 2
-    ;;
+  *) echo "$PROJECT_MSG" >&2; exit 2 ;;
 esac
 # BALU_E2E_PORT first so the dev stack's BALU_PORT (root .env) does not leak in; same order as balu_e2e.py
 PORT=${BALU_E2E_PORT:-${BALU_PORT:-8090}}

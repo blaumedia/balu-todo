@@ -10,6 +10,12 @@ Needs ANDROID_SERIAL and Pillow: uv run --with pillow python tools/e2e/android/d
 """
 from __future__ import annotations
 
+import sys
+
+# these scripts use 3.10+ syntax and do not import balu_e2e, so they check the version themselves
+if sys.version_info < (3, 11):  # noqa: UP036 - ruff targets the server's Python, this runs on python3
+    raise SystemExit("tools/e2e needs Python 3.11+")
+
 import argparse
 import collections
 import io
