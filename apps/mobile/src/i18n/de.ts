@@ -111,6 +111,8 @@ export const de: Record<TranslationKey, string> = {
   'priority.p3': 'P3',
 
   'row.complete': 'Erledigen',
+  'row.moreLabelsOne': '{n} weiteres Label',
+  'row.moreLabelsOther': '{n} weitere Labels',
 
   'schedule.title': 'Planen',
   'schedule.today': 'Heute',

@@ -56,6 +56,8 @@ export interface TaskListSurfaceProps {
   groups: TaskGroup[];
   emptyLabel: string;
   showProject?: boolean;
+  /** Today view: a task due today needs no "Today" date chip. */
+  hideTodayDate?: boolean;
   projects: Map<string, Project>;
   labels: Map<string, Label>;
   today: IsoDate;
@@ -159,6 +161,7 @@ interface RowProps {
   labels: Map<string, Label>;
   meta: RowMeta;
   showProject?: boolean;
+  hideTodayDate?: boolean;
   selected: boolean;
   today: IsoDate;
   locale: Locale;
@@ -217,6 +220,7 @@ function DraggableRow({ task, groupKey, move, draggable, meta, ...rest }: RowPro
         isShared={meta.isShared}
         commentCount={meta.commentCounts.get(task.id) ?? 0}
         showProject={rest.showProject}
+        hideTodayDate={rest.hideTodayDate}
         selected={rest.selected}
         today={rest.today}
         locale={rest.locale}
@@ -292,7 +296,7 @@ function GroupDropZone({ groupKey, move, header, children }: { groupKey: string;
   );
 }
 
-export function TaskListSurface({ groups, emptyLabel, showProject, projects, labels, today, locale, t, dnd, showEmptyGroups, onDeleteGroup, draggable = true }: TaskListSurfaceProps) {
+export function TaskListSurface({ groups, emptyLabel, showProject, hideTodayDate, projects, labels, today, locale, t, dnd, showEmptyGroups, onDeleteGroup, draggable = true }: TaskListSurfaceProps) {
   const focusedIndex = useApp((s) => s.focusedIndex);
   const selectTask = useApp((s) => s.selectTask);
   const setVisibleTaskIds = useApp((s) => s.setVisibleTaskIds);
@@ -409,6 +413,7 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
                 labels={labels}
                 meta={meta}
                 showProject={showProject}
+                hideTodayDate={hideTodayDate}
                 selected={selected}
                 today={today}
                 locale={locale}
@@ -428,6 +433,7 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
               isShared={meta.isShared}
               commentCount={meta.commentCounts.get(task.id) ?? 0}
               showProject={showProject}
+              hideTodayDate={hideTodayDate}
               selected={selected}
               today={today}
               locale={locale}
@@ -510,6 +516,7 @@ export function TaskListSurface({ groups, emptyLabel, showProject, projects, lab
                 isShared={meta.isShared}
                 commentCount={meta.commentCounts.get(activeTask.id) ?? 0}
                 showProject={showProject}
+                hideTodayDate={hideTodayDate}
                 selected={false}
                 today={today}
                 locale={locale}
