@@ -5,6 +5,19 @@ import { relativeDate } from './format';
 /** Labels shown as chips on a row; the rest collapse into a "+N" chip. */
 const MAX_ROW_LABELS = 2;
 
+/** Below this width in font-scale-independent dp the row meta stacks on two lines. */
+const STACK_BELOW_DP = 360;
+
+/**
+ * Meta layout of a row: 'inline' keeps everything on one nowrap line, 'stacked'
+ * puts the project/labels on their own line above the fixed items. Decided from
+ * the window width divided by the font scale (the room text really has), so it
+ * is deterministic and needs no measuring.
+ */
+export function metaLayout(windowWidthDp: number, fontScale: number): 'inline' | 'stacked' {
+  return windowWidthDp / (fontScale > 0 ? fontScale : 1) < STACK_BELOW_DP ? 'stacked' : 'inline';
+}
+
 /**
  * Resolves a task's label ids to live labels (a deleted or unknown id is
  * skipped, like the web row) and splits them into the chips to render and the

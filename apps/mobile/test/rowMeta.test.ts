@@ -2,7 +2,7 @@ import type { IsoDate, Label } from '@balu/domain';
 import { describe, expect, it } from 'vitest';
 import { de } from '../src/i18n/de';
 import { en, type TranslationKey } from '../src/i18n/en';
-import { moreLabelsText, rowDate, rowLabels } from '../src/lib/rowMeta';
+import { metaLayout, moreLabelsText, rowDate, rowLabels } from '../src/lib/rowMeta';
 
 const mk = (id: string, deleted = false) => [id, { id, name: id, color: null, is_deleted: deleted } as unknown as Label] as const;
 const labels = new Map([mk('a'), mk('b'), mk('c'), mk('gone', true)]);
@@ -66,5 +66,17 @@ describe('rowDate', () => {
   it('prefers the start date over the deadline', () => {
     expect(d(today, '2026-05-20', false)?.info.tone).toBe('today');
     expect(d(today, '2026-05-20', true)).toBeNull();
+  });
+});
+
+describe('metaLayout', () => {
+  it('keeps a normal phone inline', () => {
+    expect(metaLayout(411, 1)).toBe('inline');
+    expect(metaLayout(360, 1)).toBe('inline');
+  });
+  it('stacks a narrow screen or a large font scale', () => {
+    expect(metaLayout(320, 1)).toBe('stacked');
+    expect(metaLayout(411, 1.3)).toBe('stacked');
+    expect(metaLayout(320, 2)).toBe('stacked');
   });
 });

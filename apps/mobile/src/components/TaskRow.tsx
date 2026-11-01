@@ -1,7 +1,7 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
 import { useMemo, useRef, useState } from 'react';
-import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation } from 'expo-router';
 import Animated, { FadeOut, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -10,7 +10,7 @@ import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { completeTask, uncompleteTask } from '../lib/actions';
-import { moreLabelsText, rowDate, rowLabels } from '../lib/rowMeta';
+import { metaLayout, moreLabelsText, rowDate, rowLabels } from '../lib/rowMeta';
 import { hapticComplete } from '../lib/haptics';
 import { dispatchRowAction, rowAccessibilityActions } from '../lib/rowActions';
 import { useT } from '../i18n';
@@ -165,6 +165,75 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     shownLabels.length > 0 ||
     assignee != null ||
     hasComments;
+  // The meta row is laid out deterministically (no wrapping container, which
+  // Yoga breaks by hypothetical size and then does not shrink): inline, one
+  // nowrap line where only the project/labels group shrinks; stacked (narrow
+  // screen or large font scale), that group on its own line and the fixed items
+  // in a wrapping line below. Every fixed item is noShrink, so wrapping is safe.
+  const { width: windowWidth, fontScale } = useWindowDimensions();
+  const stacked = metaLayout(windowWidth, fontScale) === 'stacked';
+  const dateEl = dateInfo ? (
+    <View style={[styles.metaItem, styles.noShrink]}>
+      {isDeadlineOnly && <Icon name="flag" size={12} color={dateColor} strokeWidth={2} />}
+      <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo.text}</Text>
+    </View>
+  ) : null;
+  const recurEl = task.recurrence ? (
+    <View style={styles.noShrink}>
+      <Icon name="repeat" size={13} color={theme.textTertiary} strokeWidth={2} />
+    </View>
+  ) : null;
+  const showProject = !hideProject && project != null;
+  const projectLabelsEl =
+    showProject || shownLabels.length > 0 || hiddenLabels > 0 ? (
+      <View style={styles.shrinkGroup}>
+        {showProject && project && (
+          <View style={[styles.metaItem, styles.projectChip]}>
+            <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
+            <Text style={[styles.metaText, styles.shrink, { color: theme.textSecondary }]} numberOfLines={1}>
+              {project.name}
+            </Text>
+          </View>
+        )}
+        {shownLabels.map((l) => (
+          <Text key={l.id} style={[styles.metaText, styles.labelChip, { color: projectHex(l.color) }]} numberOfLines={1}>
+            @{l.name}
+          </Text>
+        ))}
+        {hiddenLabels > 0 ? (
+          <Text
+            accessibilityLabel={moreLabelsText(hiddenLabels, t)}
+            style={[styles.metaText, styles.noShrink, styles.groupGap, { color: theme.textTertiary }]}
+          >
+            +{hiddenLabels}
+          </Text>
+        ) : null}
+      </View>
+    ) : null;
+  const priorityEl =
+    task.priority === 1 || task.priority === 2 ? (
+      <View style={styles.noShrink}>
+        <Icon
+          name="flag"
+          size={13}
+          color={task.priority === 1 ? theme.priority1 : theme.priority2}
+          fill={task.priority === 1 ? theme.priority1 : theme.priority2}
+          strokeWidth={2}
+        />
+      </View>
+    ) : null;
+  const commentsEl = hasComments ? (
+    <View style={[styles.metaItem, styles.noShrink]}>
+      <Icon name="message-square" size={12} color={theme.textTertiary} strokeWidth={2} />
+      <Text style={[styles.metaText, { color: theme.textTertiary }]}>{commentCount}</Text>
+    </View>
+  ) : null;
+  const avatarEl = assignee ? (
+    <View style={[styles.avatar, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
+      <Text style={[styles.avatarText, { color: theme.accent }]}>{initials(assignee.name)}</Text>
+    </View>
+  ) : null;
+  const hasFixed = dateEl != null || recurEl != null || priorityEl != null || commentsEl != null || avatarEl != null;
   const content = (
     <Pressable
       onPress={() => openDetail(task.id)}
@@ -188,58 +257,28 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
         >
           {task.title}
         </Text>
-        {hasMeta && (
+        {hasMeta && !stacked && (
           <View style={styles.meta}>
-            {dateInfo && (
-              <View style={[styles.metaItem, styles.noShrink]}>
-                {isDeadlineOnly && <Icon name="flag" size={12} color={dateColor} strokeWidth={2} />}
-                <Text style={[styles.metaText, { color: dateColor }]}>{dateInfo.text}</Text>
+            {dateEl}
+            {recurEl}
+            {projectLabelsEl}
+            {priorityEl}
+            {commentsEl}
+            {avatarEl}
+          </View>
+        )}
+        {hasMeta && stacked && (
+          <View style={styles.metaStack}>
+            {projectLabelsEl && <View style={styles.metaLine}>{projectLabelsEl}</View>}
+            {hasFixed && (
+              <View style={styles.metaFixed}>
+                {dateEl}
+                {recurEl}
+                {priorityEl}
+                {commentsEl}
+                {avatarEl}
               </View>
             )}
-            {task.recurrence ? <Icon name="repeat" size={13} color={theme.textTertiary} strokeWidth={2} /> : null}
-            <View style={styles.shrinkGroup}>
-            {!hideProject && project && (
-              <View style={[styles.metaItem, styles.projectChip]}>
-                <View style={[styles.dot, { backgroundColor: projectHex(project.color) }]} />
-                <Text style={[styles.metaText, styles.shrink, { color: theme.textSecondary }]} numberOfLines={1}>
-                  {project.name}
-                </Text>
-              </View>
-            )}
-            {shownLabels.map((l) => (
-              <Text key={l.id} style={[styles.metaText, styles.labelChip, { color: projectHex(l.color) }]} numberOfLines={1}>
-                @{l.name}
-              </Text>
-            ))}
-            {hiddenLabels > 0 ? (
-              <Text
-                accessibilityLabel={moreLabelsText(hiddenLabels, t)}
-                style={[styles.metaText, styles.noShrink, styles.groupGap, { color: theme.textTertiary }]}
-              >
-                +{hiddenLabels}
-              </Text>
-            ) : null}
-            </View>
-            {task.priority === 1 || task.priority === 2 ? (
-              <Icon
-                name="flag"
-                size={13}
-                color={task.priority === 1 ? theme.priority1 : theme.priority2}
-                fill={task.priority === 1 ? theme.priority1 : theme.priority2}
-                strokeWidth={2}
-              />
-            ) : null}
-            {hasComments ? (
-              <View style={[styles.metaItem, styles.noShrink]}>
-                <Icon name="message-square" size={12} color={theme.textTertiary} strokeWidth={2} />
-                <Text style={[styles.metaText, { color: theme.textTertiary }]}>{commentCount}</Text>
-              </View>
-            ) : null}
-            {assignee ? (
-              <View style={[styles.avatar, { backgroundColor: theme.accentWash, borderColor: theme.accent }]}>
-                <Text style={[styles.avatarText, { color: theme.accent }]}>{initials(assignee.name)}</Text>
-              </View>
-            ) : null}
           </View>
         )}
       </View>
@@ -314,17 +353,17 @@ const styles = StyleSheet.create({
   body: { flex: 1, gap: 2 },
   title: { fontSize: font.body, fontWeight: font.weightRegular, lineHeight: titleLineHeight },
   strike: { textDecorationLine: 'line-through' },
-  // Only this outer row wraps, and only when the fixed items (date, icons,
-  // comments, avatar) plus the shrunken project/labels group do not fit, so the
-  // fixed items never leave the screen on a 320dp phone or with large text.
-  meta: { flexDirection: 'row', alignItems: 'center', gap: space.s2, rowGap: 2, flexWrap: 'wrap' },
-  // Project and labels live in a nowrap group capped at the line width, so only
-  // the outer row wraps (the group moves above the fixed items when it is too wide)
-  // and the date, icons, count, comments and avatar never leave the screen. Inside
-  // the group the project has the larger shrink factor and a 48dp floor; on device
-  // (Yoga) a project already at its cap is not always shrunk further, so the group
-  // clips what still overflows instead of drawing it over the fixed items.
-  shrinkGroup: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' },
+  // Inline: one nowrap line; the fixed items are noShrink, so only the
+  // project/labels group gives way when the line is too wide.
+  meta: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', gap: space.s2 },
+  // Stacked: project/labels line above the fixed items line.
+  metaStack: { gap: 2 },
+  metaLine: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center' },
+  metaFixed: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.s2, rowGap: 2 },
+  // Project and labels: a plain nowrap group Yoga shrinks correctly. The project
+  // has the larger shrink factor and a 48dp floor; the group may shrink below its
+  // content (minWidth 0) and clips what still overflows.
+  shrinkGroup: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', flexShrink: 1, minWidth: 0, overflow: 'hidden' },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 160 },
   projectChip: { flexShrink: 100, minWidth: 48 },
   labelChip: { flexShrink: 1, minWidth: 28, maxWidth: 120, marginLeft: space.s2 },
@@ -335,9 +374,10 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   avatar: {
     minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    minHeight: 18,
+    borderRadius: 12,
     paddingHorizontal: 3,
+    flexShrink: 0,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
