@@ -1,6 +1,6 @@
 import '../lib/polyfills'; // must run first — installs crypto.randomUUID for the sync client
 import { useLastNotificationResponse } from 'expo-notifications';
-import { Stack } from 'expo-router';
+import { Stack, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -13,8 +13,11 @@ import { ProjectActionsSheet } from '../features/ProjectActionsSheet';
 import { QuickAddSheet } from '../features/QuickAddSheet';
 import { ScheduleSheet } from '../features/ScheduleSheet';
 import { TaskDetailSheet } from '../features/TaskDetailSheet';
-import { bootApp } from '../lib/boot';
-import { getSync } from '../lib/clients';
+import { bootApp, navigateToOnboarding } from '../lib/boot';
+import { getSync, subscribeSyncClient } from '../lib/clients';
+import { needsOnboardingRedirect } from '../lib/goBack';
+import { retryLocaleOnReconnect, retryPendingLocale } from '../lib/localeChoice';
+import { useApp } from '../store/app';
 import { configureNotifications, openTaskFromNotification, taskIdFromResponse } from '../lib/notifications';
 import { ThemeProvider, useScheme, useTheme } from '../theme/ThemeProvider';
 
@@ -52,9 +55,22 @@ export default function RootLayout() {
     // Foreground (contract §6.7): sync now and restart the retry backoff from its
     // shortest delay - it may have grown to 30 s while the app was in the background.
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void getSync()?.wake();
+      if (state === 'active') {
+        void getSync()?.wake();
+        void retryPendingLocale();
+      }
     });
-    return () => sub.remove();
+    // A pending language choice is sent again once sync is back online.
+    let unwatch: (() => void) | null = null;
+    const unsubscribe = subscribeSyncClient((client) => {
+      unwatch?.();
+      unwatch = client ? retryLocaleOnReconnect(client) : null;
+    });
+    return () => {
+      sub.remove();
+      unsubscribe();
+      unwatch?.();
+    };
   }, []);
 
   return (
@@ -71,6 +87,13 @@ export default function RootLayout() {
 function Chrome() {
   const scheme = useScheme();
   const theme = useTheme();
+  const boot = useApp((s) => s.boot);
+  const segments = useSegments();
+  // Logged out with a pushed screen in front (cold deep link, or /me answering 401):
+  // the index gate is not in that stack, so nothing else would leave it.
+  useEffect(() => {
+    if (needsOnboardingRedirect(boot, segments)) navigateToOnboarding();
+  }, [boot, segments]);
   return (
     <>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />

@@ -9,7 +9,7 @@ const router = vi.hoisted(() => ({
 }));
 vi.mock('expo-router', () => ({ router }));
 
-import { goBackOr, leaveGate, replaceWithGate } from '../src/lib/goBack';
+import { gateTarget, goBackOr, leaveGate, needsOnboardingRedirect, replaceWithGate } from '../src/lib/goBack';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -78,10 +78,42 @@ describe('leaveGate', () => {
     );
   });
 
+  it('dismisses alone for the app: the anchor already is (tabs)/Today', () => {
+    router.canDismiss.mockReturnValue(true);
+    leaveGate('/today');
+    expect(router.dismissAll).toHaveBeenCalledTimes(1);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
   it('only replaces when there is nothing to dismiss', () => {
     router.canDismiss.mockReturnValue(false);
     leaveGate('/today');
     expect(router.dismissAll).not.toHaveBeenCalled();
     expect(router.replace).toHaveBeenCalledWith('/today');
+  });
+});
+
+describe('gateTarget', () => {
+  it('waits while boot is unresolved, and picks the destination otherwise', () => {
+    expect(gateTarget('loading')).toBeNull();
+    expect(gateTarget('reconnecting')).toBeNull();
+    expect(gateTarget('noWorkspace')).toBeNull();
+    expect(gateTarget('onboarding')).toBe('/onboarding');
+    expect(gateTarget('ready')).toBe('/today');
+  });
+});
+
+describe('needsOnboardingRedirect', () => {
+  it('redirects a logged-out boot with a pushed screen in front', () => {
+    expect(needsOnboardingRedirect('onboarding', ['settings'])).toBe(true);
+    expect(needsOnboardingRedirect('onboarding', ['project', '[id]'])).toBe(true);
+    expect(needsOnboardingRedirect('onboarding', ['(tabs)', 'today'])).toBe(true);
+  });
+
+  it('leaves the gate, onboarding and every other boot state alone', () => {
+    expect(needsOnboardingRedirect('onboarding', [])).toBe(false);
+    expect(needsOnboardingRedirect('onboarding', ['onboarding'])).toBe(false);
+    expect(needsOnboardingRedirect('loading', ['settings'])).toBe(false);
+    expect(needsOnboardingRedirect('ready', ['settings'])).toBe(false);
   });
 });

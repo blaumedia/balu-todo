@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { leaveGate } from '../lib/goBack';
+import { gateTarget, leaveGate } from '../lib/goBack';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -13,8 +13,8 @@ export default function Index() {
   // leave (tabs) below onboarding (Back = a tab with no session) or a second (tabs)
   // above the first. leaveGate clears the stack first.
   useEffect(() => {
-    if (boot === 'loading' || boot === 'reconnecting' || boot === 'noWorkspace') return;
-    leaveGate(boot === 'onboarding' ? '/onboarding' : '/today');
+    const target = gateTarget(boot);
+    if (target) leaveGate(target);
   }, [boot]);
 
   // reconnecting / noWorkspace: components/BootNotice explains; the gate just waits.

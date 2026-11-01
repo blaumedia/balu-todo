@@ -38,14 +38,34 @@ export function replaceWithGate(): void {
   router.replace('/');
 }
 
+/** Where the index gate sends the app for a boot state: '/today', '/onboarding', or null to keep waiting. */
+export function gateTarget(boot: 'loading' | 'onboarding' | 'ready' | 'reconnecting' | 'noWorkspace'): Href | null {
+  if (boot === 'ready') return '/today';
+  if (boot === 'onboarding') return '/onboarding';
+  return null;
+}
+
+/**
+ * A logged-out boot with a pushed screen in front (cold deep link, or /me refusing
+ * the session): that screen sits on the (tabs) anchor with no session. True when
+ * the focused route is neither the gate (no segment) nor onboarding.
+ */
+export function needsOnboardingRedirect(boot: string, segments: readonly string[]): boolean {
+  return boot === 'onboarding' && segments.length > 0 && segments[0] !== 'onboarding';
+}
+
 /**
  * Leave the index gate for its destination with exactly one root screen left.
  *
- * The root anchor makes the cold-start stack `[(tabs), index]`. A plain replace
- * would give `[(tabs), onboarding]` (Back reveals a tab with no session) or
- * `[(tabs), (tabs)]`. Dismissing first leaves `[(tabs)]`, which the replace swaps.
+ * The root anchor makes the cold-start stack `[(tabs), index]`. For the app itself
+ * the anchor already is `(tabs)`/Today, so dismissing is enough (a replace would
+ * remount the tabs); replace only when nothing is below. For onboarding a plain
+ * replace would give `[(tabs), onboarding]` (Back reveals a tab with no session),
+ * so dismiss first and let the replace swap the one root screen left.
  */
 export function leaveGate(href: Href): void {
-  if (router.canDismiss()) router.dismissAll();
+  const canDismiss = router.canDismiss();
+  if (canDismiss) router.dismissAll();
+  if (href === '/today' && canDismiss) return;
   router.replace(href);
 }
