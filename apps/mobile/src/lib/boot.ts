@@ -371,9 +371,15 @@ export async function landAfterDelete(
   return r === 'left' ? 'left' : 'failed';
 }
 
+/**
+ * How a hold ended: 'landed' when this very hold's establishSession set the session,
+ * 'left' for everything else (logout, expiry, superseded, refused, no workspace after all).
+ */
+export type HoldOutcome = 'landed' | 'left';
+
 interface Hold {
   epoch: number;
-  promise: Promise<void>;
+  promise: Promise<HoldOutcome>;
 }
 
 let hold: Hold | null = null;
@@ -397,40 +403,55 @@ export function resetBootStateForTests(): void {
  * recovery) leaves the running loop alone and gets its promise. If another
  * notice replaced it meanwhile ('reconnecting' ends the old loop), or the epoch
  * moved on (logout, a new session), a new loop starts and supersedes the old one.
+ * The promise resolves with the HoldOutcome; joiners get the same one. The backoff
+ * sleep wakes as soon as the hold is no longer waiting (logout from the notice), so
+ * an awaiting caller is released at once.
  */
-export function holdForWorkspace(serverUrl: string, api: ApiClient): Promise<void> {
+export function holdForWorkspace(serverUrl: string, api: ApiClient): Promise<HoldOutcome> {
   // A logout is running: no notice and no loop for a session that is going away.
-  if (endingSession > 0) return Promise.resolve();
+  if (endingSession > 0) return Promise.resolve('left');
   const epoch = sessionEpoch;
   if (hold && hold.epoch === epoch && useApp.getState().boot === 'noWorkspace') return hold.promise;
-  const me: Hold = { epoch, promise: Promise.resolve() };
+  const me: Hold = { epoch, promise: Promise.resolve('left') };
   hold = me;
   me.promise = (async () => {
     try {
       showBootNotice('noWorkspace');
       const waiting = (): boolean => useApp.getState().boot === 'noWorkspace' && sessionEpoch === epoch && hold === me;
       for (let attempt = 0; waiting(); attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, retryWaitMs(attempt)));
-        if (!waiting()) return;
+        await new Promise<void>((resolve) => {
+          const done = (): void => {
+            clearTimeout(timer);
+            unsubscribe();
+            resolve();
+          };
+          const timer = setTimeout(done, retryWaitMs(attempt));
+          // Wake early once the notice is gone (logout, expiry) or this hold is superseded.
+          const unsubscribe = useApp.subscribe(() => {
+            if (!waiting()) done();
+          });
+        });
+        if (!waiting()) return 'left';
         try {
-          if (!(await establishSession(serverUrl, api, null, false, waiting))) {
-            if (waiting()) useApp.getState().setBoot('onboarding'); // the root layout's effect leaves the screen
-          }
-          return;
+          if (await establishSession(serverUrl, api, null, false, waiting)) return 'landed';
+          if (waiting()) useApp.getState().setBoot('onboarding'); // the root layout's effect leaves the screen
+          return 'left';
         } catch (e) {
           if (e instanceof ApiError && e.status === 401 && e.code !== 'signed_out') {
             if (waiting()) await expireSession();
-            return;
+            return 'left';
           }
-          if (e instanceof ApiError && e.code === 'signed_out') return;
+          if (e instanceof ApiError && e.code === 'signed_out') return 'left';
           // Still no workspace, or the server is unreachable: keep asking.
         }
       }
+      return 'left';
     } finally {
       if (hold === me) hold = null;
     }
-  })().catch(() => {
-    /* showBootNotice failed: nothing to wait for, and no caller awaits this */
+  })().catch((): HoldOutcome => {
+    /* showBootNotice failed: resolve so an awaiting caller (onboarding) just continues */
+    return 'left';
   });
   return me.promise;
 }

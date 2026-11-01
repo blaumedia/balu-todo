@@ -1021,6 +1021,61 @@ describe('accounts without a workspace (what-if 6)', () => {
     expect(calls).toBe(1);
     expect(useApp.getState().boot).toBe('onboarding');
   });
+
+  it("a logout from the notice wakes the hold at once with 'left' (review fe2fb9f3)", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => {
+      calls += 1;
+      return me();
+    };
+    const held = holdForWorkspace('https://x', fakeApi as any);
+    let outcome: string | null = null;
+    void held.then((o) => (outcome = o));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(useApp.getState().boot).toBe('noWorkspace');
+    expect(outcome).toBeNull();
+    const out = logout();
+    await vi.advanceTimersByTimeAsync(10); // far below the 1 s first backoff
+    await out;
+    expect(outcome).toBe('left');
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(calls).toBe(0); // no establishSession afterwards
+    expect(useApp.getState().boot).toBe('onboarding');
+  });
+
+  it("resolves 'landed' when its own establishSession set the session, joiners get the same", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    fake.getMe = async () => (++calls <= 1 ? me() : me('a'));
+    useApp.setState({ boot: 'ready' } as any);
+    const first = holdForWorkspace('https://x', fakeApi as any);
+    const joiner = holdForWorkspace('https://x', fakeApi as any);
+    let a: string | null = null;
+    let b: string | null = null;
+    void first.then((o) => (a = o));
+    void joiner.then((o) => (b = o));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(useApp.getState().boot).toBe('ready');
+    expect([a, b]).toEqual(['landed', 'landed']);
+  });
+
+  it("a superseded old-epoch hold resolves 'left' and a joiner shares that outcome", async () => {
+    vi.useFakeTimers();
+    fake.getMe = async () => me();
+    useApp.setState({ boot: 'ready' } as any);
+    const old = holdForWorkspace('https://x', fakeApi as any);
+    const joiner = holdForWorkspace('https://x', fakeApi as any);
+    let a: string | null = null;
+    let b: string | null = null;
+    void old.then((o) => (a = o));
+    void joiner.then((o) => (b = o));
+    // a new session started meanwhile: the old loop's epoch is stale
+    const lo = logout();
+    await vi.advanceTimersByTimeAsync(10);
+    await lo;
+    expect([a, b]).toEqual(['left', 'left']);
+  });
 });
 
 describe('leaving for onboarding past the gate (review 026272d7)', () => {

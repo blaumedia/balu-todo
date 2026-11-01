@@ -1,7 +1,7 @@
 import { ApiError } from '@balu/api-client';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -170,6 +170,13 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const submit = async () => {
     setBusy(true);
@@ -194,9 +201,10 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         // Signed in, but the account has no workspace yet: the notice explains it and keeps
         // asking. Nothing else moves this screen once a workspace appears (the root layout
         // only leaves *for* onboarding, the index gate only runs on its own route), so wait
-        // for the hold and leave for Today if the session landed.
-        await holdForWorkspace(serverUrl, getApi() ?? api);
-        if (useApp.getState().boot === 'ready') router.replace('/today');
+        // for the hold and leave for Today only if this hold landed the session (a logout
+        // from the notice ends it as 'left' at once) and this screen is still there.
+        const outcome = await holdForWorkspace(serverUrl, getApi() ?? api);
+        if (outcome === 'landed' && mounted.current) router.replace('/today');
         return;
       }
       const code = e instanceof ApiError ? (`auth.${e.code}` as TranslationKey) : 'auth.errorGeneric';
