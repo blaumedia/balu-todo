@@ -32,6 +32,8 @@ const fake = vi.hoisted(() => ({
   patchHolds: [] as Array<Promise<void>>,
   syncCreated: 0,
   routerThrows: false,
+  permGate: null as Promise<void> | null,
+  remindersStarted: 0,
 }));
 
 const fakeApi = {
@@ -71,8 +73,13 @@ vi.mock('expo-router', () => ({
   },
 }));
 vi.mock('../src/lib/notifications', () => ({
-  getReminderPermissionGranted: async () => false,
-  startReminderScheduler: () => {},
+  getReminderPermissionGranted: async () => {
+    await fake.permGate;
+    return !!fake.permGate;
+  },
+  startReminderScheduler: () => {
+    fake.remindersStarted += 1;
+  },
   stopReminderScheduler: () => {
     fake.remindersStopped += 1;
   },
@@ -141,10 +148,12 @@ import {
   expireSession,
   fallBackToKnownWorkspace,
   handleAccessLost,
+  holdForWorkspace,
   landAfterDelete,
   logout,
   moveOffLostWorkspace,
   navigateToOnboarding,
+  switchWorkspace,
   resetBootStateForTests,
 } from '../src/lib/boot';
 import { chooseLocale, retryLocaleOnReconnect, retryPendingLocale, watchLocaleRetries } from '../src/lib/localeChoice';
@@ -178,6 +187,8 @@ beforeEach(() => {
   fake.nav = [];
   fake.canDismiss = false;
   fake.routerThrows = false;
+  fake.permGate = null;
+  fake.remindersStarted = 0;
   fake.inited = [];
   fake.events = [];
   fake.logoutGate = null;
@@ -753,14 +764,24 @@ describe('landAfterDelete', () => {
     expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('failed');
   });
 
-  it('reports landed, not failed, when a concurrent recovery already moved the session', async () => {
-    useApp.setState({ boot: 'ready', workspace: ws('b') } as any);
+  it('reports landed, not failed, when a concurrent recovery lands the session during its /me (review 21c50c6e)', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
     fake.getMe = async () => {
-      throw new Error('offline');
+      if (++calls === 1) {
+        await gate;
+        return me('a');
+      }
+      return me('b');
     };
-    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('landed');
+    const out = landAfterDelete('https://x', fakeApi as any, 'lost');
+    await establishSession('https://x', fakeApi as any, 'b'); // a concurrent landing: bumps the epoch
     expect(open()).toBe('b');
-    expect(fake.inited).toEqual([]);
+    release();
+    expect(await out).toBe('landed');
+    expect(fake.inited).toEqual(['b']);
   });
 
   it('asks /me once after a 401 and ends the session through expireSession (review 280267c8)', async () => {
@@ -888,7 +909,7 @@ describe('holdForWorkspace single-flight by epoch (review 280267c8)', () => {
     await vi.advanceTimersByTimeAsync(10);
     await lo;
     // signed in again, the workspace is lost again, while L1 still sleeps
-    useApp.setState({ boot: 'noWorkspace', workspace: ws('lost'), user, memberships: [mem('lost')] } as any);
+    useApp.setState({ boot: 'ready', workspace: ws('lost'), user, memberships: [mem('lost')] } as any);
     fake.alerts = [];
     await moveOffLostWorkspace('lost');
     expect(useApp.getState().boot).toBe('noWorkspace'); // the notice was shown
@@ -1097,5 +1118,145 @@ describe('discardLostWorkspaces details (review f9966f34)', () => {
     await discardLostWorkspaces(['a']);
     expect(fake.cleared).toEqual(['a']);
     expect(fake.alerts[0]![1]).toContain('deleted');
+  });
+});
+
+describe('last round (review 21c50c6e)', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('1: a switch started during a running logout starts no sync client', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    const lo = logout(); // blocked in teardownSyncSettled
+    expect(await switchWorkspace('a')).toBe(false);
+    expect(await establishSession('https://x', fakeApi as any, 'a', true)).toBe(false);
+    await lo;
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('1: a landAfterDelete started during a running logout opens nothing', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    const lo = logout();
+    expect(await landAfterDelete('https://x', fakeApi as any, 'lost')).toBe('left');
+    expect(fallBackToKnownWorkspace('https://x', 'lost')).toBe('left');
+    await lo;
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('1: flows work again after the logout ended', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    await logout();
+    useApp.setState({ boot: 'ready', user, workspace: ws('lost'), memberships: [mem('lost'), mem('a')] } as any);
+    expect(await switchWorkspace('a')).toBe(true);
+  });
+
+  it('2: landOutside ends a session whose 401 left the tokens in place', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    fake.getMe = async () => {
+      throw new ApiError('unauthorized', 'no', 401);
+    };
+    await moveOffLostWorkspace('lost');
+    expect(fake.logouts).toBe(1);
+    expect(useApp.getState().boot).toBe('onboarding');
+    expect(useApp.getState().loginNotice).toBe('sessionExpired');
+    expect(fake.inited).toEqual([]);
+  });
+
+  it('4: a loss in a new session does not join a move left over from the old one', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me('a');
+    };
+    const old = moveOffLostWorkspace('lost');
+    await logout();
+    useApp.setState({ boot: 'ready', user, workspace: ws('lost'), memberships: [mem('lost'), mem('a')] } as any);
+    fake.getMe = async () => me('b');
+    const fresh = moveOffLostWorkspace('lost');
+    expect(fresh).not.toBe(old);
+    await fresh;
+    expect(open()).toBe('b');
+    release();
+    await old;
+  });
+
+  it('5: a logout during the reminder permission read does not restart the scheduler', async () => {
+    useApp.setState({ boot: 'ready', remindersEnabled: true } as any);
+    let release!: () => void;
+    fake.permGate = new Promise<void>((r) => (release = r));
+    await establishSession('https://x', fakeApi as any); // resumeReminders waits for the permission
+    await logout();
+    release();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fake.remindersStarted).toBe(0);
+  });
+
+  it('5: reminders still start when no session ended meanwhile', async () => {
+    useApp.setState({ boot: 'ready', remindersEnabled: true } as any);
+    fake.permGate = Promise.resolve();
+    await establishSession('https://x', fakeApi as any);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fake.remindersStarted).toBe(1);
+  });
+
+  it('5: the lost-workspace alert is dropped when a logout ended the session first', async () => {
+    fake.discarded.set('gone', 2);
+    const p = discardLostWorkspaces(['a'], 'gone', 'G');
+    await logout();
+    await p;
+    expect(fake.alerts).toEqual([]);
+  });
+
+  it('6: no hold and no second expiry when a logout overtook the cold start', async () => {
+    fake.kv.set('serverUrl', 'https://x');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      throw new ApiError('unauthorized', 'no', 401);
+    };
+    const boot = bootApp();
+    await new Promise((r) => setTimeout(r, 0));
+    const lo = logout();
+    release();
+    await boot;
+    await lo;
+    expect(fake.logouts).toBe(1);
+  });
+
+  it('6: a cold start 401 with the tokens already gone does not expire twice', async () => {
+    fake.kv.set('serverUrl', 'https://x');
+    fake.getMe = async () => {
+      fake.authed = false;
+      throw new ApiError('unauthorized', 'no', 401);
+    };
+    await bootApp();
+    expect(fake.logouts).toBe(0);
+  });
+
+  it('holdForWorkspace starts no loop during a running logout', async () => {
+    useApp.setState({ boot: 'ready' } as any);
+    const lo = logout();
+    await holdForWorkspace('https://x', fakeApi as any);
+    expect(useApp.getState().boot).not.toBe('noWorkspace');
+    await lo;
+  });
+
+  it('a stale /me does not close the sync client of the session that overtook it', async () => {
+    fake.kv.set('session', JSON.stringify({ user: { id: 'other' }, workspace: ws('lost') }));
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    fake.getMe = async () => {
+      await gate;
+      return me('a');
+    };
+    let checks = 0;
+    // wanted right after /me, overtaken while the cached session is read
+    const p = establishSession('https://x', fakeApi as any, null, false, () => ++checks === 1);
+    release();
+    expect(await p).toBe(false);
+    expect(fake.teardowns).toBe(0);
+    expect(fake.purgeCalls).toEqual([]);
   });
 });

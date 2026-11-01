@@ -133,13 +133,14 @@ export default function SettingsScreen() {
   const doSwitch = async (id: string) => {
     // Both flows re-establish the session; letting them overlap could race two
     // initSync calls, or switch *into* the workspace that is being deleted.
-    if (switchingRef.current || deletingRef.current || id === workspace?.id) return;
+    if (switchingRef.current || deletingRef.current || leaving.current || id === workspace?.id) return;
     switchingRef.current = true;
     setSwitching(true);
     try {
       const ok = await switchWorkspace(id);
       if (!ok) {
-        Alert.alert(t('workspace.switchError'));
+        // A logout that cut the switch off already shows the login step: no error on top of it.
+        if (useApp.getState().boot === 'ready') Alert.alert(t('workspace.switchError'));
         return;
       }
       // Everything under this screen still belongs to the old workspace: a
@@ -163,7 +164,7 @@ export default function SettingsScreen() {
   };
 
   const doDelete = async () => {
-    if (deletingRef.current || switchingRef.current || !workspace || !serverUrl) return;
+    if (deletingRef.current || switchingRef.current || leaving.current || !workspace || !serverUrl) return;
     const api = getApi();
     if (!api) return;
     const doomedId = workspace.id;
@@ -284,8 +285,9 @@ export default function SettingsScreen() {
                       <Pressable
                         key={m.workspace.id}
                         onPress={() => doSwitch(m.workspace.id)}
+                        disabled={leavingUi}
                         accessibilityRole="button"
-                        accessibilityState={{ selected: active, disabled: switching }}
+                        accessibilityState={{ selected: active, disabled: switching || leavingUi }}
                         style={({ pressed }) => [
                           styles.wsRow,
                           i < memberships.length - 1 && {
@@ -344,7 +346,7 @@ export default function SettingsScreen() {
                       <Button
                         title={t('workspace.delete')}
                         danger
-                        disabled={deleteInput.trim() !== workspace.name.trim()}
+                        disabled={leavingUi || deleteInput.trim() !== workspace.name.trim()}
                         onPress={doDelete}
                         style={{ flex: 1 }}
                       />

@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../components/Button';
 import { Icon } from '../components/Icon';
 import { useT, type TranslationKey } from '../i18n';
-import { establishSession } from '../lib/boot';
+import { NoWorkspaceError, establishSession, holdForWorkspace } from '../lib/boot';
 import { apiBase, getApi, initApi } from '../lib/clients';
 import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '../lib/serverUrl';
 import { useApp } from '../store/app';
@@ -182,9 +182,19 @@ function AuthStep({ serverUrl, onChangeServer }: { serverUrl: string; onChangeSe
         await api.login({ email: email.trim(), password });
       }
       const client = getApi();
-      if (client) await establishSession(serverUrl, client);
+      // The session did not start (a logout or expiry overtook it): stay on the login
+      // step and say so, instead of opening Today with no session.
+      if (!client || !(await establishSession(serverUrl, client))) {
+        setError(t('auth.errorGeneric'));
+        return;
+      }
       router.replace('/today');
     } catch (e) {
+      if (e instanceof NoWorkspaceError) {
+        // Signed in, but the account has no workspace yet: the notice explains it and keeps asking.
+        void holdForWorkspace(serverUrl, getApi() ?? api);
+        return;
+      }
       const code = e instanceof ApiError ? (`auth.${e.code}` as TranslationKey) : 'auth.errorGeneric';
       // `rate_limited` included so a throttled user is told to wait rather than
       // being sent back to re-check a password that was fine.
