@@ -143,3 +143,10 @@ describe("utcOffsetMinutes", () => {
     expect(utcOffsetMinutes(undefined)).toBe(0);
   });
 });
+
+describe("rollForward reminder overflow", () => {
+  it("leaves a reminder near year 9999 unchanged", () => {
+    const rolled = rollForward("FREQ=DAILY", "2026-07-23", null, "9999-12-31T23:00:00Z", "2026-07-25", 0);
+    expect(rolled).toEqual({ start_date: "2026-07-26", deadline: null, reminder_at: "9999-12-31T23:00:00Z" });
+  });
+});

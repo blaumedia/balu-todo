@@ -189,7 +189,9 @@ export function rollForward(
   }
   let reminder = reminderAt;
   if (reminder != null && shift > 0 && !Number.isNaN(Date.parse(reminder))) {
-    reminder = shiftInstant(reminder, shift);
+    const shifted = shiftInstant(reminder, shift);
+    // Past year 9999 the ISO string is not a valid server instant: leave the reminder alone.
+    if (/^\d{4}-/.test(shifted)) reminder = shifted;
   }
   return { start_date: start, deadline: due, reminder_at: reminder };
 }

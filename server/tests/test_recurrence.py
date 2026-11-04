@@ -193,6 +193,13 @@ def test_roll_forward_parity_vectors(
     assert _iso_utc(rolled.reminder_at) == exp_reminder
 
 
+def test_roll_forward_leaves_a_reminder_near_year_9999_unchanged():
+    reminder = datetime(9999, 12, 31, 23, 0, tzinfo=UTC)
+    rolled = roll_forward("FREQ=DAILY", d("2026-07-23"), None, reminder, d("2026-07-25"), 0)
+    assert rolled.start_date == d("2026-07-26")
+    assert rolled.reminder_at == reminder
+
+
 # (input, expected)
 OFFSET_VECTORS: list[tuple[object, int]] = [
     (120, 120),

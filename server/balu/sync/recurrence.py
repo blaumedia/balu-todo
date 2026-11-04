@@ -209,5 +209,9 @@ def roll_forward(
             local_day = (reminder_at.astimezone(UTC) + timedelta(minutes=utc_offset)).date()
             shift = (start_date - local_day).days
     if reminder_at is not None and shift > 0:
-        reminder_at = reminder_at + timedelta(days=shift)
+        try:
+            reminder_at = reminder_at + timedelta(days=shift)
+        except OverflowError:
+            # Past year 9999: leave the reminder where it is.
+            pass
     return Rolled(start_date, deadline, reminder_at)
