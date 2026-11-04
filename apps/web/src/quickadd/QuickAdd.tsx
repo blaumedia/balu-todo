@@ -30,6 +30,8 @@ function tokenStyle(tok: Token): CSSProperties {
         : tok.value === 2
           ? { color: "var(--priority-2)", background: "rgba(217,119,6,0.14)" }
           : { color: "var(--accent)", background: "var(--accent-wash)" };
+    case "time":
+      return { color: "var(--accent)", background: "var(--accent-wash)" };
     default:
       return { color: "var(--accent)", background: "var(--accent-wash)" };
   }

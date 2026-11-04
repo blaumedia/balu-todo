@@ -13,6 +13,8 @@ export interface ComposeCtx {
   projects: Project[];
   labels: Label[];
   today: IsoDate;
+  /** Wall clock for the "time already passed today" rule; defaults to now. Tests pin it. */
+  now?: Date;
 }
 
 /**
@@ -30,5 +32,6 @@ export function composeTaskArgs(
     labels: ctx.labels,
     today: ctx.today,
     context: ctx.context,
+    ...(ctx.now ? { now: ctx.now } : {}),
   });
 }

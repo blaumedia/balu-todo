@@ -1,4 +1,4 @@
-// Live token highlighting for quick-add (DESIGN §2): dates/recurrence → accent,
+// Live token highlighting for quick-add (DESIGN §2): dates/times/recurrence → accent,
 // #project → violet, @label → amber, !priority → its priority color.
 import { StyleSheet, Text, View } from 'react-native';
 import type { TokenType } from '@balu/nl-parser';
@@ -13,6 +13,8 @@ export function tokenColor(type: TokenType, priority: number, theme: ReturnType<
       return theme.tokenLabel;
     case 'priority':
       return priority === 1 ? theme.priority1 : priority === 2 ? theme.priority2 : theme.priority3;
+    case 'time':
+      return theme.tokenDate;
     default:
       return theme.tokenDate; // start / deadline / evening / recurrence
   }

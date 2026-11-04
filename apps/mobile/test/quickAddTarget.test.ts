@@ -96,4 +96,18 @@ describe('resolveQuickAddContext', () => {
     expect(args['project_id']).toBe('W1');
     expect(target.redirected).toBe(true);
   });
+
+  it('turns a time of day into reminder_at and strips it from the title', () => {
+    const text = 'Aufgabe jeden Tag um 9 Uhr';
+    const args = composeTaskArgs(text, parseQuickAdd(text, { locale: 'de', referenceDate: '2026-10-30' }), {
+      context: { kind: 'none' },
+      projects: [],
+      labels: [],
+      today: '2026-10-30',
+      now: new Date(2026, 9, 30, 8, 0),
+    });
+    expect(args['title']).toBe('Aufgabe');
+    expect(args['recurrence']).toBe('FREQ=DAILY');
+    expect(args['reminder_at']).toBe(new Date(2026, 9, 30, 9, 0).toISOString().replace(/\.\d{3}Z$/, 'Z'));
+  });
 });

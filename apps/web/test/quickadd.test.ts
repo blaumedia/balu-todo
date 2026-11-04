@@ -84,13 +84,14 @@ describe("quickAddTarget", () => {
 describe("quickAddTarget + composeTaskArgs", () => {
   const work = project({ id: "W1", name: "Work" });
   const archived = project({ archived_at: "2026-07-02T00:00:00Z" });
-  const run = (text: string) => {
+  const run = (text: string, now?: Date) => {
     const target = quickAddTarget(view("P1"), [archived, work], {});
     return composeTaskArgs(text, parseQuickAdd(text, { locale: "en", referenceDate: "2026-10-30" }), {
       context: target.context,
       projects: [work],
       labels: [],
       today: "2026-10-30",
+      ...(now ? { now } : {}),
     });
   };
 
@@ -100,6 +101,13 @@ describe("quickAddTarget + composeTaskArgs", () => {
 
   it("lets a #project token win", () => {
     expect(run("Buy milk #Work")["project_id"]).toBe("W1");
+  });
+
+  it("turns a time of day into reminder_at and strips it from the title", () => {
+    const args = run("Task every day at 9am", new Date(2026, 9, 30, 8, 0));
+    expect(args["title"]).toBe("Task");
+    expect(args["recurrence"]).toBe("FREQ=DAILY");
+    expect(args["reminder_at"]).toBe(new Date(2026, 9, 30, 9, 0).toISOString().replace(/\.\d{3}Z$/, "Z"));
   });
 });
 
