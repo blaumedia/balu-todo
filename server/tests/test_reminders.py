@@ -98,6 +98,31 @@ def test_reminder_rearms_when_a_recurring_task_rolls_forward(client, user):
     assert _run_tick(Recorder()) == 0
 
 
+def test_stale_reminder_is_not_re_armed_when_a_recurring_task_completes(client, user):
+    _configure_ntfy(client, user)
+    today = datetime.now(UTC).date()
+    # Old behaviour never moved reminder_at, so it lags far behind start_date.
+    added = sync(
+        client, user, "*",
+        [cmd("task_add", temp_id="t1", title="Daily", start_date=today.isoformat(),
+             recurrence="FREQ=DAILY", reminder_at=f"{today - timedelta(days=30)}T07:00:00Z")],
+    )
+    task_id = added["temp_id_mapping"]["t1"]
+    assert _run_tick(Recorder()) == 1
+
+    sync(client, user, added["sync_token"],
+         [cmd("task_complete", id=task_id, today=today.isoformat(), utc_offset=0)])
+
+    with get_sessionmaker()() as session:
+        task = session.get(Task, uuid.UUID(task_id))
+        # shifted by one day, still in the past, and marked sent
+        expected = datetime.combine(today - timedelta(days=29), time(7, 0), tzinfo=UTC)
+        assert task.reminder_at == expected
+        assert task.reminder_sent_at is not None
+
+    assert _run_tick(Recorder()) == 0
+
+
 def test_reminder_stays_sent_when_completing_leaves_reminder_at_unchanged(client, user):
     _configure_ntfy(client, user)
     today = datetime.now(UTC).date()

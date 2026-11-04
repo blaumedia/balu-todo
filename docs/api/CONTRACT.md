@@ -210,7 +210,7 @@ visibly jumped once the response landed.
 `reminder_at` moves only forward: a shift of 0 or less leaves it alone (it already belongs
 to a later occurrence). It moves by whole days of 24 h on the UTC instant, so a reminder
 keeps its UTC time and its local time shifts by an hour across a DST change (accepted in
-v1, the server has no timezone). A moved reminder is re-armed (§8). The local day needs the
+v1, the server has no timezone). A moved reminder is re-armed (§8) only when its new time is in the future; a moved reminder that is still in the past is marked as sent instead, so a stale reminder never pushes on completion. The local day needs the
 device's UTC offset: `task_complete` carries `args.utc_offset`, integer minutes east of UTC;
 the server accepts `-720..840` and otherwise (absent, not an integer, out of range) uses
 `0`, i.e. the UTC day. Non-recurring completion leaves `reminder_at` unchanged.
@@ -598,7 +598,7 @@ Channel validation (v1.2.1):
 non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the channels of
 the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal (not in
 sync payloads); changing `reminder_at` re-arms it, including when completing a recurring
-task moves it (§3.3). Message: task title, project name, deadline if set. Mobile clients
+task moves it to a future time (§3.3); a roll that leaves it in the past marks it sent. Message: task title, project name, deadline if set. Mobile clients
 additionally schedule **local** notifications from their replica; with external channels
 configured this can duplicate - accepted in v1.
 
