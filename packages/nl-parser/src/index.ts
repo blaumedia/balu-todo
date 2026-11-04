@@ -89,12 +89,12 @@ export function parseQuickAdd(text: string, opts: ParseOptions): ParseResult {
   const chosen = resolve(cands).sort((a, b) => a.start - b.start);
 
   // "by 5pm friday": the keyword was absorbed by the time, so the date right after it is the
-  // deadline ("by friday 5pm" already is). Evening starts and typed deadlines are left alone.
+  // deadline ("by friday 5pm" already is), also across one "on"/"am". Evening starts and typed deadlines are left alone.
   if (!chosen.some((c) => c.type === "deadline")) {
     for (let i = 0; i + 1 < chosen.length; i++) {
       const a = chosen[i]!;
       const b = chosen[i + 1]!;
-      if (a.type === "time" && a.timeDeadline && b.type === "start" && text.slice(a.end, b.start).trim() === "") {
+      if (a.type === "time" && a.timeDeadline && b.type === "start" && /^\s*(?:(?:on|am)\s+)?$/i.test(text.slice(a.end, b.start))) {
         b.type = "deadline";
         break;
       }

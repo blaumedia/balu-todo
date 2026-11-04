@@ -175,6 +175,24 @@ describe("composeTaskArgs reminder_at from a time of day", () => {
       reminder_at: "2026-07-24T15:00:00Z",
     });
   });
+  it("makes the date after 'by 5pm on' the deadline too", () => {
+    expect(composeAt("Report by 5pm on friday", BEFORE_NINE)).toEqual({
+      title: "Report on",
+      deadline: "2026-07-24",
+      reminder_at: "2026-07-24T15:00:00Z",
+    });
+  });
+  it("makes the date after 'bis 17 Uhr am' the deadline too", () => {
+    expect(composeAt("Bericht bis 17 Uhr am Freitag", BEFORE_NINE, { kind: "none" }, "de")).toEqual({
+      title: "Bericht am",
+      deadline: "2026-07-24",
+      reminder_at: "2026-07-24T15:00:00Z",
+    });
+  });
+  it("keeps a start date when another word sits between 'by 5pm' and the date", () => {
+    const args = composeAt("Report by 5pm and friday", BEFORE_NINE);
+    expect(args["start_date"]).toBe("2026-07-24");
+  });
   it("does not set an automatic deadline for a recurrence with 'by 9am'", () => {
     expect(composeAt("Standup every monday by 9am", BEFORE_NINE)).toEqual({
       title: "Standup",
