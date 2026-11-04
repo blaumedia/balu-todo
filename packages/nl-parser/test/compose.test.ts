@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeTaskArgs, parseQuickAdd, type ComposeContext, type NamedEntity } from "../src/index.js";
+import { composeTaskArgs, localTimeToUtc, parseQuickAdd, type ComposeContext, type NamedEntity } from "../src/index.js";
 
 const TODAY = "2026-07-23";
 
@@ -78,5 +78,114 @@ describe("composeTaskArgs (shared by web and mobile — D1)", () => {
 
   it("falls back to the raw text when stripping empties the title", () => {
     expect(compose("#Finanzen")["title"]).toBe("#Finanzen");
+  });
+});
+
+// UTC+2 (Berlin summer), injected so the result does not depend on the machine's timezone.
+const plus2 = (date: string, time: string) =>
+  new Date(Date.parse(`${date}T${time}:00Z`) - 120 * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
+const BEFORE_NINE = new Date("2026-07-23T05:00:00Z"); // 07:00 local
+const AFTER_NINE = new Date("2026-07-23T08:00:00Z"); // 10:00 local
+const AT_NINE = new Date("2026-07-23T07:00:00Z"); // 09:00 local exactly
+function composeAt(text: string, now: Date, context: ComposeContext = { kind: "none" }, locale: "en" | "de" = "en") {
+  const result = parseQuickAdd(text, { locale, referenceDate: TODAY });
+  return composeTaskArgs(text, result, { projects, labels, today: TODAY, context, now, localToUtc: plus2 });
+}
+const LOCAL_NINE = new Date(2026, 6, 24, 9, 0).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+describe("composeTaskArgs reminder_at from a time of day", () => {
+  it("keeps today when the time is still ahead", () => {
+    expect(composeAt("Task every day at 9am", BEFORE_NINE)).toEqual({
+      title: "Task",
+      recurrence: "FREQ=DAILY",
+      reminder_at: "2026-07-23T07:00:00Z",
+    });
+  });
+  it("rolls a passed time to tomorrow without creating a start_date", () => {
+    expect(composeAt("Task every day at 9am", AFTER_NINE)).toEqual({
+      title: "Task",
+      recurrence: "FREQ=DAILY",
+      reminder_at: "2026-07-24T07:00:00Z",
+    });
+  });
+  it("accepts a bare HH:MM", () => {
+    expect(composeAt("Task every day 9:00", BEFORE_NINE)).toEqual({
+      title: "Task",
+      recurrence: "FREQ=DAILY",
+      reminder_at: "2026-07-23T07:00:00Z",
+    });
+  });
+  it("uses the start date of an explicit date", () => {
+    expect(composeAt("Task tomorrow at 9", AFTER_NINE)).toEqual({
+      title: "Task",
+      start_date: "2026-07-24",
+      reminder_at: "2026-07-24T07:00:00Z",
+    });
+  });
+  it("works in German", () => {
+    expect(composeAt("Aufgabe jeden Tag um 9 Uhr", BEFORE_NINE, { kind: "none" }, "de")).toEqual({
+      title: "Aufgabe",
+      recurrence: "FREQ=DAILY",
+      reminder_at: "2026-07-23T07:00:00Z",
+    });
+  });
+  it("uses the deadline as the base day", () => {
+    expect(composeAt("Report by friday at 5pm", AFTER_NINE)).toEqual({
+      title: "Report",
+      deadline: "2026-07-24",
+      reminder_at: "2026-07-24T15:00:00Z",
+    });
+  });
+  it("treats a time equal to now as passed", () => {
+    expect(composeAt("Task at 9am", AT_NINE)["reminder_at"]).toBe("2026-07-24T07:00:00Z");
+  });
+  it("never rolls an explicit date", () => {
+    expect(composeAt("Task today at 9am", AFTER_NINE)).toEqual({
+      title: "Task",
+      start_date: "2026-07-23",
+      reminder_at: "2026-07-23T07:00:00Z",
+    });
+  });
+  it("keeps the evening start for tonight", () => {
+    const args = composeAt("Call mom tonight at 9pm", AFTER_NINE);
+    expect(args["start_date"]).toBe("2026-07-23");
+    expect(args["evening"]).toBe(true);
+    expect(args["reminder_at"]).toBe("2026-07-23T19:00:00Z");
+  });
+  it("Today list: keeps the default start when the time is ahead", () => {
+    expect(composeAt("Task at 9am", BEFORE_NINE, { kind: "list", list: "today" })).toEqual({
+      title: "Task",
+      start_date: "2026-07-23",
+      reminder_at: "2026-07-23T07:00:00Z",
+    });
+  });
+  it("Today list: the default start moves to tomorrow with a rolled time", () => {
+    expect(composeAt("Task at 9am", AFTER_NINE, { kind: "list", list: "today" })).toEqual({
+      title: "Task",
+      start_date: "2026-07-24",
+      reminder_at: "2026-07-24T07:00:00Z",
+    });
+  });
+  it("Someday list: rolls the reminder, no start_date", () => {
+    expect(composeAt("Task at 9am", AFTER_NINE, { kind: "list", list: "someday" })).toEqual({
+      title: "Task",
+      someday: true,
+      reminder_at: "2026-07-24T07:00:00Z",
+    });
+  });
+  it("project context adds no start_date", () => {
+    const args = composeAt("Task at 9am", BEFORE_NINE, { kind: "project", projectId: "p-ctx" });
+    expect(args["project_id"]).toBe("p-ctx");
+    expect(args["start_date"]).toBeUndefined();
+    expect(args["reminder_at"]).toBe("2026-07-23T07:00:00Z");
+  });
+  it("default conversion uses the runtime timezone", () => {
+    const text = "Task tomorrow at 9";
+    const result = parseQuickAdd(text, { locale: "en", referenceDate: TODAY });
+    const args = composeTaskArgs(text, result, { projects, labels, today: TODAY, context: { kind: "none" } });
+    expect(args["reminder_at"]).toBe(LOCAL_NINE);
+  });
+  it("localTimeToUtc converts local wall time", () => {
+    expect(localTimeToUtc("2026-07-24", "09:00")).toBe(LOCAL_NINE);
   });
 });

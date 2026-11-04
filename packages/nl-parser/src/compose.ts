@@ -6,6 +6,7 @@
 // @balu/domain.
 
 import type { ParseResult, Token } from "./types.js";
+import { addDays } from "./dateMath.js";
 import { buildTitle } from "./title.js";
 
 /** Anything with a display name the parser can match `#project` / `@label` against. */
@@ -30,6 +31,16 @@ export interface ComposeOptions {
   /** `YYYY-MM-DD` used when the context implies "today". */
   today: string;
   context: ComposeContext;
+  /**
+   * The wall clock, used to decide whether a time with no date has already passed today.
+   * Defaults to `new Date()`.
+   */
+  now?: Date;
+  /**
+   * Local `YYYY-MM-DD` + `HH:MM` -> UTC ISO `reminder_at` (contract §3.3). Defaults to
+   * `localTimeToUtc` (runtime timezone); tests inject a fixed offset.
+   */
+  localToUtc?: (date: string, time: string) => string;
 }
 
 function matchByName(
@@ -38,6 +49,24 @@ function matchByName(
 ): NamedEntity | undefined {
   const q = query.toLowerCase();
   return items.find((i) => !i.is_deleted && i.name.toLowerCase() === q);
+}
+
+/**
+ * Local wall time in the runtime timezone -> UTC ISO without milliseconds (the server's own
+ * format). Same approach as the apps' ReminderField: a local Date from its components.
+ */
+export function localTimeToUtc(date: string, time: string): string {
+  return new Date(
+    Number(date.slice(0, 4)),
+    Number(date.slice(5, 7)) - 1,
+    Number(date.slice(8, 10)),
+    Number(time.slice(0, 2)),
+    Number(time.slice(3, 5)),
+    0,
+    0,
+  )
+    .toISOString()
+    .replace(/\.\d{3}Z$/, "Z");
 }
 
 /**
@@ -95,6 +124,24 @@ export function composeTaskArgs(
       args["someday"] = true;
       delete args["start_date"];
     }
+  }
+
+  // A time of day becomes the reminder on the task's own day (contract §3.3).
+  if (result.time) {
+    const toUtc = opts.localToUtc ?? localTimeToUtc;
+    const explicitDate = result.startDate !== undefined || result.deadline !== undefined;
+    let day =
+      (args["start_date"] as string | undefined) ?? (args["deadline"] as string | undefined) ?? opts.today;
+    let at = toUtc(day, result.time);
+    // "at 9am" typed after 9: the next 9am, not one that fires immediately. The Today-list
+    // default start moves with it so the series anchor and the reminder stay on one day.
+    if (!explicitDate && Date.parse(at) <= (opts.now ?? new Date()).getTime()) {
+      const tomorrow = addDays(opts.today, 1);
+      if (args["start_date"] === opts.today) args["start_date"] = tomorrow;
+      day = tomorrow;
+      at = toUtc(day, result.time);
+    }
+    args["reminder_at"] = at;
   }
 
   return args;

@@ -9,6 +9,7 @@ export type { Locale, ParseOptions, ParseResult, Token, TokenType } from "./type
 export { buildTitle } from "./title.js";
 export {
   composeTaskArgs,
+  localTimeToUtc,
   type ComposeContext,
   type ComposeOptions,
   type NamedEntity,
@@ -111,6 +112,9 @@ export function parseQuickAdd(text: string, opts: ParseOptions): ParseResult {
         break;
       case "recurrence":
         result.recurrence = String(c.value);
+        break;
+      case "time":
+        result.time = String(c.value);
         break;
     }
   }

@@ -21,6 +21,7 @@ interface Row {
   evening?: boolean;
   priority?: number;
   recurrence?: string;
+  time?: string;
   projectQuery?: string;
   labels?: string[];
 }
@@ -80,6 +81,53 @@ const ROWS: Row[] = [
   { locale: "de", text: "Retro jeden zweiten Dienstag", title: "Retro", recurrence: "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU" },
   { locale: "de", text: "Miete monatlich", title: "Miete", recurrence: "FREQ=MONTHLY" },
   { locale: "de", text: "Steuer jährlich", title: "Steuer", recurrence: "FREQ=YEARLY" },
+  // Time of day - English
+  { locale: "en", text: "Task every day at 9am", title: "Task", recurrence: "FREQ=DAILY", time: "09:00" },
+  { locale: "en", text: "Task every day 9:00", title: "Task", recurrence: "FREQ=DAILY", time: "09:00" },
+  { locale: "en", text: "Task tomorrow at 9", title: "Task", startDate: "2026-07-24", time: "09:00" },
+  { locale: "en", text: "Call at 9", title: "Call", time: "09:00" },
+  { locale: "en", text: "Call 9am", title: "Call", time: "09:00" },
+  { locale: "en", text: "Call 9 am", title: "Call", time: "09:00" },
+  { locale: "en", text: "Call 9:30", title: "Call", time: "09:30" },
+  { locale: "en", text: "Call 9.30pm", title: "Call", time: "21:30" },
+  { locale: "en", text: "Call at 9:30 pm", title: "Call", time: "21:30" },
+  { locale: "en", text: "Call 21:00", title: "Call", time: "21:00" },
+  { locale: "en", text: "Call 12am", title: "Call", time: "00:00" },
+  { locale: "en", text: "Call 12pm", title: "Call", time: "12:00" },
+  { locale: "en", text: "Lunch at noon", title: "Lunch", time: "12:00" },
+  { locale: "en", text: "Backup at midnight", title: "Backup", time: "00:00" },
+  { locale: "en", text: "Report by friday at 5pm", title: "Report", deadline: "2026-07-24", time: "17:00" },
+  { locale: "en", text: "Meds every 3 days at 8am", title: "Meds", recurrence: "FREQ=DAILY;INTERVAL=3", time: "08:00" },
+  { locale: "en", text: "Ping Ana in 3 days at 9", title: "Ping Ana", startDate: "2026-07-26", time: "09:00" },
+  { locale: "en", text: "Taxes 2026-07-31 at 10:00", title: "Taxes", startDate: "2026-07-31", time: "10:00" },
+  // Time of day - German
+  { locale: "de", text: "Aufgabe jeden Tag um 9 Uhr", title: "Aufgabe", recurrence: "FREQ=DAILY", time: "09:00" },
+  { locale: "de", text: "Anruf um 9", title: "Anruf", time: "09:00" },
+  { locale: "de", text: "Anruf 9 Uhr", title: "Anruf", time: "09:00" },
+  { locale: "de", text: "Anruf 9Uhr", title: "Anruf", time: "09:00" },
+  { locale: "de", text: "Anruf 9:30 Uhr", title: "Anruf", time: "09:30" },
+  { locale: "de", text: "Anruf 21:00", title: "Anruf", time: "21:00" },
+  { locale: "de", text: "Anruf 21.30 Uhr", title: "Anruf", time: "21:30" },
+  { locale: "de", text: "Anruf morgen um 14:30", title: "Anruf", startDate: "2026-07-24", time: "14:30" },
+  { locale: "de", text: "Abgabe bis Freitag 12 Uhr", title: "Abgabe", deadline: "2026-07-24", time: "12:00" },
+  { locale: "de", text: "Termin 1.12. um 9 Uhr", title: "Termin", startDate: "2026-12-01", time: "09:00" },
+  { locale: "de", text: "Bericht bis 31.7. 9:00", title: "Bericht", deadline: "2026-07-31", time: "09:00" },
+  // Time of day - not a time
+  { locale: "en", text: "Buy 9 apples", title: "Buy 9 apples" },
+  { locale: "en", text: "Call 9", title: "Call 9" },
+  { locale: "en", text: "Call 25:00", title: "Call 25:00" },
+  { locale: "en", text: "Call 9:75", title: "Call 9:75" },
+  { locale: "en", text: "Call 13pm", title: "Call 13pm" },
+  { locale: "en", text: "Call at 24", title: "Call at 24" },
+  { locale: "en", text: "Pay 9.30", title: "Pay 9.30" },
+  { locale: "de", text: "Kaufe 9 Äpfel", title: "Kaufe 9 Äpfel" },
+  { locale: "de", text: "Anruf 25 Uhr", title: "Anruf 25 Uhr" },
+  { locale: "de", text: "Anruf um 9.30", title: "Anruf um 9.30" },
+  { locale: "de", text: "Steuer 9.30.", title: "Steuer 9.30." },
+  { locale: "de", text: "Anruf 9 am", title: "Anruf 9 am" },
+  // Time vs date collisions
+  { locale: "en", text: "Gym at 1.12.", title: "Gym at", startDate: "2026-12-01" },
+  { locale: "de", text: "Termin um 1.12.", title: "Termin um", startDate: "2026-12-01" },
 ];
 
 describe("parseQuickAdd table", () => {
@@ -92,6 +140,7 @@ describe("parseQuickAdd table", () => {
       expect(r.evening ?? undefined).toBe(row.evening);
       expect(r.priority).toBe(row.priority);
       expect(r.recurrence).toBe(row.recurrence);
+      expect(r.time).toBe(row.time);
       if (row.projectQuery) expect(r.projectQuery).toBe(row.projectQuery);
       if (row.labels) expect(r.labelQueries).toEqual(row.labels);
     });
@@ -143,6 +192,12 @@ describe("deadline vs start", () => {
 // ── Tokens & title reconstruction ─────────────────────────────────────
 
 describe("tokens", () => {
+  it("a time token spans the prefix and the time", () => {
+    expect(en("Task every day at 9am").tokens).toEqual([
+      { type: "recurrence", start: 5, end: 14, value: "FREQ=DAILY" },
+      { type: "time", start: 15, end: 21, value: "09:00" },
+    ]);
+  });
   it("emits non-empty spans for highlighting", () => {
     const r = en("Ship it tomorrow #Balu !p1");
     expect(r.tokens.length).toBe(3);

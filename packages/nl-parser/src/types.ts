@@ -7,7 +7,8 @@ export type TokenType =
   | "priority"
   | "project"
   | "label"
-  | "recurrence";
+  | "recurrence"
+  | "time"; // time of day -> reminder_at
 
 /** A recognized span in the input, for live pill highlighting. */
 export interface Token {
@@ -18,8 +19,8 @@ export interface Token {
   end: number;
   /**
    * The parsed value: an ISO date for start/deadline/evening, the RRULE string
-   * for recurrence, the priority number for priority, or the raw query for
-   * project/label.
+   * for recurrence, `"HH:MM"` (24h local wall clock) for time, the priority number
+   * for priority, or the raw query for project/label.
    */
   value: string | number;
 }
@@ -37,6 +38,8 @@ export interface ParseResult {
   labelQueries: string[];
   /** RRULE subset string (contract §3.3). */
   recurrence?: string;
+  /** Local time of day `HH:MM` (24h) for the reminder, e.g. "at 9am" -> "09:00". */
+  time?: string;
   tokens: Token[];
 }
 

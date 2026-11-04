@@ -113,6 +113,44 @@ function resolveMonthName(g: Groups, ref: string): string | null {
 const BOUND_PRE = "(?<=^|\\s)";
 const BOUND_POST = "(?=$|[\\s.,;])";
 
+/**
+ * End boundary for times. Like BOUND_POST, but a "." only counts when no digit follows, so
+ * "um 1.12." and "at 1.12." stay dates (the time would otherwise start earlier and win).
+ */
+const TIME_POST = "(?=$|[\\s,;]|\\.(?!\\d))";
+
+function hhmm(h: number, mi: number): string {
+  return `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+}
+
+/** A 24h time, or null when the hour or minute is out of range (25:00, 9:75). */
+function time24(g: Groups): string | null {
+  const h = Number(g["h"]);
+  const mi = g["mi"] === undefined ? 0 : Number(g["mi"]);
+  if (h > 23 || mi > 59) return null;
+  return hhmm(h, mi);
+}
+
+/** A 12h time with am/pm, or null when the hour is not 1-12 (13pm, 0am) or the minute > 59. */
+function time12(g: Groups): string | null {
+  const h = Number(g["h"]);
+  const mi = g["mi"] === undefined ? 0 : Number(g["mi"]);
+  if (h < 1 || h > 12 || mi > 59) return null;
+  const pm = (g["ap"] ?? "").toLowerCase() === "pm";
+  return hhmm((h % 12) + (pm ? 12 : 0), mi);
+}
+
+function timeMatcher(core: string, toTime: (g: Groups) => string | null): Matcher {
+  const re = new RegExp(`${BOUND_PRE}(?:${core})${TIME_POST}`, "giu");
+  return {
+    re,
+    build: (m) => {
+      const v = toTime(m.groups ?? {});
+      return v ? { type: "time", value: v } : null;
+    },
+  };
+}
+
 /** Wrap a date core so it optionally absorbs a leading deadline keyword. */
 function dateMatcher(
   locale: Locale,
@@ -246,6 +284,22 @@ export function buildMatchers(locale: Locale): Matcher[] {
       const w = wd[(g["wd"] ?? "").toLowerCase()];
       return w ? nextWeekday(ref, w.dow) : null;
     }));
+  }
+
+  // Times of day (contract §3.3 reminder_at). Last, so a date always keeps its own order
+  // slot; there is no span they share once TIME_POST has done its job. A bare number is
+  // never a time: it needs a prefix (at/um), a suffix (am/pm/Uhr) or ":mm".
+  if (locale === "en") {
+    out.push(timeMatcher(`(?:at\\s+)?(?<h>\\d{1,2})(?:[:.](?<mi>\\d{2}))?\\s?(?<ap>am|pm)`, time12));
+    out.push(timeMatcher(`(?:at\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})`, time24));
+    out.push(timeMatcher(`at\\s+(?<h>\\d{1,2})`, time24));
+    out.push(timeMatcher(`at\\s+noon`, () => "12:00"));
+    out.push(timeMatcher(`at\\s+midnight`, () => "00:00"));
+  } else {
+    out.push(timeMatcher(`(?:um\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})(?:\\s?uhr)?`, time24));
+    out.push(timeMatcher(`(?:um\\s+)?(?<h>\\d{1,2})\\.(?<mi>\\d{2})\\s?uhr`, time24));
+    out.push(timeMatcher(`(?:um\\s+)?(?<h>\\d{1,2})\\s?uhr`, time24));
+    out.push(timeMatcher(`um\\s+(?<h>\\d{1,2})`, time24));
   }
 
   return out;
