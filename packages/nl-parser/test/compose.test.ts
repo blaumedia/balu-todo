@@ -197,14 +197,41 @@ describe("composeTaskArgs reminder_at from a time of day", () => {
     expect(composeAt("Standup every monday by 9am", BEFORE_NINE)).toEqual({
       title: "Standup",
       recurrence: "FREQ=WEEKLY;BYDAY=MO",
-      reminder_at: "2026-07-23T07:00:00Z",
+      reminder_at: "2026-07-27T07:00:00Z",
     });
+  });
+  it("puts the reminder of 'every monday at 9am' on the first Monday", () => {
+    expect(composeAt("Standup every monday at 9am", BEFORE_NINE)).toEqual({
+      title: "Standup",
+      recurrence: "FREQ=WEEKLY;BYDAY=MO",
+      reminder_at: "2026-07-27T07:00:00Z",
+    });
+  });
+  it("puts the reminder of a German 'jeden Montag um 9 Uhr' on the first Monday", () => {
+    const args = composeAt("Sport jeden Montag um 9 Uhr", BEFORE_NINE, { kind: "none" }, "de");
+    expect(args["recurrence"]).toBe("FREQ=WEEKLY;BYDAY=MO");
+    expect(args["reminder_at"]).toBe("2026-07-27T07:00:00Z");
+  });
+  it("keeps today for a weekly rule typed on its own weekday before the time", () => {
+    const text = "Standup every monday at 9am";
+    const monday = "2026-07-27";
+    const result = parseQuickAdd(text, { locale: "en", referenceDate: monday });
+    const at = (now: string) =>
+      composeTaskArgs(text, result, { projects, labels, today: monday, context: { kind: "none" }, now: new Date(now), localToUtc: plus2 });
+    expect(at("2026-07-27T05:00:00Z")["reminder_at"]).toBe("2026-07-27T07:00:00Z");
+    // After 9: the next Monday, not tomorrow.
+    expect(at("2026-07-27T08:00:00Z")["reminder_at"]).toBe("2026-08-03T07:00:00Z");
+  });
+  it("Today list: leaves the default start alone for a Monday series typed on Thursday", () => {
+    const args = composeAt("Standup every monday at 9am", BEFORE_NINE, { kind: "list", list: "today" });
+    expect(args["start_date"]).toBe("2026-07-23");
+    expect(args["reminder_at"]).toBe("2026-07-27T07:00:00Z");
   });
   it("does not set an automatic deadline for a German recurrence with 'bis 9 Uhr'", () => {
     const args = composeAt("Sport jeden Montag bis 9 Uhr", BEFORE_NINE, { kind: "none" }, "de");
     expect(args["deadline"]).toBeUndefined();
     expect(args["recurrence"]).toBe("FREQ=WEEKLY;BYDAY=MO");
-    expect(args["reminder_at"]).toBe("2026-07-23T07:00:00Z");
+    expect(args["reminder_at"]).toBe("2026-07-27T07:00:00Z");
   });
   it("takes the deadline flag from the last time only", () => {
     expect(parseQuickAdd("Call by 5pm at 9am", { locale: "en", referenceDate: TODAY }).timeIsDeadline).toBe(false);

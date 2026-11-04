@@ -6,7 +6,7 @@
 // @balu/domain.
 
 import type { ParseResult, Token } from "./types.js";
-import { addDays } from "./dateMath.js";
+import { addDays, dow } from "./dateMath.js";
 import { buildTitle } from "./title.js";
 
 /** Anything with a display name the parser can match `#project` / `@label` against. */
@@ -14,6 +14,29 @@ export interface NamedEntity {
   id: string;
   name: string;
   is_deleted: boolean;
+}
+
+const BYDAY_DOW: Record<string, number> = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+/**
+ * First day on or after `from` that a recurrence rule can fire on. Only a BYDAY list moves
+ * the day (the next matching weekday, today included); every other rule fires on `from`
+ * itself. Kept here because the parser has no dependency on sync-client.
+ */
+function firstOccurrenceOnOrAfter(rrule: string, from: string): string {
+  const byday = /(?:^|;)BYDAY=([^;]*)/.exec(rrule)?.[1];
+  if (!byday) return from;
+  const wanted = new Set<number>();
+  for (const part of byday.split(",")) {
+    const d = BYDAY_DOW[part.replace(/^[+-]?\d+/, "")];
+    if (d !== undefined) wanted.add(d);
+  }
+  if (wanted.size === 0) return from;
+  for (let i = 0; i < 7; i++) {
+    const day = addDays(from, i);
+    if (wanted.has(dow(day))) return day;
+  }
+  return from;
 }
 
 /**
@@ -133,13 +156,18 @@ export function composeTaskArgs(
     // Typed dates only: list defaults (Today start, Someday dropping start_date) must not
     // move the reminder off the day the user wrote.
     let day = result.startDate ?? result.deadline ?? (args["start_date"] as string | undefined) ?? opts.today;
+    // "every monday at 9am" typed on a Thursday: the first reminder belongs to the first
+    // Monday, not to today. Only without a typed date; the series anchor is left alone.
+    if (!explicitDate && result.recurrence) day = firstOccurrenceOnOrAfter(result.recurrence, day);
     let at = toUtc(day, result.time);
     // "at 9am" typed after 9: the next 9am, not one that fires immediately. The Today-list
     // default start moves with it so the series anchor and the reminder stay on one day.
     if (!explicitDate && Date.parse(at) <= (opts.now ?? new Date()).getTime()) {
-      const tomorrow = addDays(opts.today, 1);
-      if (args["start_date"] === opts.today) args["start_date"] = tomorrow;
-      day = tomorrow;
+      const next = result.recurrence
+        ? firstOccurrenceOnOrAfter(result.recurrence, addDays(day, 1))
+        : addDays(opts.today, 1);
+      if (args["start_date"] === day) args["start_date"] = next;
+      day = next;
       at = toUtc(day, result.time);
     }
     args["reminder_at"] = at;
