@@ -4,15 +4,18 @@
 `packages/sync-client/test/recurrence.test.ts` — the two engines must agree for
 every rule, or a completed recurring task visibly jumps to a different date once
 the sync response lands (I1). Keep the two lists in sync.
+
+`ROLL_VECTORS` (the whole roll-forward including the reminder) and `OFFSET_VECTORS`
+are mirrored the same way in that file.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
-from balu.sync.recurrence import next_occurrence, parse_recurrence
+from balu.sync.recurrence import next_occurrence, parse_recurrence, roll_forward, utc_offset_minutes
 
 
 def d(iso: str) -> date:
@@ -109,3 +112,103 @@ def test_parse_rejects_bad_interval():
 def test_parse_rejects_bad_byday_code():
     with pytest.raises(ValueError):
         parse_recurrence("FREQ=WEEKLY;BYDAY=XX")
+
+
+# (rrule, start, deadline, reminder, today, utc_offset, exp_start, exp_deadline, exp_reminder)
+ROLL_VECTORS: list[
+    tuple[
+        str, str | None, str | None, str | None, str, int,
+        str | None, str | None, str | None,
+    ]
+] = [
+    # start branch: the reminder moves with the start date
+    ("FREQ=DAILY", "2026-07-23", None, "2026-07-23T07:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "2026-07-24T07:00:00Z"),
+    # completed late, 42-day shift
+    ("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "2026-07-06", "2026-07-08", "2026-07-06T07:00:00Z",
+     "2026-08-05", 120, "2026-08-17", "2026-08-19", "2026-08-17T07:00:00Z"),
+    # no reminder
+    ("FREQ=DAILY", "2026-07-23", None, None, "2026-07-23", 0,
+     "2026-07-24", None, None),
+    # reminder not on the start day keeps its distance
+    ("FREQ=DAILY", "2026-07-23", None, "2026-07-20T07:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "2026-07-21T07:00:00Z"),
+    # deadline branch, 181 days
+    ("FREQ=MONTHLY", None, "2026-01-31", "2026-01-31T16:00:00Z", "2026-07-23", 60,
+     None, "2026-07-31", "2026-07-31T16:00:00Z"),
+    # neither, reminder today
+    ("FREQ=DAILY", None, None, "2026-07-23T07:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "2026-07-24T07:00:00Z"),
+    # neither, quick-add rolled it to tomorrow: untouched
+    ("FREQ=DAILY", None, None, "2026-07-24T07:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "2026-07-24T07:00:00Z"),
+    # neither, completed days late
+    ("FREQ=DAILY", None, None, "2026-07-20T07:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "2026-07-24T07:00:00Z"),
+    # neither, reminder on another weekday
+    ("FREQ=WEEKLY;BYDAY=MO", None, None, "2026-07-23T07:00:00Z", "2026-07-22", 120,
+     "2026-07-27", None, "2026-07-27T07:00:00Z"),
+    # UTC-5, 21:00 local: the offset decides the day
+    ("FREQ=DAILY", None, None, "2026-07-24T02:00:00Z", "2026-07-23", -300,
+     "2026-07-24", None, "2026-07-25T02:00:00Z"),
+    # same without offset: UTC day, untouched
+    ("FREQ=DAILY", None, None, "2026-07-24T02:00:00Z", "2026-07-23", 0,
+     "2026-07-24", None, "2026-07-24T02:00:00Z"),
+    # UTC+13
+    ("FREQ=DAILY", None, None, "2026-07-23T19:00:00Z", "2026-07-24", 780,
+     "2026-07-25", None, "2026-07-24T19:00:00Z"),
+    # reminder already past the next occurrence: never moves back
+    ("FREQ=DAILY", None, None, "2026-08-10T07:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "2026-08-10T07:00:00Z"),
+    # neither, no reminder
+    ("FREQ=DAILY", None, None, None, "2026-07-23", 0,
+     "2026-07-24", None, None),
+]
+
+
+def _iso_utc(value: datetime | None) -> str | None:
+    return None if value is None else value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@pytest.mark.parametrize(
+    (
+        "rrule", "start", "deadline", "reminder", "today", "offset",
+        "exp_start", "exp_deadline", "exp_reminder",
+    ),
+    ROLL_VECTORS,
+)
+def test_roll_forward_parity_vectors(
+    rrule, start, deadline, reminder, today, offset, exp_start, exp_deadline, exp_reminder
+):
+    rolled = roll_forward(
+        rrule,
+        d(start) if start else None,
+        d(deadline) if deadline else None,
+        datetime.fromisoformat(reminder.replace("Z", "+00:00")) if reminder else None,
+        d(today),
+        offset,
+    )
+    assert rolled.start_date == (d(exp_start) if exp_start else None)
+    assert rolled.deadline == (d(exp_deadline) if exp_deadline else None)
+    assert _iso_utc(rolled.reminder_at) == exp_reminder
+
+
+# (input, expected)
+OFFSET_VECTORS: list[tuple[object, int]] = [
+    (120, 120),
+    (0, 0),
+    (-300, -300),
+    (840, 840),
+    (-720, -720),
+    (841, 0),
+    (-721, 0),
+    ("120", 0),
+    (True, 0),
+    (None, 0),
+    (1.5, 0),
+]
+
+
+@pytest.mark.parametrize(("value", "expected"), OFFSET_VECTORS)
+def test_utc_offset_minutes(value, expected):
+    assert utc_offset_minutes(value) == expected

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime, time, timedelta
+
 import pytest
 
 from balu.db import get_sessionmaker
+from balu.models import Task
 from balu.reminders import reminder_tick
 from tests.conftest import cmd, sync
 
@@ -66,6 +70,32 @@ def test_reminder_rearms_on_change(client, user):
     rec2 = Recorder()
     assert _run_tick(rec2) == 1
     assert len(rec2.calls) == 1
+
+
+def test_reminder_rearms_when_a_recurring_task_rolls_forward(client, user):
+    _configure_ntfy(client, user)
+    today = datetime.now(UTC).date()
+    yesterday = today - timedelta(days=1)
+    added = sync(
+        client, user, "*",
+        [cmd("task_add", temp_id="t1", title="Daily", start_date=yesterday.isoformat(),
+             recurrence="FREQ=DAILY", reminder_at=f"{yesterday}T07:00:00Z")],
+    )
+    task_id = added["temp_id_mapping"]["t1"]
+    assert _run_tick(Recorder()) == 1
+
+    sync(client, user, added["sync_token"],
+         [cmd("task_complete", id=task_id, today=today.isoformat(), utc_offset=0)])
+
+    with get_sessionmaker()() as session:
+        task = session.get(Task, uuid.UUID(task_id))
+        assert task.reminder_sent_at is None
+        # start moved yesterday -> today+1, a 2-day shift
+        expected = datetime.combine(today + timedelta(days=1), time(7, 0), tzinfo=UTC)
+        assert task.reminder_at == expected
+
+    # The new reminder is in the future: nothing to deliver yet.
+    assert _run_tick(Recorder()) == 0
 
 
 def test_reminder_skips_completed(client, user):

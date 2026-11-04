@@ -1389,6 +1389,60 @@ describe("recurring task_complete mirrors the server (I1/I5)", () => {
     expect(t.start_date).toBe("2026-07-26");
     expect(t.deadline).toBeNull();
   });
+
+  it("moves the reminder by the start_date delta", () => {
+    const c = track(createSyncClient(base(at("2026-08-05"))));
+    const { temp_id } = c.mutate({
+      type: "task_add",
+      args: {
+        title: "Standup",
+        start_date: "2026-07-06",
+        deadline: "2026-07-08",
+        recurrence: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO",
+        reminder_at: "2026-07-06T07:00:00Z",
+      },
+    });
+    c.mutate({ type: "task_complete", args: { id: temp_id, today: "2026-08-05", utc_offset: 120 } });
+    expect(c.getSnapshot().tasks[0]!.reminder_at).toBe("2026-08-17T07:00:00Z");
+  });
+
+  it("leaves a reminder that is already on the next occurrence", () => {
+    const c = track(createSyncClient(base(at("2026-07-23"))));
+    const { temp_id } = c.mutate({
+      type: "task_add",
+      args: { title: "Water", recurrence: "FREQ=DAILY", reminder_at: "2026-07-24T07:00:00Z" },
+    });
+    c.mutate({ type: "task_complete", args: { id: temp_id, today: "2026-07-23", utc_offset: 120 } });
+    const t = c.getSnapshot().tasks[0]!;
+    expect(t.start_date).toBe("2026-07-24");
+    expect(t.reminder_at).toBe("2026-07-24T07:00:00Z");
+  });
+
+  it("moves a dateless task's reminder from its local day", () => {
+    const c = track(createSyncClient(base(at("2026-07-23"))));
+    const { temp_id } = c.mutate({
+      type: "task_add",
+      args: { title: "Water", recurrence: "FREQ=DAILY", reminder_at: "2026-07-23T07:00:00Z" },
+    });
+    c.mutate({ type: "task_complete", args: { id: temp_id, today: "2026-07-23", utc_offset: 120 } });
+    expect(c.getSnapshot().tasks[0]!.reminder_at).toBe("2026-07-24T07:00:00Z");
+  });
+
+  it("stamps utc_offset on task_complete", async () => {
+    const storage = memoryKV();
+    const c = track(createSyncClient(base({ ...at("2026-07-23"), storage })));
+    const { temp_id } = c.mutate({ type: "task_add", args: { title: "Water", recurrence: "FREQ=DAILY" } });
+    c.mutate({ type: "task_complete", args: { id: temp_id } });
+    await vi.waitFor(async () => {
+      const raw = await storage.getItem(workspaceStorageKeys(WS).queue);
+      expect(raw).not.toBeNull();
+      const queue = JSON.parse(raw as string) as Array<{ type: string; args: Record<string, unknown> }>;
+      const cmd = queue.find((q) => q.type === "task_complete");
+      expect(cmd).toBeDefined();
+      expect(cmd!.args["utc_offset"]).toBe(-new Date("2026-07-23T12:00:00Z").getTimezoneOffset() || 0);
+      expect(String(cmd!.args["today"])).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
 });
 
 describe("attachments (v1.4)", () => {

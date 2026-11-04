@@ -156,6 +156,7 @@ Field semantics (these ARE the product decisions - implement precisely):
   "This Evening" section.
 - `someday: true` ⟹ server forces `start_date = null` (mutually exclusive).
 - `reminder_at`: UTC datetime; drives push later. No validation coupling to dates in v1.
+  Completing a recurring task moves it with the series (below).
 - `recurrence`: RRULE subset string or null: `FREQ=DAILY|WEEKLY|MONTHLY|YEARLY`
   `[;INTERVAL=n][;BYDAY=MO,TU,WE,TH,FR,SA,SU]` (BYDAY only with WEEKLY).
   Examples: `FREQ=DAILY`, `FREQ=WEEKLY;INTERVAL=2;BYDAY=TU`.
@@ -193,21 +194,31 @@ BYDAY days of every `INTERVAL`-th week starting from the anchor's own week), and
 answer is its smallest member strictly greater than `after`. Each step is measured from
 the anchor, so a clamped month-end recovers: Jan 31 → Feb 28 → **Mar 31**.
 
-| Task has | anchor | after | effect |
-|---|---|---|---|
-| `start_date` | `start_date` | `max(start_date, today)` | `start_date` = next occurrence; `deadline` shifts by the same delta |
-| only `deadline` | `deadline` | `max(deadline, today)` | `deadline` = next occurrence |
-| neither | `today` | `today` | `start_date` = next occurrence |
+| Task has | anchor | after | effect | `reminder_at` moves by |
+|---|---|---|---|---|
+| `start_date` | `start_date` | `max(start_date, today)` | `start_date` = next occurrence; `deadline` shifts by the same delta | the `start_date` delta |
+| only `deadline` | `deadline` | `max(deadline, today)` | `deadline` = next occurrence | the `deadline` delta |
+| neither | `today` | `today` | `start_date` = next occurrence | `start_date` - local day of `reminder_at` |
 
 `today` comes from the **client**: `task_complete` carries `args.today` (`YYYY-MM-DD`),
 the device's local calendar day, because the optimistic apply runs against that day (§0).
 The server clamps it to ±1 day of UTC - the real span of world timezones - and falls back
 to its own UTC day when it is absent or outside that range. Deriving it from UTC alone
 made the server disagree with any client more than a few hours out, and the completed task
-visibly jumped once the response landed. Server
-and client run the same algorithm - `server/balu/sync/recurrence.py` and
+visibly jumped once the response landed.
+
+`reminder_at` moves only forward: a shift of 0 or less leaves it alone (it already belongs
+to a later occurrence). It moves by whole days of 24 h on the UTC instant, so a reminder
+keeps its UTC time and its local time shifts by an hour across a DST change (accepted in
+v1, the server has no timezone). A moved reminder is re-armed (§8). The local day needs the
+device's UTC offset: `task_complete` carries `args.utc_offset`, integer minutes east of UTC;
+the server accepts `-720..840` and otherwise (absent, not an integer, out of range) uses
+`0`, i.e. the UTC day. Non-recurring completion leaves `reminder_at` unchanged.
+
+Server and client run the same algorithm - `server/balu/sync/recurrence.py` and
 `packages/sync-client/src/recurrence.ts` share a test-vector table, because a mismatch
-makes a completed task visibly jump once the sync response lands.
+makes a completed task visibly jump once the sync response lands. `roll_forward` /
+`rollForward` share a second table for the whole roll-forward including the reminder.
 
 ### 3.4 `comment` - v1.2
 
@@ -416,7 +427,7 @@ in `args` (absent ≠ null; sending `"deadline": null` clears it, omitting leave
 | `task_add` | `temp_id`, `title`, plus any writable task field. A `section_id` must belong to the task's own project. If the target project, section or parent task was deleted meanwhile, the task is filed elsewhere instead of rejected (§5.5). |
 | `task_update` | `id`, any of `title, notes, start_date, evening, someday, deadline, reminder_at, recurrence, priority, label_ids, assigned_to` |
 | `task_move` | `id`, `project_id?`, `section_id?`, `parent_task_id?`, `sort_order?` - container change. A `section_id` must belong to the task's own project (`invalid_args` otherwise); changing `project_id` without naming a `section_id` clears the section. `sort_order` is not implied: omitted, the task keeps its old value and lands wherever that falls in the new container, so a move made on the user's behalf (drag & drop) should append with max + 1000 of the destination (§3.3). Subtasks follow their parent: moving a parent moves its subtasks, and a subtask's own `project_id`/`section_id` are ignored (§3.3). |
-| `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) - see §3.3 for recurring behavior |
+| `task_complete` | `id`; optional `today` (`YYYY-MM-DD`) and `utc_offset` (integer minutes east of UTC) - see §3.3 for recurring behavior |
 | `task_uncomplete` | `id` |
 | `task_delete` | `id` - soft-deletes task + its subtasks + all their comments and attachments (blobs removed after the commit, best-effort) |
 | `task_reorder` | `items: [{"id": …, "sort_order": …}, …]` - bulk, single container expected. Items whose task is deleted, unknown or in another workspace are skipped (the rest is applied); a malformed item is `invalid_args`; if no item resolves the command is `ok` and applies nothing (the workspace version still advances) (§5.5) |
@@ -586,7 +597,8 @@ Channel validation (v1.2.1):
 **Reminder delivery (server-side):** a background loop (~every 30 s) finds open,
 non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the channels of
 the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal (not in
-sync payloads); changing `reminder_at` re-arms it. Message: task title, project name,
+sync payloads); changing `reminder_at` re-arms it,
+including when completing a recurring task moves it (§3.3). Message: task title, project name,
 deadline if set. Mobile clients additionally schedule **local** notifications from their
 replica; with external channels configured this can duplicate - accepted in v1.
 

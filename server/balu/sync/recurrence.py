@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import calendar
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 _WEEKDAYS = {"MO": 0, "TU": 1, "WE": 2, "TH": 3, "FR": 4, "SA": 5, "SU": 6}
 _FREQS = {"DAILY", "WEEKLY", "MONTHLY", "YEARLY"}
@@ -149,3 +149,65 @@ def next_occurrence(rrule: str, anchor: date, after: date | None = None) -> date
         if candidate > after:
             return candidate
     raise ValueError("could not find the next occurrence")  # pragma: no cover
+
+
+# The device's UTC offset in minutes east of UTC, as `task_complete` carries it. Clamped to
+# the real span of world timezones; anything else falls back to UTC (0).
+MIN_UTC_OFFSET = -12 * 60
+MAX_UTC_OFFSET = 14 * 60
+
+
+def utc_offset_minutes(value: object) -> int:
+    """`args.utc_offset` -> minutes, or 0 when absent, not an integer, or out of range.
+
+    Mirrored by `utcOffsetMinutes` in `packages/sync-client/src/recurrence.ts`.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    if not MIN_UTC_OFFSET <= value <= MAX_UTC_OFFSET:
+        return 0
+    return value
+
+
+@dataclass(frozen=True)
+class Rolled:
+    start_date: date | None
+    deadline: date | None
+    reminder_at: datetime | None
+
+
+def roll_forward(
+    rrule: str,
+    start_date: date | None,
+    deadline: date | None,
+    reminder_at: datetime | None,
+    today: date,
+    utc_offset: int = 0,
+) -> Rolled:
+    """Advance a recurring task on completion (contract §3.3).
+
+    `start_date` (or, without one, `deadline`) moves to its next anchored occurrence and the
+    other dates move by the same number of days. Without either date the series is anchored
+    on `today` and the reminder moves from its own local day to the new start date. The
+    reminder only ever moves forward, by whole days of the UTC instant. Mirrored step for
+    step by `rollForward` in `packages/sync-client/src/recurrence.ts`.
+    """
+    shift = 0
+    if start_date is not None:
+        new_start = next_occurrence(rrule, start_date, max(start_date, today))
+        shift = (new_start - start_date).days
+        start_date = new_start
+        if deadline is not None:
+            deadline = deadline + timedelta(days=shift)
+    elif deadline is not None:
+        new_deadline = next_occurrence(rrule, deadline, max(deadline, today))
+        shift = (new_deadline - deadline).days
+        deadline = new_deadline
+    else:
+        start_date = next_occurrence(rrule, today, today)
+        if reminder_at is not None:
+            local_day = (reminder_at.astimezone(UTC) + timedelta(minutes=utc_offset)).date()
+            shift = (start_date - local_day).days
+    if reminder_at is not None and shift > 0:
+        reminder_at = reminder_at + timedelta(days=shift)
+    return Rolled(start_date, deadline, reminder_at)

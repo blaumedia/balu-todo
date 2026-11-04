@@ -23,5 +23,5 @@ export {
   type Replica,
   type SerializedReplica,
 } from "./replica.js";
-export { nextOccurrence, parseRrule } from "./recurrence.js";
+export { nextOccurrence, parseRrule, rollForward, utcOffsetMinutes, type Rolled } from "./recurrence.js";
 export { localStorageKV, memoryKV, type AsyncKV } from "./storage.js";

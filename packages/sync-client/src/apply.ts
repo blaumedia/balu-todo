@@ -13,8 +13,7 @@ import {
   type SyncCommand,
   type Task,
 } from "@balu/domain";
-import { addDaysISO, diffDaysISO } from "@balu/domain";
-import { nextOccurrence } from "./recurrence.js";
+import { rollForward, utcOffsetMinutes } from "./recurrence.js";
 import type { Replica } from "./replica.js";
 
 export interface ApplyContext {
@@ -255,27 +254,24 @@ export function applyCommand(replica: Replica, cmd: SyncCommand, ctx: ApplyConte
       if (!t) break;
       if (t.recurrence) {
         // Mirrors the server's h_task_complete exactly (contract §3.3): anchor on
-        // the task's own date so the rule keeps its phase, and advance the
-        // deadline directly when there is no start date.
+        // the task's own date so the rule keeps its phase, advance the deadline
+        // directly when there is no start date, and move the reminder with the series.
         // Read the stamp the command carries — `mutate` set it and the server
         // uses that same value. Recomputing could straddle midnight and disagree
         // with our own command, and a replayed command would use the wrong day.
         const today = str(a["today"]) ?? ctx.today();
-        if (t.start_date != null) {
-          const from = t.start_date;
-          const next = nextOccurrence(t.recurrence, from, from > today ? from : today);
-          if (next) {
-            const delta = diffDaysISO(from, next);
-            t.start_date = next;
-            if (t.deadline) t.deadline = addDaysISO(t.deadline, delta);
-          }
-        } else if (t.deadline != null) {
-          const from = t.deadline;
-          const next = nextOccurrence(t.recurrence, from, from > today ? from : today);
-          if (next) t.deadline = next;
-        } else {
-          const next = nextOccurrence(t.recurrence, today, today);
-          if (next) t.start_date = next;
+        const rolled = rollForward(
+          t.recurrence,
+          t.start_date,
+          t.deadline,
+          t.reminder_at,
+          today,
+          utcOffsetMinutes(a["utc_offset"]),
+        );
+        if (rolled) {
+          t.start_date = rolled.start_date;
+          t.deadline = rolled.deadline;
+          t.reminder_at = rolled.reminder_at;
         }
       } else {
         t.completed_at = now;

@@ -514,6 +514,55 @@ def test_task_complete_uses_the_clients_local_day(client, user):
     assert task["start_date"] == (tomorrow + timedelta(days=1)).isoformat()
 
 
+def _complete_recurring(client, user, add_args, **complete_args):
+    r = sync(client, user, "*", [cmd("task_add", temp_id="t1", title="Daily", **add_args)])
+    tid = r["temp_id_mapping"]["t1"]
+    r2 = sync(client, user, r["sync_token"], [cmd("task_complete", id=tid, **complete_args)])
+    return next(t for t in r2["tasks"] if t["id"] == tid)
+
+
+def test_recurring_complete_moves_the_reminder_with_the_start_date(client, user):
+    utc_today = datetime.now(UTC).date()
+    nxt = utc_today + timedelta(days=1)
+    task = _complete_recurring(
+        client, user,
+        {"start_date": utc_today.isoformat(), "recurrence": "FREQ=DAILY",
+         "reminder_at": f"{utc_today}T07:00:00Z"},
+        today=utc_today.isoformat(), utc_offset=120,
+    )
+    assert task["start_date"] == nxt.isoformat()
+    assert task["reminder_at"] == f"{nxt}T07:00:00Z"
+
+
+def test_recurring_complete_moves_a_dateless_reminder_to_the_next_occurrence(client, user):
+    utc_today = datetime.now(UTC).date()
+    nxt = utc_today + timedelta(days=1)
+    task = _complete_recurring(
+        client, user,
+        {"recurrence": "FREQ=DAILY", "reminder_at": f"{utc_today}T07:00:00Z"},
+        today=utc_today.isoformat(), utc_offset=120,
+    )
+    assert task["start_date"] == nxt.isoformat()
+    assert task["reminder_at"] == f"{nxt}T07:00:00Z"
+
+
+def test_recurring_complete_ignores_an_implausible_utc_offset(client, user):
+    utc_today = datetime.now(UTC).date()
+    nxt = utc_today + timedelta(days=1)
+    task = _complete_recurring(
+        client, user,
+        {"recurrence": "FREQ=DAILY", "reminder_at": f"{utc_today}T23:30:00Z"},
+        today=utc_today.isoformat(), utc_offset=5000,
+    )
+    # Offset 0: the local day is the UTC day, so the reminder moves (with 120 it would stay).
+    assert task["reminder_at"] == f"{nxt}T23:30:00Z"
+
+
+def test_complete_leaves_a_non_recurring_reminder_alone(client, user):
+    task = _complete_recurring(client, user, {"reminder_at": "2999-01-01T09:00:00Z"})
+    assert task["reminder_at"] == "2999-01-01T09:00:00Z"
+
+
 def test_task_complete_ignores_an_implausible_client_day(client, user):
     """A wrong or hostile `today` cannot push the series somewhere arbitrary."""
     utc_today = datetime.now(UTC).date()

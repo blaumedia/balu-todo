@@ -122,3 +122,74 @@ export function nextOccurrence(rrule: string, anchor: string, after: string): st
   }
   return null;
 }
+
+/** Clamp for `task_complete`'s `utc_offset`, mirroring the server's MIN/MAX_UTC_OFFSET. */
+const MIN_UTC_OFFSET = -12 * 60;
+const MAX_UTC_OFFSET = 14 * 60;
+const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
+
+/**
+ * `args.utc_offset` -> minutes east of UTC, or 0 when absent, not an integer or out of range.
+ * Mirrors `utc_offset_minutes` in `server/balu/sync/recurrence.py`.
+ */
+export function utcOffsetMinutes(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_UTC_OFFSET && value <= MAX_UTC_OFFSET
+    ? value
+    : 0;
+}
+
+export interface Rolled {
+  start_date: string | null;
+  deadline: string | null;
+  reminder_at: string | null;
+}
+
+/** Shift a UTC instant by whole days, in the server's `YYYY-MM-DDTHH:MM:SSZ` format. */
+function shiftInstant(iso: string, days: number): string {
+  return new Date(Date.parse(iso) + days * DAY_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * Advance a recurring task on completion (contract §3.3). Mirrors `roll_forward` in
+ * `server/balu/sync/recurrence.py` step for step; returns null when the rrule is unsupported
+ * (the caller then leaves the task alone, as before).
+ */
+export function rollForward(
+  rrule: string,
+  startDate: string | null,
+  deadline: string | null,
+  reminderAt: string | null,
+  today: string,
+  utcOffset = 0,
+): Rolled | null {
+  let start = startDate;
+  let due = deadline;
+  let shift = 0;
+  if (start != null) {
+    const next = nextOccurrence(rrule, start, start > today ? start : today);
+    if (!next) return null;
+    shift = diffDaysISO(start, next);
+    start = next;
+    if (due != null) due = addDaysISO(due, shift);
+  } else if (due != null) {
+    const next = nextOccurrence(rrule, due, due > today ? due : today);
+    if (!next) return null;
+    shift = diffDaysISO(due, next);
+    due = next;
+  } else {
+    const next = nextOccurrence(rrule, today, today);
+    if (!next) return null;
+    start = next;
+    const ms = reminderAt == null ? NaN : Date.parse(reminderAt);
+    if (!Number.isNaN(ms)) {
+      const localDay = new Date(ms + utcOffset * MINUTE_MS).toISOString().slice(0, 10);
+      shift = diffDaysISO(localDay, next);
+    }
+  }
+  let reminder = reminderAt;
+  if (reminder != null && shift > 0 && !Number.isNaN(Date.parse(reminder))) {
+    reminder = shiftInstant(reminder, shift);
+  }
+  return { start_date: start, deadline: due, reminder_at: reminder };
+}

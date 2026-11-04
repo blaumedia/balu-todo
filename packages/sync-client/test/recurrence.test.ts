@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextOccurrence, parseRrule } from "../src/index.js";
+import { nextOccurrence, parseRrule, rollForward, utcOffsetMinutes } from "../src/index.js";
 
 /**
  * Mirrored verbatim from `server/tests/test_recurrence.py::PARITY_VECTORS` —
@@ -78,5 +78,68 @@ describe("parseRrule", () => {
   });
   it("defaults interval to 1", () => {
     expect(parseRrule("FREQ=DAILY")?.interval).toBe(1);
+  });
+});
+
+/**
+ * Mirrored verbatim from `server/tests/test_recurrence.py::ROLL_VECTORS` - the whole
+ * roll-forward including the reminder must agree on both sides.
+ */
+const ROLL_VECTORS: Array<[
+  rrule: string, start: string | null, deadline: string | null, reminder: string | null,
+  today: string, utcOffset: number,
+  expStart: string | null, expDeadline: string | null, expReminder: string | null,
+]> = [
+  ["FREQ=DAILY", "2026-07-23", null, "2026-07-23T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-07-24T07:00:00Z"],
+  ["FREQ=WEEKLY;INTERVAL=2;BYDAY=MO", "2026-07-06", "2026-07-08", "2026-07-06T07:00:00Z", "2026-08-05", 120, "2026-08-17", "2026-08-19", "2026-08-17T07:00:00Z"],
+  ["FREQ=DAILY", "2026-07-23", null, null, "2026-07-23", 0, "2026-07-24", null, null],
+  ["FREQ=DAILY", "2026-07-23", null, "2026-07-20T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-07-21T07:00:00Z"],
+  ["FREQ=MONTHLY", null, "2026-01-31", "2026-01-31T16:00:00Z", "2026-07-23", 60, null, "2026-07-31", "2026-07-31T16:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-07-23T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-07-24T07:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-07-24T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-07-24T07:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-07-20T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-07-24T07:00:00Z"],
+  ["FREQ=WEEKLY;BYDAY=MO", null, null, "2026-07-23T07:00:00Z", "2026-07-22", 120, "2026-07-27", null, "2026-07-27T07:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-07-24T02:00:00Z", "2026-07-23", -300, "2026-07-24", null, "2026-07-25T02:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-07-24T02:00:00Z", "2026-07-23", 0, "2026-07-24", null, "2026-07-24T02:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-07-23T19:00:00Z", "2026-07-24", 780, "2026-07-25", null, "2026-07-24T19:00:00Z"],
+  ["FREQ=DAILY", null, null, "2026-08-10T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-08-10T07:00:00Z"],
+  ["FREQ=DAILY", null, null, null, "2026-07-23", 0, "2026-07-24", null, null],
+];
+
+describe("rollForward - server parity vectors", () => {
+  for (const [rrule, start, deadline, reminder, today, offset, expStart, expDeadline, expReminder] of ROLL_VECTORS) {
+    it(`${rrule} start=${start} deadline=${deadline} reminder=${reminder} today=${today} offset=${offset}`, () => {
+      expect(rollForward(rrule, start, deadline, reminder, today, offset)).toEqual({
+        start_date: expStart,
+        deadline: expDeadline,
+        reminder_at: expReminder,
+      });
+    });
+  }
+});
+
+/** Mirrored from `server/tests/test_recurrence.py::OFFSET_VECTORS`. */
+const OFFSET_VECTORS: Array<[unknown, number]> = [
+  [120, 120],
+  [0, 0],
+  [-300, -300],
+  [840, 840],
+  [-720, -720],
+  [841, 0],
+  [-721, 0],
+  ["120", 0],
+  [true, 0],
+  [null, 0],
+  [1.5, 0],
+];
+
+describe("utcOffsetMinutes", () => {
+  for (const [input, expected] of OFFSET_VECTORS) {
+    it(`${JSON.stringify(input)} -> ${expected}`, () => {
+      expect(utcOffsetMinutes(input)).toBe(expected);
+    });
+  }
+  it("undefined -> 0", () => {
+    expect(utcOffsetMinutes(undefined)).toBe(0);
   });
 });

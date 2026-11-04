@@ -917,8 +917,11 @@ export function createSyncClient(opts: SyncClientOptions): SyncClient {
     // *device's* calendar day. Stamping it here — rather than at each call site —
     // keeps the server on the same day: without it a user far from UTC saw the
     // completed task jump to a different date once the response landed.
-    if (input.type === "task_complete" && args["today"] === undefined) {
-      args["today"] = ctx.today();
+    if (input.type === "task_complete") {
+      if (args["today"] === undefined) args["today"] = ctx.today();
+      // The reminder of a recurring task without dates moves from its own local day
+      // (contract §3.3); the server only knows that day through this offset.
+      if (args["utc_offset"] === undefined) args["utc_offset"] = -nowDate().getTimezoneOffset() || 0;
     }
     const cmd: SyncCommand = {
       type: input.type,

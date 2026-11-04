@@ -44,7 +44,7 @@ from ..models import (
 )
 from ..notifications import send_to_channel
 from .engine import ROLE_RANK, bump_version
-from .recurrence import next_occurrence, parse_recurrence
+from .recurrence import parse_recurrence, roll_forward, utc_offset_minutes
 
 logger = logging.getLogger("balu.sync.commands")
 
@@ -710,22 +710,21 @@ def h_task_complete(ctx: Ctx, args: dict) -> dict:
     task = _get_task(ctx, args.get("id"))
     version = ctx.bump()
     if task.recurrence:
-        today = _completion_today(args)
-        if task.start_date is not None:
-            # Anchor on the task's own start date so the rule keeps its phase.
-            new_start = next_occurrence(
-                task.recurrence, task.start_date, max(task.start_date, today)
-            )
-            delta = new_start - task.start_date
-            task.start_date = new_start
-            if task.deadline is not None:
-                task.deadline = task.deadline + delta
-        elif task.deadline is not None:
-            task.deadline = next_occurrence(
-                task.recurrence, task.deadline, max(task.deadline, today)
-            )
-        else:
-            task.start_date = next_occurrence(task.recurrence, today, today)
+        # Anchor on the task's own date so the rule keeps its phase (contract §3.3).
+        rolled = roll_forward(
+            task.recurrence,
+            task.start_date,
+            task.deadline,
+            task.reminder_at,
+            _completion_today(args),
+            utc_offset_minutes(args.get("utc_offset")),
+        )
+        task.start_date = rolled.start_date
+        task.deadline = rolled.deadline
+        if rolled.reminder_at != task.reminder_at:
+            task.reminder_at = rolled.reminder_at
+            # Re-arm delivery for the next occurrence, as _apply_task_fields does.
+            task.reminder_sent_at = None
         # recurring task stays open: completed_at intentionally left null
     else:
         task.completed_at = datetime.now(UTC)
