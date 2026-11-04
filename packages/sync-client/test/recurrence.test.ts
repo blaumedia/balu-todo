@@ -103,7 +103,7 @@ const ROLL_VECTORS: Array<[
   ["FREQ=DAILY", null, null, "2026-07-24T02:00:00Z", "2026-07-23", 0, "2026-07-24", null, "2026-07-24T02:00:00Z"],
   ["FREQ=DAILY", null, null, "2026-07-23T19:00:00Z", "2026-07-24", 780, "2026-07-25", null, "2026-07-24T19:00:00Z"],
   ["FREQ=DAILY", null, null, "2026-08-10T07:00:00Z", "2026-07-23", 120, "2026-07-24", null, "2026-08-10T07:00:00Z"],
-  ["FREQ=DAILY", null, null, null, "2026-07-23", 0, "2026-07-24", null, null],
+  ["FREQ=DAILY", null, null, null, "2026-07-23", 0, "2026-07-24", null, null],  ["FREQ=DAILY", null, null, "9999-12-31T23:00:00Z", "2026-07-23", 120, "2026-07-24", null, "9999-12-31T23:00:00Z"],
 ];
 
 describe("rollForward - server parity vectors", () => {

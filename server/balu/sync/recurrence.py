@@ -198,6 +198,7 @@ def roll_forward(
         shift = (new_start - start_date).days
         start_date = new_start
         if deadline is not None:
+            # Near date.max this can overflow; next_occurrence already bounds start_date.
             deadline = deadline + timedelta(days=shift)
     elif deadline is not None:
         new_deadline = next_occurrence(rrule, deadline, max(deadline, today))
@@ -206,8 +207,12 @@ def roll_forward(
     else:
         start_date = next_occurrence(rrule, today, today)
         if reminder_at is not None:
-            local_day = (reminder_at.astimezone(UTC) + timedelta(minutes=utc_offset)).date()
-            shift = (start_date - local_day).days
+            try:
+                local_day = (reminder_at.astimezone(UTC) + timedelta(minutes=utc_offset)).date()
+                shift = (start_date - local_day).days
+            except OverflowError:
+                # Reminder at the end of year 9999: leave it where it is (as the JS twin).
+                shift = 0
     if reminder_at is not None and shift > 0:
         try:
             reminder_at = reminder_at + timedelta(days=shift)

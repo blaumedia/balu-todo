@@ -723,14 +723,15 @@ def h_task_complete(ctx: Ctx, args: dict) -> dict:
         task.deadline = rolled.deadline
         if rolled.reminder_at != task.reminder_at:
             task.reminder_at = rolled.reminder_at
-            if rolled.reminder_at is not None and rolled.reminder_at > datetime.now(UTC):
+            now = datetime.now(UTC)
+            if rolled.reminder_at is not None and rolled.reminder_at > now:
                 # Re-arm delivery for the next occurrence, as _apply_task_fields does.
                 task.reminder_sent_at = None
             else:
                 # A stale reminder (it lagged behind start_date before the roll moved it
                 # with the start) is still in the past: re-arming it would push on every
                 # completion. Mark it sent so it never fires.
-                task.reminder_sent_at = datetime.now(UTC)
+                task.reminder_sent_at = now
         # recurring task stays open: completed_at intentionally left null
     else:
         task.completed_at = datetime.now(UTC)

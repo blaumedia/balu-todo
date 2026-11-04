@@ -163,6 +163,9 @@ ROLL_VECTORS: list[
     # neither, no reminder
     ("FREQ=DAILY", None, None, None, "2026-07-23", 0,
      "2026-07-24", None, None),
+    # dateless, reminder at the end of year 9999 with a positive offset: unchanged
+    ("FREQ=DAILY", None, None, "9999-12-31T23:00:00Z", "2026-07-23", 120,
+     "2026-07-24", None, "9999-12-31T23:00:00Z"),
 ]
 
 
