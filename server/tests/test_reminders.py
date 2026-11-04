@@ -98,6 +98,35 @@ def test_reminder_rearms_when_a_recurring_task_rolls_forward(client, user):
     assert _run_tick(Recorder()) == 0
 
 
+def test_reminder_stays_sent_when_completing_leaves_reminder_at_unchanged(client, user):
+    _configure_ntfy(client, user)
+    today = datetime.now(UTC).date()
+    tomorrow = today + timedelta(days=1)
+    # Dateless daily task whose reminder already sits on the next occurrence: completing it
+    # rolls nothing. A reminder one day ahead cannot be delivered by a tick, so the sent mark
+    # is set directly, as a delivered reminder would leave it.
+    added = sync(
+        client, user, "*",
+        [cmd("task_add", temp_id="t1", title="Daily", recurrence="FREQ=DAILY",
+             reminder_at=f"{tomorrow}T07:00:00Z")],
+    )
+    task_id = added["temp_id_mapping"]["t1"]
+    with get_sessionmaker()() as session:
+        session.get(Task, uuid.UUID(task_id)).reminder_sent_at = datetime.now(UTC)
+        session.commit()
+
+    sync(client, user, added["sync_token"],
+         [cmd("task_complete", id=task_id, today=today.isoformat(), utc_offset=0)])
+
+    with get_sessionmaker()() as session:
+        task = session.get(Task, uuid.UUID(task_id))
+        # Nothing to roll: reminder_at is unchanged, so the sent mark must survive.
+        assert task.reminder_at == datetime.combine(tomorrow, time(7, 0), tzinfo=UTC)
+        assert task.reminder_sent_at is not None
+
+    assert _run_tick(Recorder()) == 0
+
+
 def test_reminder_skips_completed(client, user):
     _configure_ntfy(client, user)
     added = sync(

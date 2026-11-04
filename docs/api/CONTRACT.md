@@ -597,10 +597,10 @@ Channel validation (v1.2.1):
 **Reminder delivery (server-side):** a background loop (~every 30 s) finds open,
 non-deleted tasks with `reminder_at ≤ now` not yet sent, and delivers to the channels of
 the **recipient = `assigned_to` ?? `created_by`**. Sent-state is server-internal (not in
-sync payloads); changing `reminder_at` re-arms it,
-including when completing a recurring task moves it (§3.3). Message: task title, project name,
-deadline if set. Mobile clients additionally schedule **local** notifications from their
-replica; with external channels configured this can duplicate - accepted in v1.
+sync payloads); changing `reminder_at` re-arms it, including when completing a recurring
+task moves it (§3.3). Message: task title, project name, deadline if set. Mobile clients
+additionally schedule **local** notifications from their replica; with external channels
+configured this can duplicate - accepted in v1.
 
 **Event notifications (v1.2)** - sent through the same per-user channels, fire-and-forget
 from the command handlers (failures logged, never fail the command):
