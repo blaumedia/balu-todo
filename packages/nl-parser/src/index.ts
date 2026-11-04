@@ -88,6 +88,19 @@ export function parseQuickAdd(text: string, opts: ParseOptions): ParseResult {
 
   const chosen = resolve(cands).sort((a, b) => a.start - b.start);
 
+  // "by 5pm friday": the keyword was absorbed by the time, so the date right after it is the
+  // deadline ("by friday 5pm" already is). Evening starts and typed deadlines are left alone.
+  if (!chosen.some((c) => c.type === "deadline")) {
+    for (let i = 0; i + 1 < chosen.length; i++) {
+      const a = chosen[i]!;
+      const b = chosen[i + 1]!;
+      if (a.type === "time" && a.timeDeadline && b.type === "start" && text.slice(a.end, b.start).trim() === "") {
+        b.type = "deadline";
+        break;
+      }
+    }
+  }
+
   const result: ParseResult = { title: "", labelQueries: [], tokens: [] };
   for (const c of chosen) {
     const token: Token = { type: c.type, start: c.start, end: c.end, value: c.value };
@@ -117,7 +130,8 @@ export function parseQuickAdd(text: string, opts: ParseOptions): ParseResult {
         break;
       case "time":
         result.time = String(c.value);
-        if (c.timeDeadline) result.timeIsDeadline = true;
+        // The flag belongs to the winning (last) time: "Call by 5pm at 9am" is not a deadline.
+        result.timeIsDeadline = c.timeDeadline === true;
         break;
     }
   }

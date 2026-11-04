@@ -153,9 +153,10 @@ function timeMatcher(
   locale: Locale,
   core: string,
   toTime: (g: Groups) => string | null,
+  requireDl = false,
 ): Matcher {
   const re = new RegExp(
-    `${BOUND_PRE}(?:(?<dl>${DL[locale]})\\s+)?(?:${core})${TIME_POST}`,
+    `${BOUND_PRE}(?:(?<dl>${DL[locale]})\\s+)${requireDl ? "" : "?"}(?:${core})${TIME_POST}`,
     "giu",
   );
   return {
@@ -316,6 +317,9 @@ export function buildMatchers(locale: Locale): Matcher[] {
     ));
     out.push(timeMatcher(locale, `at\\s+noon`, () => "12:00"));
     out.push(timeMatcher(locale, `at\\s+midnight`, () => "00:00"));
+    // "by noon" / "due at midnight": the keyword makes "at" optional, bare "noon" stays text.
+    out.push(timeMatcher(locale, `(?:at\\s+)?noon`, () => "12:00", true));
+    out.push(timeMatcher(locale, `(?:at\\s+)?midnight`, () => "00:00", true));
   } else {
     out.push(timeMatcher(locale, `(?:um\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})(?:\\s?uhr)?`, time24));
     out.push(timeMatcher(locale, `(?:um\\s+)?(?<h>\\d{1,2})\\.(?<mi>\\d{2})\\s?uhr`, time24));

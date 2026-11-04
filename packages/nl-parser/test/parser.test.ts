@@ -115,6 +115,12 @@ const ROWS: Row[] = [
   { locale: "en", text: "Submit report by 5pm", title: "Submit report", time: "17:00" },
   { locale: "en", text: "Submit report due 17:00", title: "Submit report", time: "17:00" },
   { locale: "de", text: "Abgabe bis 12 Uhr", title: "Abgabe", time: "12:00" },
+  { locale: "en", text: "Report by 5pm friday", title: "Report", deadline: "2026-07-24", time: "17:00" },
+  { locale: "en", text: "Pay rent due 9am tomorrow", title: "Pay rent", deadline: "2026-07-24", time: "09:00" },
+  { locale: "de", text: "Bericht bis 17 Uhr morgen", title: "Bericht", deadline: "2026-07-24", time: "17:00" },
+  { locale: "en", text: "Lunch by noon", title: "Lunch", time: "12:00" },
+  { locale: "en", text: "Lunch due at midnight", title: "Lunch", time: "00:00" },
+  { locale: "en", text: "Lunch by midnight", title: "Lunch", time: "00:00" },
   // Time of day - not a time
   { locale: "en", text: "Ship at 9 jul", title: "Ship at", startDate: "2027-07-09" },
   { locale: "en", text: "Party at 1 may", title: "Party at", startDate: "2027-05-01" },

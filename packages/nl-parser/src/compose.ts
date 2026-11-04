@@ -143,8 +143,10 @@ export function composeTaskArgs(
       at = toUtc(day, result.time);
     }
     args["reminder_at"] = at;
-    // "by 5pm" without a date: due that day, reminded at that time.
-    if (result.timeIsDeadline && result.deadline === undefined) args["deadline"] = day;
+    // "by 5pm" without a date: due that day, reminded at that time. Not with a recurrence:
+    // "every monday by 9am" would get a deadline on an unrelated day and the server anchors
+    // the series on it, so only the reminder is kept.
+    if (result.timeIsDeadline && result.deadline === undefined && !result.recurrence) args["deadline"] = day;
   }
 
   return args;

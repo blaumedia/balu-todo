@@ -168,6 +168,29 @@ describe("composeTaskArgs reminder_at from a time of day", () => {
       reminder_at: "2026-07-23T10:00:00Z",
     });
   });
+  it("makes the date after 'by 5pm' the deadline, not a start date", () => {
+    expect(composeAt("Report by 5pm tomorrow", BEFORE_NINE)).toEqual({
+      title: "Report",
+      deadline: "2026-07-24",
+      reminder_at: "2026-07-24T15:00:00Z",
+    });
+  });
+  it("does not set an automatic deadline for a recurrence with 'by 9am'", () => {
+    expect(composeAt("Standup every monday by 9am", BEFORE_NINE)).toEqual({
+      title: "Standup",
+      recurrence: "FREQ=WEEKLY;BYDAY=MO",
+      reminder_at: "2026-07-23T07:00:00Z",
+    });
+  });
+  it("does not set an automatic deadline for a German recurrence with 'bis 9 Uhr'", () => {
+    const args = composeAt("Sport jeden Montag bis 9 Uhr", BEFORE_NINE, { kind: "none" }, "de");
+    expect(args["deadline"]).toBeUndefined();
+    expect(args["recurrence"]).toBe("FREQ=WEEKLY;BYDAY=MO");
+    expect(args["reminder_at"]).toBe("2026-07-23T07:00:00Z");
+  });
+  it("takes the deadline flag from the last time only", () => {
+    expect(parseQuickAdd("Call by 5pm at 9am", { locale: "en", referenceDate: TODAY }).timeIsDeadline).toBe(false);
+  });
   it("treats a time equal to now as passed", () => {
     expect(composeAt("Task at 9am", AT_NINE)["reminder_at"]).toBe("2026-07-24T07:00:00Z");
   });
