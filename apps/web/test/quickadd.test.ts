@@ -1,5 +1,6 @@
 import type { Project } from "@balu/domain";
 import { parseQuickAdd } from "@balu/nl-parser";
+import { rollForward } from "@balu/sync-client";
 import { describe, expect, it } from "vitest";
 import { afterQuickAdd, archivedViewProjectId, composeTaskArgs, contextOf, quickAddTarget, shouldNotifyInbox } from "../src/lib/quickadd.js";
 
@@ -145,4 +146,36 @@ describe("afterQuickAdd", () => {
     expect(afterQuickAdd({}, redirected, {})).toEqual({ clearInput: true, notifyInbox: true });
     expect(afterQuickAdd({}, { ...redirected, redirected: false }, {})).toEqual({ clearInput: true, notifyInbox: false });
   });
+});
+
+describe("composed recurring reminder survives roll-forward", () => {
+  // Thursday, Today list: the default start must move to the first Monday or the reminder
+  // drifts off its weekday when completion shifts it by the start delta.
+  const thursday = "2026-07-23";
+  for (const [text, rrule] of [
+    ["Standup every monday at 12pm", "FREQ=WEEKLY;BYDAY=MO"],
+    ["Standup every other monday at 12pm", "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO"],
+  ] as const) {
+    it(`${rrule}: reminder stays on a Monday across two completions`, () => {
+      const args = composeTaskArgs(text, parseQuickAdd(text, { locale: "en", referenceDate: thursday }), {
+        context: { kind: "list", list: "today" },
+        projects: [],
+        labels: [],
+        today: thursday,
+        now: new Date("2026-07-23T05:00:00Z"),
+      });
+      expect(args["recurrence"]).toBe(rrule);
+      let start = args["start_date"] as string;
+      let reminder = args["reminder_at"] as string;
+      expect(new Date(start).getUTCDay()).toBe(1);
+      for (let i = 0; i < 2; i++) {
+        const rolled = rollForward(rrule, start, null, reminder, start, 0);
+        if (!rolled) throw new Error("rollForward rejected the composed rule");
+        start = rolled.start_date as string;
+        reminder = rolled.reminder_at as string;
+        expect(new Date(start).getUTCDay()).toBe(1);
+        expect(new Date(reminder).getUTCDay()).toBe(1);
+      }
+    });
+  }
 });

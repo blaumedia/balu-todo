@@ -157,8 +157,14 @@ export function composeTaskArgs(
     // move the reminder off the day the user wrote.
     let day = result.startDate ?? result.deadline ?? (args["start_date"] as string | undefined) ?? opts.today;
     // "every monday at 9am" typed on a Thursday: the first reminder belongs to the first
-    // Monday, not to today. Only without a typed date; the series anchor is left alone.
-    if (!explicitDate && result.recurrence) day = firstOccurrenceOnOrAfter(result.recurrence, day);
+    // Monday, not to today. Only without a typed date. A default (not typed) start moves
+    // with it: roll_forward shifts the reminder by the start delta, so a start left on
+    // Thursday would drift the reminder off its weekday for good.
+    if (!explicitDate && result.recurrence) {
+      const first = firstOccurrenceOnOrAfter(result.recurrence, day);
+      if (args["start_date"] === day) args["start_date"] = first;
+      day = first;
+    }
     let at = toUtc(day, result.time);
     // "at 9am" typed after 9: the next 9am, not one that fires immediately. The Today-list
     // default start moves with it so the series anchor and the reminder stay on one day.

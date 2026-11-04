@@ -222,9 +222,9 @@ describe("composeTaskArgs reminder_at from a time of day", () => {
     // After 9: the next Monday, not tomorrow.
     expect(at("2026-07-27T08:00:00Z")["reminder_at"]).toBe("2026-08-03T07:00:00Z");
   });
-  it("Today list: leaves the default start alone for a Monday series typed on Thursday", () => {
+  it("Today list: moves the default start to the first Monday for a series typed on Thursday", () => {
     const args = composeAt("Standup every monday at 9am", BEFORE_NINE, { kind: "list", list: "today" });
-    expect(args["start_date"]).toBe("2026-07-23");
+    expect(args["start_date"]).toBe("2026-07-27");
     expect(args["reminder_at"]).toBe("2026-07-27T07:00:00Z");
   });
   it("does not set an automatic deadline for a German recurrence with 'bis 9 Uhr'", () => {
