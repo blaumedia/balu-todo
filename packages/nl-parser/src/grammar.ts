@@ -14,6 +14,8 @@ import type { Locale, TokenType } from "./types.js";
 export interface Payload {
   type: TokenType;
   value: string | number;
+  /** A time that absorbed a deadline keyword ("by 5pm"). */
+  deadline?: boolean;
 }
 
 export interface Matcher {
@@ -68,6 +70,9 @@ const EN_MONTHS: Record<string, number> = {
   jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
   jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
 };
+
+const MONTH_ALT =
+  "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
 
 const DL: Record<Locale, string> = { en: "by|due", de: "bis" };
 
@@ -140,13 +145,26 @@ function time12(g: Groups): string | null {
   return hhmm((h % 12) + (pm ? 12 : 0), mi);
 }
 
-function timeMatcher(core: string, toTime: (g: Groups) => string | null): Matcher {
-  const re = new RegExp(`${BOUND_PRE}(?:${core})${TIME_POST}`, "giu");
+/**
+ * A time core that optionally absorbs a leading deadline keyword ("by 5pm", "bis 12 Uhr"),
+ * so the keyword is not left behind in the title. `deadline` marks that keyword.
+ */
+function timeMatcher(
+  locale: Locale,
+  core: string,
+  toTime: (g: Groups) => string | null,
+): Matcher {
+  const re = new RegExp(
+    `${BOUND_PRE}(?:(?<dl>${DL[locale]})\\s+)?(?:${core})${TIME_POST}`,
+    "giu",
+  );
   return {
     re,
     build: (m) => {
-      const v = toTime(m.groups ?? {});
-      return v ? { type: "time", value: v } : null;
+      const g = m.groups ?? {};
+      const v = toTime(g);
+      if (!v) return null;
+      return g["dl"] ? { type: "time", value: v, deadline: true } : { type: "time", value: v };
     },
   };
 }
@@ -246,10 +264,8 @@ export function buildMatchers(locale: Locale): Matcher[] {
   out.push(dateMatcher(locale, `(?<d>\\d{1,2})\\.(?<mo>\\d{1,2})\\.(?<y>\\d{4})?`, resolveDMY));
 
   if (locale === "en") {
-    const monthAlt =
-      "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
-    out.push(dateMatcher(locale, `(?<mon>${monthAlt})\\s+(?<md>\\d{1,2})(?:st|nd|rd|th)?`, resolveMonthName));
-    out.push(dateMatcher(locale, `(?<md>\\d{1,2})(?:st|nd|rd|th)?\\s+(?<mon>${monthAlt})`, resolveMonthName));
+    out.push(dateMatcher(locale, `(?<mon>${MONTH_ALT})\\s+(?<md>\\d{1,2})(?:st|nd|rd|th)?`, resolveMonthName));
+    out.push(dateMatcher(locale, `(?<md>\\d{1,2})(?:st|nd|rd|th)?\\s+(?<mon>${MONTH_ALT})`, resolveMonthName));
   }
 
   // Relative words.
@@ -287,19 +303,24 @@ export function buildMatchers(locale: Locale): Matcher[] {
   }
 
   // Times of day (contract §3.3 reminder_at). Last, so a date always keeps its own order
-  // slot; there is no span they share once TIME_POST has done its job. A bare number is
-  // never a time: it needs a prefix (at/um), a suffix (am/pm/Uhr) or ":mm".
+  // slot. A bare number is never a time: it needs a prefix (at/um), a suffix (am/pm/Uhr)
+  // or ":mm". The bare "at 9" refuses a following month name, because the time match
+  // starts at "at" and would otherwise beat the date "at 9 jul" (earliest start wins).
   if (locale === "en") {
-    out.push(timeMatcher(`(?:at\\s+)?(?<h>\\d{1,2})(?:[:.](?<mi>\\d{2}))?\\s?(?<ap>am|pm)`, time12));
-    out.push(timeMatcher(`(?:at\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})`, time24));
-    out.push(timeMatcher(`at\\s+(?<h>\\d{1,2})`, time24));
-    out.push(timeMatcher(`at\\s+noon`, () => "12:00"));
-    out.push(timeMatcher(`at\\s+midnight`, () => "00:00"));
+    out.push(timeMatcher(locale, `(?:at\\s+)?(?<h>\\d{1,2})(?:[:.](?<mi>\\d{2}))?\\s?(?<ap>am|pm)`, time12));
+    out.push(timeMatcher(locale, `(?:at\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})`, time24));
+    out.push(timeMatcher(
+      locale,
+      `at\\s+(?<h>\\d{1,2})(?!(?:st|nd|rd|th)?\\s+(?:${MONTH_ALT})\\b)`,
+      time24,
+    ));
+    out.push(timeMatcher(locale, `at\\s+noon`, () => "12:00"));
+    out.push(timeMatcher(locale, `at\\s+midnight`, () => "00:00"));
   } else {
-    out.push(timeMatcher(`(?:um\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})(?:\\s?uhr)?`, time24));
-    out.push(timeMatcher(`(?:um\\s+)?(?<h>\\d{1,2})\\.(?<mi>\\d{2})\\s?uhr`, time24));
-    out.push(timeMatcher(`(?:um\\s+)?(?<h>\\d{1,2})\\s?uhr`, time24));
-    out.push(timeMatcher(`um\\s+(?<h>\\d{1,2})`, time24));
+    out.push(timeMatcher(locale, `(?:um\\s+)?(?<h>\\d{1,2}):(?<mi>\\d{2})(?:\\s?uhr)?`, time24));
+    out.push(timeMatcher(locale, `(?:um\\s+)?(?<h>\\d{1,2})\\.(?<mi>\\d{2})\\s?uhr`, time24));
+    out.push(timeMatcher(locale, `(?:um\\s+)?(?<h>\\d{1,2})\\s?uhr`, time24));
+    out.push(timeMatcher(locale, `um\\s+(?<h>\\d{1,2})`, time24));
   }
 
   return out;

@@ -130,8 +130,9 @@ export function composeTaskArgs(
   if (result.time) {
     const toUtc = opts.localToUtc ?? localTimeToUtc;
     const explicitDate = result.startDate !== undefined || result.deadline !== undefined;
-    let day =
-      (args["start_date"] as string | undefined) ?? (args["deadline"] as string | undefined) ?? opts.today;
+    // Typed dates only: list defaults (Today start, Someday dropping start_date) must not
+    // move the reminder off the day the user wrote.
+    let day = result.startDate ?? result.deadline ?? (args["start_date"] as string | undefined) ?? opts.today;
     let at = toUtc(day, result.time);
     // "at 9am" typed after 9: the next 9am, not one that fires immediately. The Today-list
     // default start moves with it so the series anchor and the reminder stay on one day.
@@ -142,6 +143,8 @@ export function composeTaskArgs(
       at = toUtc(day, result.time);
     }
     args["reminder_at"] = at;
+    // "by 5pm" without a date: due that day, reminded at that time.
+    if (result.timeIsDeadline && result.deadline === undefined) args["deadline"] = day;
   }
 
   return args;

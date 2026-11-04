@@ -40,6 +40,8 @@ export interface ParseResult {
   recurrence?: string;
   /** Local time of day `HH:MM` (24h) for the reminder, e.g. "at 9am" -> "09:00". */
   time?: string;
+  /** The time was written with a deadline keyword ("by 5pm"): the task is due that day. */
+  timeIsDeadline?: boolean;
   tokens: Token[];
 }
 

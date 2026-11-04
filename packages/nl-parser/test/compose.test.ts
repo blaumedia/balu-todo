@@ -136,6 +136,38 @@ describe("composeTaskArgs reminder_at from a time of day", () => {
       reminder_at: "2026-07-24T15:00:00Z",
     });
   });
+  it("keeps the typed deadline as the reminder day in the Today list", () => {
+    const args = composeAt("Report by friday at 5pm", AFTER_NINE, { kind: "list", list: "today" });
+    expect(args["reminder_at"]).toBe("2026-07-24T15:00:00Z");
+    expect(args["deadline"]).toBe("2026-07-24");
+  });
+  it("keeps the typed start day as the reminder day in the Someday list", () => {
+    const args = composeAt("Task tomorrow at 9", AFTER_NINE, { kind: "list", list: "someday" });
+    expect(args["reminder_at"]).toBe("2026-07-24T07:00:00Z");
+    expect(args["someday"]).toBe(true);
+    expect(args["start_date"]).toBeUndefined();
+  });
+  it("turns 'by 5pm' into a deadline today with a reminder at 17:00", () => {
+    expect(composeAt("Submit report by 5pm", BEFORE_NINE)).toEqual({
+      title: "Submit report",
+      deadline: "2026-07-23",
+      reminder_at: "2026-07-23T15:00:00Z",
+    });
+  });
+  it("moves a passed 'by 9am' deadline to tomorrow together with the reminder", () => {
+    expect(composeAt("Submit report by 9am", AFTER_NINE)).toEqual({
+      title: "Submit report",
+      deadline: "2026-07-24",
+      reminder_at: "2026-07-24T07:00:00Z",
+    });
+  });
+  it("turns 'bis 12 Uhr' into a deadline with a reminder in German", () => {
+    expect(composeAt("Abgabe bis 12 Uhr", BEFORE_NINE, { kind: "none" }, "de")).toEqual({
+      title: "Abgabe",
+      deadline: "2026-07-23",
+      reminder_at: "2026-07-23T10:00:00Z",
+    });
+  });
   it("treats a time equal to now as passed", () => {
     expect(composeAt("Task at 9am", AT_NINE)["reminder_at"]).toBe("2026-07-24T07:00:00Z");
   });

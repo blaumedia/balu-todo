@@ -24,6 +24,7 @@ export {
 
 interface Candidate extends Token {
   order: number; // tie-break: lower = higher priority
+  timeDeadline?: boolean;
 }
 
 function collect(
@@ -50,6 +51,7 @@ function collect(
           start: m.index,
           end: m.index + m[0].length,
           order,
+          ...(payload.deadline ? { timeDeadline: true } : {}),
         });
       }
     }
@@ -115,6 +117,7 @@ export function parseQuickAdd(text: string, opts: ParseOptions): ParseResult {
         break;
       case "time":
         result.time = String(c.value);
+        if (c.timeDeadline) result.timeIsDeadline = true;
         break;
     }
   }
