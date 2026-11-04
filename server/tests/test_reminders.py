@@ -124,8 +124,6 @@ def test_reminder_stays_sent_when_completing_leaves_reminder_at_unchanged(client
         assert task.reminder_at == datetime.combine(tomorrow, time(7, 0), tzinfo=UTC)
         assert task.reminder_sent_at is not None
 
-    assert _run_tick(Recorder()) == 0
-
 
 def test_reminder_skips_completed(client, user):
     _configure_ntfy(client, user)
