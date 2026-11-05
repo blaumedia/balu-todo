@@ -1,8 +1,8 @@
 # @balu/mobile
 
-Balu's mobile app - Expo (SDK 58, React Native 0.88) + expo-router, sharing the exact contract and
-domain logic of the web client via the workspace packages `@balu/domain`,
-`@balu/nl-parser`, `@balu/sync-client`, and `@balu/api-client`.
+Balu's mobile app - Expo (SDK 58, React Native 0.88) + expo-router, sharing the
+exact contract and domain logic of the web client via the workspace packages
+`@balu/domain`, `@balu/nl-parser`, `@balu/sync-client`, and `@balu/api-client`.
 
 It is **local-first**: every screen renders from an on-device replica (persisted
 in SQLite), mutations apply optimistically and queue durably, and sync flushes
@@ -140,9 +140,9 @@ Notes & limits:
 - **Monorepo Metro.** `metro.config.js` watches the workspace root, resolves
   from both node_modules trees, and remaps the `@balu/*` packages' `.js`
   import specifiers onto their real `.ts` source (they ship raw TypeScript).
-- **React Native fetch.** metro.config.js sets EXPO_PUBLIC_USE_RN_FETCH=1: SDK 56+
-  makes expo/fetch the global fetch, and it rejects the {uri, name, type} FormData
-  parts the attachment upload sends.
+- **React Native fetch.** `metro.config.js` sets `EXPO_PUBLIC_USE_RN_FETCH=1`:
+  SDK 56+ makes `expo/fetch` the global fetch, and it rejects the
+  `{ uri, name, type }` FormData parts the attachment upload sends.
 - **iOS toolchain.** Building iOS needs Xcode 27.1+, the minimum iOS is now 16.4,
   and the EAS profiles use `image: sdk-58`.
 - **`crypto.randomUUID`.** Polyfilled at startup (`src/lib/polyfills.ts`) via
@@ -201,9 +201,10 @@ test/                      vitest - pure logic and hooks-free helpers (reminders
 - **"Project is incompatible with this version of Expo Go"** - the app must be on the
   same Expo SDK as the Expo Go app from the store. The store build lags new SDK
   releases, so this repo pins the SDK Expo Go actually supports (currently **58** -
-  the App Store build is 58.0.5 since 2026-10-22, checked via the iTunes lookup API; newer-SDK Expo Go builds are
-  only distributed via expo.dev/go, and the store error message misleadingly says to
-  "download the latest version"). If it happens again after an SDK bump here, update Expo Go; if Expo
+  the App Store build has been 58.0.5 since 2026-10-22, checked via the iTunes
+  lookup API; newer-SDK Expo Go builds are only distributed via expo.dev/go, and
+  the store error message misleadingly says to "download the latest version"). If
+  it happens again after an SDK bump here, update Expo Go; if Expo
   Go is behind, downgrade: set `"expo"` in `package.json` to the store-supported SDK,
   run `npx expo install --fix`, and restart with `npx expo start -c`.
 - `npx expo-doctor` misdetects the project root in this pnpm monorepo (it walks up to

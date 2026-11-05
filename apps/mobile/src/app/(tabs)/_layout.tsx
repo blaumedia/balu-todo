@@ -12,7 +12,7 @@ import { useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
 import { font } from '../../theme/tokens';
 
-export const unstable_settings = { initialRouteName: 'today' };
+export const unstable_settings = { anchor: 'today' };
 
 export default function TabsLayout() {
   const theme = useTheme();
