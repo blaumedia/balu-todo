@@ -25,6 +25,7 @@ vi.mock('../src/lib/boot', () => ({ bootApp: async () => {}, navigateToOnboardin
 vi.mock('../src/lib/clients', () => ({ getSync: () => null, subscribeSyncClient: () => () => {} }));
 vi.mock('../src/lib/goBack', () => ({ leaveForOnboarding: () => false }));
 vi.mock('../src/lib/localeChoice', () => ({ watchLocaleRetries: () => () => {} }));
+vi.mock('../src/hooks/use-orientation-policy', () => ({ useOrientationPolicy: () => {} }));
 vi.mock('../src/store/app', () => ({ useApp: () => 'loading' }));
 vi.mock('../src/lib/notifications', () => ({
   configureNotifications: () => {},

@@ -9,6 +9,7 @@ import { AppState, Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BootNotice } from '../components/BootNotice';
+import { useOrientationPolicy } from '../hooks/use-orientation-policy';
 import { rootViewRef } from '../lib/rootViewRef';
 import { ProjectActionsSheet } from '../features/ProjectActionsSheet';
 import { QuickAddSheet } from '../features/QuickAddSheet';
@@ -83,6 +84,7 @@ export default function RootLayout() {
 }
 
 function Chrome() {
+  useOrientationPolicy();
   const scheme = useScheme();
   const theme = useTheme();
   const boot = useApp((s) => s.boot);
