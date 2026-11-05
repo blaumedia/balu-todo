@@ -19,4 +19,15 @@ module.exports = defineConfig([
     files: ['**/test/**'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
+  {
+    // eslint-config-expo 58 brings eslint-plugin-react-hooks 7, whose React Compiler
+    // rules flag existing code (reanimated shared values, ref reads in render,
+    // setState in effects). Addressing them is its own change, not part of the SDK bump.
+    rules: {
+      'react-hooks/refs': 'off',
+      'react-hooks/immutability': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/purity': 'off',
+    },
+  },
 ]);

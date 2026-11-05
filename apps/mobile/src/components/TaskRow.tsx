@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation } from 'expo-router';
 import Animated, { FadeOut, useSharedValue } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureStateManager, useManualGesture } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
   SwipeDirection,
   type SwipeableMethods,
@@ -84,23 +84,28 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   // get a copy of captured variables, so the touch-down point lives in shared values.
   const startX = useSharedValue(0);
   const startY = useSharedValue(0);
-  const edgeBlock = useMemo(
-    () =>
-      Gesture.Manual()
-        .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
-        .onTouchesDown((e) => {
-          startX.value = e.allTouches[0]?.x ?? 0;
-          startY.value = e.allTouches[0]?.y ?? 0;
-        })
-        .onTouchesMove((e, manager) => {
-          const touch = e.allTouches[0];
-          if (!touch) return;
-          if (touch.x - startX.value < -10 || Math.abs(touch.y - startY.value) > 10) manager.fail();
-        })
-        .onTouchesUp((_e, manager) => manager.fail())
-        .onTouchesCancelled((_e, manager) => manager.fail()),
-    [startX, startY],
-  );
+  const edgeBlock = useManualGesture({
+    hitSlop: { left: 0, width: EDGE_BACK_ZONE },
+    onTouchesDown: (e) => {
+      'worklet';
+      startX.value = e.allTouches[0]?.x ?? 0;
+      startY.value = e.allTouches[0]?.y ?? 0;
+    },
+    onTouchesMove: (e) => {
+      'worklet';
+      const touch = e.allTouches[0];
+      if (!touch) return;
+      if (touch.x - startX.value < -10 || Math.abs(touch.y - startY.value) > 10) GestureStateManager.fail(e.handlerTag);
+    },
+    onTouchesUp: (e) => {
+      'worklet';
+      GestureStateManager.fail(e.handlerTag);
+    },
+    onTouchesCancel: (e) => {
+      'worklet';
+      GestureStateManager.fail(e.handlerTag);
+    },
+  });
 
   const completed = task.completed_at != null;
   const checked = completed || done;
@@ -309,7 +314,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
   const swipe = (
     <ReanimatedSwipeable
       ref={swipeRef}
-      requireExternalGestureToFail={edgeBack ? edgeBlock : undefined}
+      requireToFail={edgeBack ? edgeBlock : undefined}
       friction={2}
       leftThreshold={56}
       rightThreshold={56}

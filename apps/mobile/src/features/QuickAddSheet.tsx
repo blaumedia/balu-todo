@@ -2,7 +2,7 @@ import { activeProjects, todayLocalISO } from '@balu/domain';
 import { wasSaved } from '@balu/sync-client';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, type TextInputInstance, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { TokenPill } from '../components/TokenPill';
@@ -29,7 +29,7 @@ export function QuickAddSheet() {
   // Newest typed text; `text` lags by a render, so a press in that window would drop a character.
   const latestText = useRef('');
   const [inputEpoch, setInputEpoch] = useState(0);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const lastSubmitAt = useRef(0);
   const today = todayLocalISO();
 

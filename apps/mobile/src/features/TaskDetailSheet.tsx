@@ -1,7 +1,7 @@
 import type { Comment, Priority, Role, Task } from '@balu/domain';
 import { canWrite } from '@balu/domain';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, type ScrollViewInstance, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Checkbox } from '../components/Checkbox';
 import { Icon } from '../components/Icon';
@@ -96,7 +96,7 @@ function DetailBody({
   const assignee = task.assigned_to ? members.find((m) => m.id === task.assigned_to) : undefined;
   const myRole = useMyRole();
   const writable = canWrite(myRole);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // The composer sits at the sheet's bottom — when it gains focus the keyboard
   // pads the sheet, but the ScrollView doesn't follow on its own.
   const scrollToComposer = () => {

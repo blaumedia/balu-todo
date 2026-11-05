@@ -12,6 +12,8 @@ import { useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
 import { font } from '../../theme/tokens';
 
+export const unstable_settings = { initialRouteName: 'today' };
+
 export default function TabsLayout() {
   const theme = useTheme();
   const { t } = useT();
@@ -29,7 +31,6 @@ export default function TabsLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Tabs
-        initialRouteName="today"
         screenOptions={{
           headerShown: false,
           tabBarActiveTintColor: theme.accent,

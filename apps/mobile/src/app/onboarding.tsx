@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AndroidKeyboardSpacer } from '../components/AndroidKeyboardSpacer';
@@ -28,7 +29,7 @@ import { font, gutter, radius, space } from '../theme/tokens';
 
 // The form view whose bottom (its lowest button) must end up above the IME.
 interface RevealTarget {
-  ref: React.Ref<View>;
+  ref: React.Ref<ViewInstance>;
   onLayout: (e: LayoutChangeEvent) => void;
 }
 
