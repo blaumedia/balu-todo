@@ -204,9 +204,9 @@ test/                      vitest - pure logic and hooks-free helpers (reminders
   the App Store build has been 58.0.5 since 2026-10-22, checked via the iTunes
   lookup API; newer-SDK Expo Go builds are only distributed via expo.dev/go, and
   the store error message misleadingly says to "download the latest version"). If
-  it happens again after an SDK bump here, update Expo Go; if Expo
-  Go is behind, downgrade: set `"expo"` in `package.json` to the store-supported SDK,
-  run `npx expo install --fix`, and restart with `npx expo start -c`.
+  it happens again after an SDK bump here, update Expo Go; if Expo Go is behind,
+  downgrade: set `"expo"` in `package.json` to the store-supported SDK, run
+  `npx expo install --fix`, and restart with `npx expo start -c`.
 - `npx expo-doctor` misdetects the project root in this pnpm monorepo (it walks up to
   the workspace lockfile) and errors with "Cannot determine the project's Expo SDK
   version" - harmless; `npx expo config` and `npx expo export` are the real checks.
