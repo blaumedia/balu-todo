@@ -65,10 +65,10 @@ def _on_signal(signum: int, _frame: object) -> None:
 
 
 def run(args: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:
-    """Run args with a hard timeout; on expiry, signal or interrupt kill the whole process group."""
+    """Run args with a hard timeout; on expiry, signal or interrupt kill the process group."""
     # block the signals from Popen until the child is registered, so a signal in between
     # cannot orphan it; the child itself starts with an empty mask
-    signal.pthread_sigmask(signal.SIG_BLOCK, _SIGNALS)
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _SIGNALS)
     try:
         p = subprocess.Popen(
             args,
@@ -80,7 +80,7 @@ def run(args: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:
         )
         _CHILDREN.add(p.pid)
     finally:
-        signal.pthread_sigmask(signal.SIG_UNBLOCK, _SIGNALS)
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
     try:
         out, err = p.communicate(timeout=timeout)
     except BaseException as exc:

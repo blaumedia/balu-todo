@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Log in on the iOS login form as an e2e role: login.py --udid UDID ROLE (owner|member).
+"""Log in on the iOS login form as an e2e role.
+
+  login.py --udid UDID ROLE        ROLE is owner or member
 
 The password is read in-process from the e2e state dir and written only into a temporary
 Maestro flow that is deleted straight after the run, together with the private Maestro
@@ -7,13 +9,15 @@ output dir of that run (Maestro logs typed text). It is never in argv, stdout or
 report. Labels are matched in en and de. Run it on the login screen ("Welcome back" /
 "Willkommen zurück").
 
-Input rows are found relative to the heading: the unlabelled single-line boxes below it that
-span most of the screen width (the server chip above the email field has a label and is
-skipped). Exactly two must be found before anything is typed. After the email, the password
-row is looked up again and must carry the Password placeholder with no text, and a keyboard
-must be up after the tap, else the password is not typed. (`focused` is always false for
-these inputs in the hierarchy, so it cannot be used.) Verified on iPhone 17 portrait (402 x 874 pt) only; iPad, the
-Duo cover screen and landscape use the same rule but are not verified yet.
+Input rows are found relative to the heading: the unlabelled single-line boxes below it
+that span most of the screen width (the server chip above the email field has a label and
+is skipped). Exactly two must be found before anything is typed. After the email, the
+password row is looked up again and must carry the Password placeholder with no text. The
+keyboard must be down and the row centre on screen before the password tap; after the tap
+the keyboard must be up and the email row must still show the typed mail, else the password
+is not typed. (`focused` is always false for these inputs in the hierarchy, so it cannot be
+used.) Verified on iPhone 17 portrait (402 x 874 pt) only; iPad, the Duo cover screen and
+landscape use the same rule but are not verified yet.
 """
 
 from __future__ import annotations
@@ -32,10 +36,9 @@ import ui
 HEADING = re.compile(r"^(Welcome back|Willkommen zur\u00fcck)")
 
 
-def input_rows(udid: str) -> list[tuple[int, int, int, int]]:
+def input_rows(all_nodes: list[dict]) -> list[tuple[int, int, int, int]]:
     # the login form has no accessibility labels for its inputs (2026-11-05, iOS 27.2):
     # the two input rows are the single-line boxes below the heading, email above password
-    all_nodes = ui.nodes(udid)
     width, _ = ui.screen_size(all_nodes)
     heads = [
         n["bounds"] for n in all_nodes if n["bounds"] and HEADING.search(n["label"])
@@ -82,6 +85,13 @@ def keyboard_up(all_nodes: list[dict]) -> bool:
     )
 
 
+def email_intact(
+    all_nodes: list[dict], row: tuple[int, int, int, int], mail: str
+) -> bool:
+    """The email row still shows exactly the typed mail (compared, never printed)."""
+    return any(n["bounds"] == row and n["label"] == mail for n in all_nodes)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--udid", required=True)
@@ -90,13 +100,14 @@ def main() -> int:
     # fail before touching the device when the run has no account
     pw = e.load(f"{a.role}.pw")
     mail = e.email(a.role)
-    rows = input_rows(a.udid)
+    ui.install_signal_handlers()
+    rows = input_rows(ui.nodes(a.udid))
     if len(rows) != 2:
         raise SystemExit(
             f"expected exactly 2 input rows, found {len(rows)}; nothing typed"
         )
-    email_xy = ui.center(rows[0])
-    ui.install_signal_handlers()
+    email_bounds = rows[0]
+    email_xy = ui.center(email_bounds)
     body = (
         f'- tapOn:\n    point: "{email_xy[0]},{email_xy[1]}"\n'
         f"- inputText: {json.dumps(mail)}\n"
@@ -108,17 +119,21 @@ def main() -> int:
     # The password is typed only into a verified row. The layout moves while typing, so look
     # again: the email row now has a label (its text), the password row is the one unlabelled
     # row left and must carry the password placeholder and no text.
-    rows = input_rows(a.udid)
-    if len(rows) != 1 or not is_password_row(ui.nodes(a.udid), rows[0]):
+    before = ui.nodes(a.udid)
+    rows = input_rows(before)
+    if len(rows) != 1 or not is_password_row(before, rows[0]):
         raise SystemExit(
             "password row not identified after the email; password not typed"
         )
+    # a tap while the keyboard is still up (or on an off-screen row) would hit a key, and the
+    # password would then go into the email field
+    width, height = ui.screen_size(before)
     pw_xy = ui.center(rows[0])
+    if keyboard_up(before) or not (0 < pw_xy[0] < width and 0 < pw_xy[1] < height):
+        raise SystemExit("keyboard still up or password row off screen; password not typed")
     ui.maestro_flow(a.udid, f'- tapOn:\n    point: "{pw_xy[0]},{pw_xy[1]}"')
     check = ui.nodes(a.udid)
-    if not keyboard_up(check) or not any(
-        is_password_row(check, b) for b in input_rows(a.udid)
-    ):
+    if not keyboard_up(check) or not email_intact(check, email_bounds, mail):
         raise SystemExit("password field not focused as expected; password not typed")
     rc = ui.maestro_flow(
         a.udid, f"- inputText: {json.dumps(pw)}\n- hideKeyboard", quiet=True

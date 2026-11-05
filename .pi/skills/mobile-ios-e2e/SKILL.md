@@ -120,8 +120,10 @@ did, say so in your report).
   Exactly two rows must be found, else nothing is typed. A filled input gets its text as a
   label, so after the email the password row is the only unlabelled row left; it is looked up
   again (the layout shifts after the keyboard hides), must carry the `hintText` "Password" /
-  "Passwort" with no text, and a keyboard must be up after the tap, else the password is not
-  typed. `focused` is always false for these inputs. Verified end to end on iPhone 17
+  "Passwort" with no text. The keyboard must be down and the row centre on screen before the
+  password tap; after the tap the keyboard must be up and the email row must still equal the
+  typed mail (compared in-process), else the password is not typed. With a connected hardware
+  keyboard no on-screen keyboard appears, so login.py aborts safely there. `focused` is always false for these inputs. Verified end to end on iPhone 17
   portrait, English ("Log in") and German ("Anmelden"), 2026-11-05; iPad, the Duo cover
   screen and landscape are not verified yet. The password goes through a temporary Maestro
   flow file that is deleted right after the run, never through argv or stdout. Use
