@@ -9,6 +9,7 @@ import { monthLong, weekdayLong } from '../../lib/format';
 import { useT, type TranslationKey } from '../../i18n';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
+import { useColumnPadding } from '../../hooks/use-layout';
 
 const VALID: SmartList[] = ['inbox', 'anytime', 'someday', 'logbook'];
 const NAV: Record<string, TranslationKey> = {
@@ -28,6 +29,7 @@ export default function ListScreen() {
   const theme = useTheme();
   const { t, locale } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const today = todayLocalISO();
@@ -50,7 +52,7 @@ export default function ListScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <StackHeader title={t(NAV[list])} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} showsVerticalScrollIndicator={false}>
         {tasks.length === 0 ? (
           <EmptyState text={t(EMPTY[list])} />
         ) : list === 'logbook' ? (

@@ -7,6 +7,7 @@ import { EmptyState, ScreenHeader, SectionHeader } from '../../components/ui';
 import { HeaderActions } from '../../components/HeaderActions';
 import { TaskItems } from '../../components/TaskList';
 import { TabFab } from '../../components/TabFab';
+import { useColumnPadding } from '../../hooks/use-layout';
 import { useT } from '../../i18n';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
@@ -16,6 +17,7 @@ export default function TodayScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const setContext = useApp((s) => s.setContext);
@@ -30,7 +32,7 @@ export default function TodayScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <ScreenHeader title={t('nav.today')} right={<HeaderActions />} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} showsVerticalScrollIndicator={false}>
         {all.length === 0 ? (
           <EmptyState text={t('empty.today')} icon="star" />
         ) : (

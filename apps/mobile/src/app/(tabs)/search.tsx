@@ -10,6 +10,7 @@ import { TaskItems } from '../../components/TaskList';
 import { TabFab } from '../../components/TabFab';
 import { EmptyState, ListRow, ScreenHeader, SectionHeader } from '../../components/ui';
 import { searchReplica } from '../../lib/search';
+import { useColumnPadding } from '../../hooks/use-layout';
 import { useT } from '../../i18n';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
@@ -20,6 +21,7 @@ export default function SearchScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const setContext = useApp((s) => s.setContext);
@@ -47,7 +49,7 @@ export default function SearchScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <ScreenHeader title={t('nav.search')} right={<HeaderActions />} />
-      <View style={[styles.searchBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View style={[styles.searchBar, { backgroundColor: theme.surface, borderColor: theme.border, marginLeft: gutter + column.left, marginRight: gutter + column.right }]}>
         <Icon name="search" size={18} color={theme.textTertiary} strokeWidth={2} />
         <TextInput
           value={query}
@@ -68,6 +70,8 @@ export default function SearchScreen() {
             {
               borderColor: includeCompleted ? theme.accent : theme.border,
               backgroundColor: includeCompleted ? theme.accentWash : 'transparent',
+              marginLeft: gutter + column.left,
+              marginRight: gutter + column.right,
             },
           ]}
         >
@@ -83,7 +87,7 @@ export default function SearchScreen() {
         </Pressable>
       ) : null}
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {!q ? (
           <EmptyState text={t('empty.search')} icon="search" />
         ) : !hasResults ? (

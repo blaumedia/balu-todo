@@ -8,6 +8,7 @@ import { HeaderActions } from '../../components/HeaderActions';
 import { TaskItems } from '../../components/TaskList';
 import { TabFab } from '../../components/TabFab';
 import { dayMonth, weekdayLong } from '../../lib/format';
+import { useColumnPadding } from '../../hooks/use-layout';
 import { useT } from '../../i18n';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
@@ -17,6 +18,7 @@ export default function UpcomingScreen() {
   const theme = useTheme();
   const { t, locale } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const setContext = useApp((s) => s.setContext);
@@ -39,7 +41,7 @@ export default function UpcomingScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <ScreenHeader title={t('nav.upcoming')} right={<HeaderActions />} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} showsVerticalScrollIndicator={false}>
         {groups.length === 0 ? (
           <EmptyState text={t('empty.upcoming')} icon="calendar" />
         ) : (

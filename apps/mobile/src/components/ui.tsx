@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { useColumnPadding } from '../hooks/use-layout';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, hit, radius, space } from '../theme/tokens';
 import { Icon, type IconName } from './Icon';
@@ -7,8 +8,9 @@ import { Icon, type IconName } from './Icon';
 /** Large view title (DESIGN §3 display) with an optional right accessory. */
 export function ScreenHeader({ title, right }: { title: string; right?: ReactNode }) {
   const theme = useTheme();
+  const column = useColumnPadding();
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingLeft: gutter + column.left, paddingRight: gutter + column.right }]}>
       <Text style={[styles.title, { color: theme.textPrimary }]} numberOfLines={1}>
         {title}
       </Text>

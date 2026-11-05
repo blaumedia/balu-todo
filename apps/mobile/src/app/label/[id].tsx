@@ -8,10 +8,12 @@ import { EmptyState } from '../../components/ui';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
 import { useTheme } from '../../theme/ThemeProvider';
 import { projectHex } from '../../theme/tokens';
+import { useColumnPadding } from '../../hooks/use-layout';
 
 export default function LabelScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const today = todayLocalISO();
@@ -25,7 +27,7 @@ export default function LabelScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <StackHeader title={label ? `@${label.name}` : ''} colorDot={projectHex(label?.color)} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} showsVerticalScrollIndicator={false}>
         {tasks.length === 0 ? <EmptyState text="-" icon="tag" /> : <TaskItems tasks={tasks} maps={maps} today={today} />}
       </ScrollView>
     </View>

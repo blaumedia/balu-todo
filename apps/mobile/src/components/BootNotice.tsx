@@ -23,7 +23,7 @@ export function BootNotice() {
   return (
     <View
       accessibilityRole="alert"
-      style={[StyleSheet.absoluteFill, styles.wrap, { backgroundColor: theme.bg, paddingTop: insets.top, paddingBottom: insets.bottom }]}
+      style={[StyleSheet.absoluteFill, styles.wrap, { backgroundColor: theme.bg, paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: space.s6 + insets.left, paddingRight: space.s6 + insets.right }]}
     >
       {noWorkspace ? null : <ActivityIndicator color={theme.accent} />}
       <Text style={[styles.title, { color: theme.textPrimary }]}>

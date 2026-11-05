@@ -28,6 +28,8 @@ import { clearExpectedAccessLoss, expectAccessLoss, getApi, purgeWorkspaceStorag
 import { landAfterDelete, logout, switchWorkspace } from '../lib/boot';
 import { chooseLocale } from '../lib/localeChoice';
 import { requestReminderPermission, startReminderScheduler, stopReminderScheduler } from '../lib/notifications';
+import { useColumnPadding } from '../hooks/use-layout';
+import { FORM_MAX_WIDTH } from '../lib/layout';
 import { useT } from '../i18n';
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
@@ -47,6 +49,7 @@ export default function SettingsScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding(FORM_MAX_WIDTH);
   const keyboardReveal = useKeyboardReveal();
   const user = useApp((s) => s.user);
   const workspace = useApp((s) => s.workspace);
@@ -256,7 +259,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
-      <StackHeader title={t('settings.title')} backFallback="/today" />
+      <StackHeader title={t('settings.title')} backFallback="/today" maxWidth={FORM_MAX_WIDTH} />
       <ScrollView
         ref={keyboardReveal.ref}
         onScroll={keyboardReveal.onScroll}
@@ -264,7 +267,7 @@ export default function SettingsScreen() {
         onTouchEnd={keyboardReveal.onTouchEnd}
         onTouchCancel={keyboardReveal.onTouchCancel}
         scrollEventThrottle={keyboardReveal.scrollEventThrottle}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingLeft: gutter + column.left, paddingRight: gutter + column.right }]}
         keyboardShouldPersistTaps="handled"
         // iOS only: keeps the inline delete confirmation above the keyboard.
         // Android ignores this prop, and with mandatory edge-to-edge (SDK 54) its

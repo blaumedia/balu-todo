@@ -11,6 +11,7 @@ import { StackHeader } from '../../components/StackHeader';
 import { TaskItems } from '../../components/TaskList';
 import { EmptyState, SectionHeader } from '../../components/ui';
 import { useWritable } from '../../hooks/use-my-role';
+import { useColumnPadding } from '../../hooks/use-layout';
 import { useT } from '../../i18n';
 import { deleteSection, updateProject } from '../../lib/actions';
 import { goBackOr } from '../../lib/goBack';
@@ -24,6 +25,7 @@ export default function ProjectScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const today = todayLocalISO();
@@ -112,7 +114,7 @@ export default function ProjectScreen() {
         }
       />
       {project?.archived_at != null ? (
-        <View style={[styles.archivedBanner, { borderBottomColor: theme.border }]}>
+        <View style={[styles.archivedBanner, { borderBottomColor: theme.border, paddingLeft: gutter + column.left, paddingRight: gutter + column.right }]}>
           <Icon name="archive" size={16} color={theme.textTertiary} strokeWidth={2} />
           <Text style={[styles.archivedText, { color: theme.textSecondary }]}>{t('project.archived')}</Text>
           {writable ? (
@@ -122,7 +124,7 @@ export default function ProjectScreen() {
           ) : null}
         </View>
       ) : null}
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} showsVerticalScrollIndicator={false}>
         {openTasks.length === 0 && sections.length === 0 ? (
           <EmptyState text={t('empty.project')} />
         ) : (

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackHeader } from '../components/StackHeader';
 import { TaskItems } from '../components/TaskList';
 import { EmptyState } from '../components/ui';
+import { useColumnPadding } from '../hooks/use-layout';
 import { useT } from '../i18n';
 import { shouldLeaveAssigned } from '../lib/assigned';
 import { goBackOr } from '../lib/goBack';
@@ -17,6 +18,7 @@ export default function AssignedScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const snap = useSnapshot();
   const maps = useMaps(snap);
   const user = useApp((s) => s.user);
@@ -36,7 +38,7 @@ export default function AssignedScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.bg, paddingTop: insets.top }}>
       <StackHeader title={t('nav.assigned')} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]} showsVerticalScrollIndicator={false}>
         {tasks.length === 0 ? (
           <EmptyState text={t('empty.assigned')} icon="user-check" />
         ) : (

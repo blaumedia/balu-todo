@@ -14,6 +14,7 @@ import { useKeyboardReveal } from '../../hooks/use-keyboard-reveal';
 import { useWritable } from '../../hooks/use-my-role';
 import { addProject, updateProject } from '../../lib/actions';
 import { hapticDrop, hapticSelect } from '../../lib/haptics';
+import { useColumnPadding } from '../../hooks/use-layout';
 import { useT } from '../../i18n';
 import { useApp } from '../../store/app';
 import { useSnapshot } from '../../store/useSnapshot';
@@ -24,6 +25,7 @@ export default function BrowseScreen() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding();
   const keyboardReveal = useKeyboardReveal();
   const snap = useSnapshot();
   const setContext = useApp((s) => s.setContext);
@@ -205,7 +207,7 @@ export default function BrowseScreen() {
         ListHeaderComponent={header}
         ListFooterComponent={footer}
         containerStyle={styles.list}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingLeft: column.left, paddingRight: column.right }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       />

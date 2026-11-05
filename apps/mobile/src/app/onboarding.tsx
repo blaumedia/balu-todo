@@ -26,6 +26,8 @@ import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '.
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
+import { useColumnPadding } from '../hooks/use-layout';
+import { FORM_MAX_WIDTH } from '../lib/layout';
 
 // The form view whose bottom (its lowest button) must end up above the IME.
 interface RevealTarget {
@@ -37,6 +39,7 @@ export default function Onboarding() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding(FORM_MAX_WIDTH);
   const keyboardReveal = useKeyboardReveal({ topInset: insets.top });
   const serverUrl = useApp((s) => s.serverUrl);
   const setServerUrl = useApp((s) => s.setServerUrl);
@@ -47,7 +50,7 @@ export default function Onboarding() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} onTouchCancel={keyboardReveal.onTouchCancel} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} onTouchCancel={keyboardReveal.onTouchCancel} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24, paddingLeft: gutter + column.left, paddingRight: gutter + column.right }]} keyboardShouldPersistTaps="handled">
         <View style={styles.brand}>
           <LinearGradient colors={[theme.gradientFrom, theme.gradientTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logo}>
             <Icon name="check" size={34} color="#fff" strokeWidth={3} />
