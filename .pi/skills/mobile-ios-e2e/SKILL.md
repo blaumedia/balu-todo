@@ -35,7 +35,7 @@ way (replace the old step, do not append a variant).
 | `xcrun simctl spawn <udid> log stream` | Streams forever | `xcrun simctl spawn <udid> log show --last 2m --predicate 'process == "Balu"'` |
 | `xcrun simctl io <udid> recordVideo` | Runs until interrupted (wrote 0-byte files on Xcode 27.2) | Screenshots |
 | `xcrun simctl bootstatus <udid>` without `-b` | Waits forever on a sim nobody boots | `timeout 300 xcrun simctl bootstatus <udid> -b` (returned in seconds, 2026-11-05) |
-| `maestro test` without a timeout | Can wait on an element forever | `timeout 600 maestro test ...` (the helpers already wrap every call) |
+| `maestro test` without a timeout | Can wait on an element forever | a bounded call (the helpers bound every Maestro call internally, 90-180 s) |
 
 Wrap anything that waits on a device in `timeout` (GNU coreutils; on macOS
 `gtimeout` or `timeout` from coreutils). Long but finite commands (`pod install`,
@@ -97,7 +97,7 @@ architecture; without it x86_64 is built too and the build takes about twice as 
 `--no-install` stops prebuild from running `pod install` itself, so run it yourself (above).
 One build serves every simulator of the same architecture: install the same `.app` on the
 iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the end, as
-`apps/mobile/ios` is regenerated (and it existed before the run - note that in your report).
+`apps/mobile/ios` is regenerated (if it existed before your run, do not delete it; if you did, say so in your report).
 
 ## 5. Driving the UI
 
@@ -112,7 +112,9 @@ iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the e
   -> for `http://` a "Continue without encryption" button -> "Welcome back" login form.
   Log in with `tools/e2e/ios/login.py --udid "$UDID" owner`.
 - The login form has no accessibility labels for its inputs; `login.py` finds the two input
-  rows by geometry. The password goes through a temporary Maestro flow file that is deleted
+  rows by geometry: the first two single-line boxes below the "Welcome back" / "Willkommen zurück"
+  heading, at least 60 % of the screen width (verified on iPhone 17 portrait only; iPad, the Duo
+  cover screen and landscape are not verified yet). It submits with "Log in" or "Anmelden". The password goes through a temporary Maestro flow file that is deleted
   right after the run, never through argv or stdout. Use throwaway e2e accounts only.
 - iOS then shows a "Save Password?" sheet: `ui.py tap '^Not Now$'`.
 - Cold start check: `xcrun simctl terminate "$UDID" com.blaumedia.balu`, then `launch`. It
@@ -121,8 +123,15 @@ iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the e
 ### 5.2 Helper and Maestro
 
 Maestro writes typed text (`inputText`, so also passwords) verbatim into
-`~/.maestro/tests/<timestamp>/`. `ui.py` and `login.py` delete the log directories of each
-Maestro run they start; do the same if you call `maestro` directly.
+`~/.maestro/tests/<timestamp>/`. `ui.py` and `login.py` run `maestro test` with
+`--test-output-dir`, `--debug-output` and `--flatten-debug-output` pointing at a private
+`mktemp -d` directory (0700) that is removed after the call; do the same if you call
+`maestro test` directly (verified 2026-11-05, Maestro 2.12.0: nothing lands in
+`~/.maestro/tests`). `maestro hierarchy` has no such flag and writes a folder with
+`maestro.log` and an xctest runner log there; it types nothing and the logs held no node
+text. Maestro also writes `~/Library/Logs/maestro/<timestamp>_<pid>.zip` per run (checked:
+empty `maestro.log`, no typed text). Never delete folders there by "what is new": other
+agents run Maestro too.
 
 `tools/e2e/ios/ui.py --udid "$UDID" <cmd>`:
 
@@ -131,8 +140,9 @@ Maestro run they start; do the same if you call `maestro` directly.
 | `list [--full] [--all]` | visible nodes: `[x1,y1][x2,y2] 'label'`; `--all` adds unlabelled nodes, `--full` keeps long labels |
 | `has REGEX` / `tap REGEX [--nth N]` | match on the accessibility label; tap the centre |
 | `point X Y` / `swipe X1 Y1 X2 Y2 [MS]` | absolute points (402 x 874 pt on iPhone 17) |
-| `type TEXT` / `erase N` / `key NAME` / `hide-keyboard` | focused field; `key enter` submits quick add |
+| `type TEXT\|-` / `erase N` / `key NAME` / `hide-keyboard` | focused field; `key enter` submits quick add. `type` text is visible in `ps` and the transcript: **never pass secrets** (passwords go through `login.py`; `type -` reads stdin). Text containing `${` is rejected |
 | `shot OUT.png` | screenshot via simctl (save under /tmp, cite the path) |
+| `screen-size` | width and height in points |
 
 - `maestro hierarchy` gives labels, bounds, enabled, checked, selected and focused, but **no
   class names**. Select by label or by geometry.
@@ -143,8 +153,8 @@ Maestro run they start; do the same if you call `maestro` directly.
   does).
 - Deep links: `xcrun simctl openurl "$UDID" 'balu://settings'`. The first call shows an
   "Open in Balu?" dialog: `ui.py tap '^Open$'`. Verified: Settings opens, Back returns to Today.
-- Screenshot paths: always the portrait framebuffer. Do not open PNGs in the agent (text only);
-  judge the layout from the hierarchy bounds.
+- Screenshot paths: always the portrait framebuffer. Judge the layout from the hierarchy
+  bounds first; open a PNG only for the checks in section 7.
 
 ### 5.3 Gestures (verified on iPhone 17, 2026-11-05)
 
@@ -207,11 +217,11 @@ fix before you mark it clean.
 ```sh
 xcrun simctl shutdown "$UDID"; xcrun simctl delete "$UDID"      # only YOUR simulators
 rm -rf /tmp/$ME-dd /tmp/$ME-udid
-rm -rf ~/.maestro/tests/<your run folders>   # Maestro keeps a folder per run; delete yours (typed text)
+rm -rf "$MAESTRO_OUT"                       # only if you called `maestro test` yourself with --test-output-dir
 cd apps/mobile && git checkout package.json && rm -rf ios .expo
 tools/e2e/stack.sh purge                    # if you started the stack (also removes its state dir)
 ```
 
 Never `xcrun simctl shutdown all` / `delete all` / `erase all`, never quit Device Hub while
-other simulators may be in use, never delete DerivedData you did not create. Delete only
-the `~/.maestro/tests` folders written after your first Maestro call (name = timestamp).
+other simulators may be in use, never delete DerivedData you did not create. Never delete
+`~/.maestro/tests` folders by timestamp: other agents' runs live there too.

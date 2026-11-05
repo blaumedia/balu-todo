@@ -6,17 +6,20 @@
   ui.py --udid UDID tap REGEX [--nth N]       tap the centre of the N-th matching node
   ui.py --udid UDID point X Y                 tap absolute points
   ui.py --udid UDID swipe X1 Y1 X2 Y2 [MS]    swipe between absolute points (pt)
-  ui.py --udid UDID type TEXT                 type into the focused field (maestro inputText)
+  ui.py --udid UDID type TEXT|-               type into the focused field (maestro inputText);
+                                              `-` reads the text from stdin. TEXT is visible in ps
+                                              and transcripts: never pass secrets (login.py does)
+  ui.py --udid UDID key NAME                  press a key (maestro pressKey, e.g. enter)
   ui.py --udid UDID erase N                   delete N characters in the focused field
   ui.py --udid UDID hide-keyboard             dismiss the software keyboard (maestro hideKeyboard)
   ui.py --udid UDID shot OUT.png              screenshot via simctl
   ui.py --udid UDID screen-size               print width height in points
 
-Secure (password) fields are never printed. Every Maestro call is bounded by a
-timeout (the process group is killed on expiry) and runs a generated flow in a temp
-dir that is removed again. Maestro logs typed text, so the new run directories under
-~/.maestro/tests are deleted after each call. The UDID comes from the caller
-(`xcrun simctl create`), never from this script.
+Node values are never printed, only labels, bounds and state. Every Maestro call is bounded
+by a timeout (the process group is killed on expiry, SIGINT or SIGTERM) and runs a generated
+flow in a temp dir that is removed again. Maestro logs typed text, so its test output and
+debug output go to a private temp dir that is removed after each call. The UDID comes from
+the caller (`xcrun simctl create`), never from this script.
 """
 from __future__ import annotations
 
@@ -31,41 +34,70 @@ import sys
 import tempfile
 
 TIMEOUT = 120
-MAESTRO_LOGS = os.path.join(os.path.expanduser("~"), ".maestro", "tests")
+
+
+_CHILDREN: set[int] = set()
+
+
+def _killpg(pid: int) -> None:
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _on_signal(signum: int, _frame: object) -> None:
+    """Forward SIGINT/SIGTERM to every child process group, then exit (finally blocks run)."""
+    for pid in list(_CHILDREN):
+        _killpg(pid)
+    raise SystemExit(128 + signum)
 
 
 def run(args: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:
-    """Run args with a hard timeout; on expiry kill the whole process group."""
+    """Run args with a hard timeout; on expiry, signal or interrupt kill the whole process group."""
     p = subprocess.Popen(
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
     )
+    _CHILDREN.add(p.pid)
     try:
         out, err = p.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
+    except BaseException as exc:
+        _killpg(p.pid)
         try:
-            os.killpg(p.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        p.communicate()
-        raise SystemExit(f"{os.path.basename(args[0])} timed out after {timeout}s") from None
+            p.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            # a descendant left the group and still holds the pipes: give up on them
+            for f in (p.stdout, p.stderr):
+                if f:
+                    f.close()
+            p.wait(timeout=10)
+        if isinstance(exc, subprocess.TimeoutExpired):
+            raise SystemExit(f"{os.path.basename(args[0])} timed out after {timeout}s") from None
+        raise
+    finally:
+        _CHILDREN.discard(p.pid)
     return subprocess.CompletedProcess(args, p.returncode, out, err)
 
 
-def _log_dirs() -> set[str]:
-    try:
-        return {e.path for e in os.scandir(MAESTRO_LOGS) if e.is_dir()}
-    except FileNotFoundError:
-        return set()
-
-
 def maestro(args: list[str], timeout: int) -> subprocess.CompletedProcess:
-    """Run maestro, then delete the log dirs this run created (they contain typed text)."""
-    before = _log_dirs()
+    """Run maestro with all of its output in a private temp dir that is removed afterwards.
+
+    Maestro logs typed text (inputText) verbatim, so `maestro test` gets --test-output-dir and
+    --debug-output pointing at a per-call mkdtemp() (0700). Nothing is deleted by guessing
+    which folders in ~/.maestro/tests are ours. Not redirectable: Maestro's own
+    ~/Library/Logs/maestro/<timestamp>_<pid>.zip (checked: its maestro.log is empty).
+    """
+    out_dir = tempfile.mkdtemp(prefix="balu-ios-maestro-")
+    cmd = ["maestro", *args]
+    if "test" in args:
+        i = cmd.index("test") + 1
+        cmd[i:i] = [
+            "--test-output-dir", out_dir, "--debug-output", out_dir, "--flatten-debug-output",
+        ]
     try:
-        return run(["maestro", *args], timeout=timeout)
+        return run(cmd, timeout=timeout)
     finally:
-        for d in _log_dirs() - before:
-            shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 def hierarchy(udid: str) -> dict:
@@ -96,8 +128,6 @@ def flatten(node: dict, out: list[dict], depth: int = 0) -> None:
         "selected": a.get("selected") == "true",
         "checked": a.get("checked") == "true",
         "focused": a.get("focused") == "true",
-        "secure": "true" in (a.get("password"), a.get("isSecure"), a.get("secure")),
-        "class": a.get("class", ""),
         "depth": depth,
     })
     for c in node.get("children", []) or []:
@@ -114,15 +144,26 @@ def center(b: tuple[int, int, int, int]) -> tuple[int, int]:
     return (b[0] + b[2]) // 2, (b[1] + b[3]) // 2
 
 
-def maestro_flow(udid: str, body: str) -> None:
+def screen_size(all_nodes: list[dict]) -> tuple[int, int]:
+    """Width and height in points of the first node with a non-empty frame (the window)."""
+    for n in all_nodes:
+        b = n["bounds"]
+        if b and b[2] > b[0] and b[3] > b[1]:
+            return b[2] - b[0], b[3] - b[1]
+    return 0, 0
+
+
+def maestro_flow(udid: str, body: str, quiet: bool = False, timeout: int = 180) -> int:
+    """Run a generated flow. quiet: return the rc and print no output (flows with secrets)."""
     with tempfile.TemporaryDirectory(prefix="balu-ios-ui-") as d:
         flow = os.path.join(d, "step.yaml")
         with open(flow, "w", encoding="utf-8") as f:
             f.write("appId: com.blaumedia.balu\n---\n" + body + "\n")
-        r = maestro(["--device", udid, "test", flow], timeout=180)
-        if r.returncode != 0:
-            tail = (r.stdout + r.stderr)[-400:]
-            raise SystemExit(f"maestro step failed rc={r.returncode}: {tail}")
+        r = maestro(["--device", udid, "test", flow], timeout=timeout)
+    if r.returncode != 0 and not quiet:
+        tail = (r.stdout + r.stderr)[-400:]
+        raise SystemExit(f"maestro step failed rc={r.returncode}: {tail}")
+    return r.returncode
 
 
 def main() -> int:
@@ -147,7 +188,7 @@ def main() -> int:
         p.add_argument(k, type=int)
     p.add_argument("ms", type=int, nargs="?", default=300)
     p = sub.add_parser("type")
-    p.add_argument("text")
+    p.add_argument("text", help="text to type, or - to read it from stdin (never pass secrets)")
     p = sub.add_parser("erase")
     p.add_argument("n", type=int)
     sub.add_parser("hide-keyboard")
@@ -157,30 +198,32 @@ def main() -> int:
     p.add_argument("out")
     sub.add_parser("screen-size")
     a = ap.parse_args()
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
 
     if a.cmd == "list":
         for n in nodes(a.udid):
-            if n["secure"] or not n["bounds"]:
+            if not n["bounds"]:
                 continue
             if not (n["label"] or n["value"] or n["hint"] or n["id"]) and not a.all:
                 continue
-            if not (n["enabled"] or a.all) and not a.full:
+            if not (n["enabled"] or a.all):
                 continue
             x1, y1, x2, y2 = n["bounds"]
             text = n["label"] if a.full else n["label"][:60]
             extra = " ".join(k for k in ("checked", "selected", "focused") if n[k])
-            print(f"[{x1},{y1}][{x2},{y2}] {text!r} {n['class']} {extra}".rstrip())
+            print(f"[{x1},{y1}][{x2},{y2}] {text!r} {extra}".rstrip())
         return 0
     if a.cmd == "has":
         pat = re.compile(a.pattern)
-        ok = any(pat.search(n["label"]) for n in nodes(a.udid) if not n["secure"])
+        ok = any(pat.search(n["label"]) for n in nodes(a.udid))
         print("yes" if ok else "no")
         return 0 if ok else 1
     if a.cmd == "tap":
         pat = re.compile(a.pattern)
         hits = [
             n for n in nodes(a.udid)
-            if n["bounds"] and not n["secure"] and pat.search(n["label"])
+            if n["bounds"] and pat.search(n["label"])
         ]
         if len(hits) <= a.nth:
             raise SystemExit(f"NOT FOUND {a.pattern!r} (hits={len(hits)})")
@@ -199,14 +242,13 @@ def main() -> int:
         )
         return 0
     if a.cmd == "type":
-        # the text is never echoed by this script; maestro's own logs are cleaned in maestro()
-        with tempfile.TemporaryDirectory(prefix="balu-ios-type-") as d:
-            flow = os.path.join(d, "type.yaml")
-            with open(flow, "w", encoding="utf-8") as f:
-                f.write("appId: com.blaumedia.balu\n---\n- inputText: " + json.dumps(a.text) + "\n")
-            r = maestro(["--device", a.udid, "test", flow], timeout=120)
-        print("typed" if r.returncode == 0 else f"type failed rc={r.returncode}")
-        return r.returncode
+        # the text is never echoed by this script; maestro's own output goes to a temp dir
+        text = sys.stdin.read().rstrip("\n") if a.text == "-" else a.text
+        if "${" in text:
+            raise SystemExit("type: text containing '${' is evaluated by maestro; not supported")
+        rc = maestro_flow(a.udid, "- inputText: " + json.dumps(text), quiet=True, timeout=120)
+        print("typed" if rc == 0 else f"type failed rc={rc}")
+        return rc
     if a.cmd == "erase":
         maestro_flow(a.udid, f"- eraseText: {a.n}")
         return 0
@@ -221,9 +263,8 @@ def main() -> int:
         print("shot", a.out if r.returncode == 0 else r.stderr[-200:])
         return r.returncode
     if a.cmd == "screen-size":
-        root = hierarchy(a.udid)
-        b = parse_bounds(root["attributes"]["bounds"]) or (0, 0, 0, 0)
-        print(b[2], b[3])
+        w, h = screen_size(nodes(a.udid))
+        print(w, h)
         return 0
     return 2
 
