@@ -34,7 +34,8 @@ export default function TabsLayout() {
       <NativeTabs.Trigger name="browse">
         <NativeTabs.Trigger.Icon sf="square.stack.3d.up" />
         <NativeTabs.Trigger.Label>{t('nav.browse')}</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Badge hidden={inboxCount === 0}>{String(inboxCount)}</NativeTabs.Trigger.Badge>
+        {/* Rendered only with a count: a Badge with children ignores `hidden` and would show "0". */}
+        {inboxCount > 0 ? <NativeTabs.Trigger.Badge>{String(inboxCount)}</NativeTabs.Trigger.Badge> : null}
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="search">
         <NativeTabs.Trigger.Icon sf="magnifyingglass" />
