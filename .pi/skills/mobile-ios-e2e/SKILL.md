@@ -82,13 +82,17 @@ cd apps/mobile
 npx expo prebuild --platform ios --no-install   # verified 2026-11-05: clears and recreates ios/, rewrites package.json
 (cd ios && timeout 2400 pod install)            # foreground; prints harmless "added script phase" notes
 (cd ios && timeout 2400 xcodebuild -workspace Balu.xcworkspace -scheme Balu -configuration Release \
-  -sdk iphonesimulator -destination "id=$UDID" -derivedDataPath /tmp/$ME-dd build) > /tmp/$ME-build.log 2>&1
+  -sdk iphonesimulator -destination "id=$UDID" -derivedDataPath /tmp/$ME-dd \
+  ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build) > /tmp/$ME-build.log 2>&1
 grep -E '\*\* BUILD' /tmp/$ME-build.log          # "** BUILD SUCCEEDED **" (verified)
 APP=/tmp/$ME-dd/Build/Products/Release-iphonesimulator/Balu.app   # contains main.jsbundle (verified)
 xcrun simctl install "$UDID" "$APP"
 xcrun simctl launch "$UDID" com.blaumedia.balu
 git checkout package.json                       # prebuild rewrites it
 ```
+
+`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` (Apple Silicon) builds only the host simulator
+architecture; without it x86_64 is built too and the build takes about twice as long.
 
 `--no-install` stops prebuild from running `pod install` itself, so run it yourself (above).
 One build serves every simulator of the same architecture: install the same `.app` on the
@@ -115,6 +119,10 @@ iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the e
   lands on Today with the session kept (verified).
 
 ### 5.2 Helper and Maestro
+
+Maestro writes typed text (`inputText`, so also passwords) verbatim into
+`~/.maestro/tests/<timestamp>/`. `ui.py` and `login.py` delete the log directories of each
+Maestro run they start; do the same if you call `maestro` directly.
 
 `tools/e2e/ios/ui.py --udid "$UDID" <cmd>`:
 

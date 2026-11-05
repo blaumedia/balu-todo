@@ -181,6 +181,13 @@ Scripts: `android/ui.py` (list, tap, has, dump, swipe, scroll, state, type), `an
 `scroll up|down` (swipe computed from `wm size`). `login.py` sends the password to the
 device shell on stdin, so it is never in a host process argument list.
 
+## iOS simulator helpers
+
+`ios/ui.py` (list, tap, type, swipe, screenshot via `maestro hierarchy`) and `ios/login.py`
+(log in as an e2e role) are the iOS twins of `android/ui.py` and `android/login.py`. Usage,
+build and cleanup rules are in `.pi/skills/mobile-ios-e2e/SKILL.md`. They bound every Maestro
+call and delete the Maestro log directories of their runs, as those contain typed text.
+
 ## 7. What was deliberately not committed
 
 Earlier ad-hoc helpers were dropped:
