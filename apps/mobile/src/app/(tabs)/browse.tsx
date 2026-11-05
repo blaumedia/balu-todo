@@ -8,6 +8,7 @@ import { AndroidKeyboardSpacer } from '../../components/AndroidKeyboardSpacer';
 import { HeaderActions } from '../../components/HeaderActions';
 import { Icon } from '../../components/Icon';
 import { MoreButton } from '../../components/MoreButton';
+import { TabFab } from '../../components/TabFab';
 import { Divider, ListRow, ScreenHeader, SectionHeader } from '../../components/ui';
 import { useKeyboardReveal } from '../../hooks/use-keyboard-reveal';
 import { useWritable } from '../../hooks/use-my-role';
@@ -208,6 +209,7 @@ export default function BrowseScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       />
+      <TabFab />
     </View>
   );
 }

@@ -7,6 +7,7 @@ import { AndroidKeyboardSpacer } from '../../components/AndroidKeyboardSpacer';
 import { HeaderActions } from '../../components/HeaderActions';
 import { Icon } from '../../components/Icon';
 import { TaskItems } from '../../components/TaskList';
+import { TabFab } from '../../components/TabFab';
 import { EmptyState, ListRow, ScreenHeader, SectionHeader } from '../../components/ui';
 import { searchReplica } from '../../lib/search';
 import { useT } from '../../i18n';
@@ -129,6 +130,7 @@ export default function SearchScreen() {
         )}
         <AndroidKeyboardSpacer bottomInset={insets.bottom} />
       </ScrollView>
+      <TabFab />
     </View>
   );
 }

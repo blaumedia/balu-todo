@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EmptyState, ScreenHeader, SectionHeader } from '../../components/ui';
 import { HeaderActions } from '../../components/HeaderActions';
 import { TaskItems } from '../../components/TaskList';
+import { TabFab } from '../../components/TabFab';
 import { useT } from '../../i18n';
 import { useApp } from '../../store/app';
 import { useMaps, useSnapshot } from '../../store/useSnapshot';
@@ -44,6 +45,7 @@ export default function TodayScreen() {
           </>
         )}
       </ScrollView>
+      <TabFab />
     </View>
   );
 }

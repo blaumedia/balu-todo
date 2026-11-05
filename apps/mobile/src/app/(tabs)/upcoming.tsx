@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EmptyState, ScreenHeader, SectionHeader } from '../../components/ui';
 import { HeaderActions } from '../../components/HeaderActions';
 import { TaskItems } from '../../components/TaskList';
+import { TabFab } from '../../components/TabFab';
 import { dayMonth, weekdayLong } from '../../lib/format';
 import { useT } from '../../i18n';
 import { useApp } from '../../store/app';
@@ -50,6 +51,7 @@ export default function UpcomingScreen() {
           ))
         )}
       </ScrollView>
+      <TabFab />
     </View>
   );
 }
