@@ -102,6 +102,11 @@ function DetailBody({
   const scrollToComposer = () => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
+  const notesY = useRef(0);
+  // Same reason as the composer: the keyboard pads the sheet but the ScrollView does not follow.
+  const scrollToNotes = () => {
+    setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, notesY.current - space.s4), animated: true }), 300);
+  };
 
   // A role drop must not leave an unsaved draft behind: it would show as if
   // kept and be committed by the next blur after a promotion back to writer.
@@ -440,6 +445,10 @@ function DetailBody({
         placeholderTextColor={theme.textTertiary}
         style={[styles.notes, { color: theme.textPrimary }]}
         multiline
+        onFocus={scrollToNotes}
+        onLayout={(e) => {
+          notesY.current = e.nativeEvent.layout.y;
+        }}
       />
 
       {/* Task meta */}
