@@ -8,23 +8,31 @@
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
-        "simulator": false
+        "simulator": false,
+        "image": "sdk-58"
       },
       "node": "22.14.0"
     },
     "development-simulator": {
       "extends": "development",
       "ios": {
-        "simulator": true
+        "simulator": true,
+        "image": "sdk-58"
       }
     },
     "preview": {
       "distribution": "internal",
-      "node": "22.14.0"
+      "node": "22.14.0",
+      "ios": {
+        "image": "sdk-58"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "node": "22.14.0"
+      "node": "22.14.0",
+      "ios": {
+        "image": "sdk-58"
+      }
     }
   },
   "submit": {

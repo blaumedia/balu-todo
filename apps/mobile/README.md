@@ -1,6 +1,6 @@
 # @balu/mobile
 
-Balu's mobile app - Expo (SDK 54) + expo-router, sharing the exact contract and
+Balu's mobile app - Expo (SDK 58, React Native 0.88) + expo-router, sharing the exact contract and
 domain logic of the web client via the workspace packages `@balu/domain`,
 `@balu/nl-parser`, `@balu/sync-client`, and `@balu/api-client`.
 
@@ -135,11 +135,16 @@ Notes & limits:
 - **Native modules.** Everything used (expo-sqlite, expo-haptics, expo-crypto,
   expo-linear-gradient, react-native-svg, @react-native-community/datetimepicker,
   expo-notifications, reanimated, gesture-handler) ships inside Expo Go for SDK
-  57, so no custom dev build is required to try it. `expo-notifications` is used
+  58, so no custom dev build is required to try it. `expo-notifications` is used
   for **local** scheduling only.
 - **Monorepo Metro.** `metro.config.js` watches the workspace root, resolves
   from both node_modules trees, and remaps the `@balu/*` packages' `.js`
   import specifiers onto their real `.ts` source (they ship raw TypeScript).
+- **React Native fetch.** metro.config.js sets EXPO_PUBLIC_USE_RN_FETCH=1: SDK 56+
+  makes expo/fetch the global fetch, and it rejects the {uri, name, type} FormData
+  parts the attachment upload sends.
+- **iOS toolchain.** Building iOS needs Xcode 27.1+, the minimum iOS is now 16.4,
+  and the EAS profiles use `image: sdk-58`.
 - **`crypto.randomUUID`.** Polyfilled at startup (`src/lib/polyfills.ts`) via
   expo-crypto because the sync client needs it and Hermes doesn't provide it.
 - **Not in v1** (per the plan): remote push notifications, widgets, share-sheet
@@ -154,6 +159,7 @@ pnpm --filter @balu/mobile typecheck        # tsc --noEmit - clean
 pnpm --filter @balu/mobile lint             # eslint (expo config) - clean
 pnpm --filter @balu/mobile test             # vitest - pure logic
 npx expo export --platform ios              # full Metro bundle
+npx expo export --platform android
 npx expo-doctor                             # project health
 ```
 
@@ -194,8 +200,8 @@ test/                      vitest - pure logic and hooks-free helpers (reminders
 
 - **"Project is incompatible with this version of Expo Go"** - the app must be on the
   same Expo SDK as the Expo Go app from the store. The store build lags new SDK
-  releases, so this repo pins the SDK Expo Go actually supports (currently **54** -
-  the App Store build has been 54.0.2 since Sep 2025; newer-SDK Expo Go builds are
+  releases, so this repo pins the SDK Expo Go actually supports (currently **58** -
+  the App Store build is 58.0.5 since 2026-10-22, checked via the iTunes lookup API; newer-SDK Expo Go builds are
   only distributed via expo.dev/go, and the store error message misleadingly says to
   "download the latest version"). If it happens again after an SDK bump here, update Expo Go; if Expo
   Go is behind, downgrade: set `"expo"` in `package.json` to the store-supported SDK,
