@@ -16,8 +16,9 @@ password row is looked up again and must carry the Password placeholder with no 
 keyboard must be down and the row centre on screen before the password tap; after the tap
 the keyboard must be up and the email row must still show the typed mail, else the password
 is not typed. (`focused` is always false for these inputs in the hierarchy, so it cannot be
-used.) Verified on iPhone 17 portrait (402 x 874 pt) only; iPad, the Duo cover screen and
-landscape use the same rule but are not verified yet.
+used.) Verified on iPhone 17 portrait (402 x 874 pt) before the keyboard-down and
+email-intact checks were added; those two are not device-verified yet. iPad, the Duo cover
+screen and landscape use the same rule but are not verified yet.
 """
 
 from __future__ import annotations
@@ -40,9 +41,7 @@ def input_rows(all_nodes: list[dict]) -> list[tuple[int, int, int, int]]:
     # the login form has no accessibility labels for its inputs (2026-11-05, iOS 27.2):
     # the two input rows are the single-line boxes below the heading, email above password
     width, _ = ui.screen_size(all_nodes)
-    heads = [
-        n["bounds"] for n in all_nodes if n["bounds"] and HEADING.search(n["label"])
-    ]
+    heads = [n["bounds"] for n in all_nodes if n["bounds"] and HEADING.search(n["label"])]
     if not (width and heads):
         raise SystemExit("login heading not found; open the login screen first")
     top = heads[0][3]
@@ -55,12 +54,7 @@ def input_rows(all_nodes: list[dict]) -> list[tuple[int, int, int, int]]:
         b = n["bounds"]
         if not (b and n["enabled"]) or b in labelled:
             continue
-        if (
-            (b[2] - b[0]) >= min_w
-            and 15 <= (b[3] - b[1]) <= 40
-            and b[1] >= top
-            and b not in rows
-        ):
+        if (b[2] - b[0]) >= min_w and 15 <= (b[3] - b[1]) <= 40 and b[1] >= top and b not in rows:
             rows.append(b)
     return sorted(rows, key=lambda b: b[1])
 
@@ -80,14 +74,11 @@ def keyboard_up(all_nodes: list[dict]) -> bool:
     """A key (single-character label) in the lower half of the screen: some field has focus."""
     _, height = ui.screen_size(all_nodes)
     return any(
-        len(n["label"]) == 1 and n["bounds"] and n["bounds"][1] > height / 2
-        for n in all_nodes
+        len(n["label"]) == 1 and n["bounds"] and n["bounds"][1] > height / 2 for n in all_nodes
     )
 
 
-def email_intact(
-    all_nodes: list[dict], row: tuple[int, int, int, int], mail: str
-) -> bool:
+def email_intact(all_nodes: list[dict], row: tuple[int, int, int, int], mail: str) -> bool:
     """The email row still shows exactly the typed mail (compared, never printed)."""
     return any(n["bounds"] == row and n["label"] == mail for n in all_nodes)
 
@@ -103,9 +94,7 @@ def main() -> int:
     ui.install_signal_handlers()
     rows = input_rows(ui.nodes(a.udid))
     if len(rows) != 2:
-        raise SystemExit(
-            f"expected exactly 2 input rows, found {len(rows)}; nothing typed"
-        )
+        raise SystemExit(f"expected exactly 2 input rows, found {len(rows)}; nothing typed")
     email_bounds = rows[0]
     email_xy = ui.center(email_bounds)
     body = (
@@ -122,9 +111,7 @@ def main() -> int:
     before = ui.nodes(a.udid)
     rows = input_rows(before)
     if len(rows) != 1 or not is_password_row(before, rows[0]):
-        raise SystemExit(
-            "password row not identified after the email; password not typed"
-        )
+        raise SystemExit("password row not identified after the email; password not typed")
     # a tap while the keyboard is still up (or on an off-screen row) would hit a key, and the
     # password would then go into the email field
     width, height = ui.screen_size(before)
@@ -135,9 +122,7 @@ def main() -> int:
     check = ui.nodes(a.udid)
     if not keyboard_up(check) or not email_intact(check, email_bounds, mail):
         raise SystemExit("password field not focused as expected; password not typed")
-    rc = ui.maestro_flow(
-        a.udid, f"- inputText: {json.dumps(pw)}\n- hideKeyboard", quiet=True
-    )
+    rc = ui.maestro_flow(a.udid, f"- inputText: {json.dumps(pw)}\n- hideKeyboard", quiet=True)
     if rc != 0:
         raise SystemExit(f"login flow failed rc={rc} (credentials not shown)")
     ui.maestro_flow(a.udid, '- tapOn:\n    text: "(Log in|Anmelden)"')

@@ -123,9 +123,15 @@ did, say so in your report).
   "Passwort" with no text. The keyboard must be down and the row centre on screen before the
   password tap; after the tap the keyboard must be up and the email row must still equal the
   typed mail (compared in-process), else the password is not typed. With a connected hardware
-  keyboard no on-screen keyboard appears, so login.py aborts safely there. `focused` is always false for these inputs. Verified end to end on iPhone 17
-  portrait, English ("Log in") and German ("Anmelden"), 2026-11-05; iPad, the Duo cover
-  screen and landscape are not verified yet. The password goes through a temporary Maestro
+  keyboard no on-screen keyboard appears, so login.py aborts safely there. `focused` is
+  always false for these inputs. Login was verified end to end on iPhone 17 portrait,
+  English ("Log in") and German ("Anmelden"), 2026-11-05, BEFORE the keyboard-down and
+  email-intact checks were added; those two checks are not device-verified yet (if login.py
+  now aborts every time, suspect them first). iPad, the Duo cover screen and landscape are
+  not verified yet.
+- If login.py aborts after typing the email, a rerun stops with "expected exactly 2 input
+  rows" (the email row now has a label): clear the field (tap it, `ui.py erase N`) or
+  terminate and relaunch the app, then rerun. The password goes through a temporary Maestro
   flow file that is deleted right after the run, never through argv or stdout. Use
   throwaway e2e accounts only.
 - iOS then shows a "Save Password?" sheet: `ui.py tap '^Not Now$'`.

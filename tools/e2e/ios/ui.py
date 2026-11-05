@@ -16,8 +16,8 @@
   ui.py --udid UDID screen-size               print width height in points
 
 Node values are never printed, only labels, bounds and state. Every Maestro call is bounded
-by a timeout (the process group is killed on expiry, SIGINT, SIGTERM or SIGHUP) and runs a generated
-flow in a temp dir that is removed again. Maestro logs typed text, so its test output and
+by a timeout (the process group is killed on expiry, SIGINT, SIGTERM or SIGHUP) and runs a
+generated flow in a temp dir that is removed again. Maestro logs typed text, so its test output and
 debug output go to a private temp dir that is removed after each call. The UDID comes from
 the caller (`xcrun simctl create`), never from this script.
 """
@@ -97,18 +97,14 @@ def run(args: list[str], timeout: int = TIMEOUT) -> subprocess.CompletedProcess:
             except subprocess.TimeoutExpired:
                 pass
         if isinstance(exc, subprocess.TimeoutExpired):
-            raise SystemExit(
-                f"{os.path.basename(args[0])} timed out after {timeout}s"
-            ) from None
+            raise SystemExit(f"{os.path.basename(args[0])} timed out after {timeout}s") from None
         raise
     finally:
         _CHILDREN.discard(p.pid)
     return subprocess.CompletedProcess(args, p.returncode, out, err)
 
 
-def maestro(
-    args: list[str], timeout: int, flow: str | None = None
-) -> subprocess.CompletedProcess:
+def maestro(args: list[str], timeout: int, flow: str | None = None) -> subprocess.CompletedProcess:
     """Run maestro with all of its output in a private temp dir that is removed afterwards.
 
     args are the global options (e.g. --device UDID) plus the subcommand for non-flow calls;
@@ -140,9 +136,7 @@ def maestro(
 def hierarchy(udid: str) -> dict:
     r = maestro(["--device", udid, "hierarchy"], timeout=90)
     if r.returncode != 0:
-        raise SystemExit(
-            f"maestro hierarchy failed rc={r.returncode}: {r.stderr[-300:]}"
-        )
+        raise SystemExit(f"maestro hierarchy failed rc={r.returncode}: {r.stderr[-300:]}")
     return json.loads(r.stdout)
 
 
@@ -234,9 +228,7 @@ def main() -> int:
         p.add_argument(k, type=int)
     p.add_argument("ms", type=int, nargs="?", default=300)
     p = sub.add_parser("type")
-    p.add_argument(
-        "text", help="text to type, or - to read it from stdin (never pass secrets)"
-    )
+    p.add_argument("text", help="text to type, or - to read it from stdin (never pass secrets)")
     p = sub.add_parser("erase")
     p.add_argument("n", type=int)
     sub.add_parser("hide-keyboard")
@@ -281,8 +273,7 @@ def main() -> int:
     if a.cmd == "swipe":
         maestro_flow(
             a.udid,
-            f'- swipe:\n    start: "{a.x1},{a.y1}"\n    end: "{a.x2},{a.y2}"\n'
-            f"    duration: {a.ms}",
+            f'- swipe:\n    start: "{a.x1},{a.y1}"\n    end: "{a.x2},{a.y2}"\n    duration: {a.ms}',
         )
         return 0
     if a.cmd == "type":
@@ -291,12 +282,8 @@ def main() -> int:
             raise SystemExit("type -: pipe the text in (stdin is a terminal)")
         text = sys.stdin.read().rstrip("\n") if a.text == "-" else a.text
         if "${" in text:
-            raise SystemExit(
-                "type: text containing '${' is evaluated by maestro; not supported"
-            )
-        rc = maestro_flow(
-            a.udid, "- inputText: " + json.dumps(text), quiet=True, timeout=120
-        )
+            raise SystemExit("type: text containing '${' is evaluated by maestro; not supported")
+        rc = maestro_flow(a.udid, "- inputText: " + json.dumps(text), quiet=True, timeout=120)
         print("typed" if rc == 0 else f"type failed rc={rc}")
         return rc
     if a.cmd == "erase":
