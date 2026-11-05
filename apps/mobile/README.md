@@ -178,7 +178,7 @@ src/
     _layout.tsx            providers, boot, global sheet overlays
     index.tsx              cold-start gate → onboarding | /today
     onboarding.tsx         server URL + login/register
-    (tabs)/                today · upcoming · browse · search (+ FAB)
+    (tabs)/                today · upcoming · browse · search; _layout.ios = NativeTabs (FAB per tab), _layout = JS tabs + rail from 600 dp (Android)
     project/[id].tsx       project view (sections, progress ring)
     list/[list].tsx        inbox · anytime · someday · logbook
     label/[id].tsx         label-filtered list
@@ -188,7 +188,7 @@ src/
                            DateField, ReminderField
   lib/                     clients, boot, kv (SQLite), actions, format, haptics,
                            notifications (local scheduler), reminderPlan (pure),
-                           search (pure)
+                           search (pure), layout (breakpoints, pure)
   store/                   zustand app store + replica snapshot hooks
   theme/                   design tokens (TS) + ThemeProvider
   i18n/                    de / en dictionaries
