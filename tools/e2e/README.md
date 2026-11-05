@@ -183,10 +183,11 @@ device shell on stdin, so it is never in a host process argument list.
 
 ### iOS simulator helpers
 
-`ios/ui.py` (list, tap and has via `maestro hierarchy`; type, swipe and key via generated Maestro flows; screenshots via `xcrun simctl io`) and `ios/login.py`
-(log in as an e2e role) are the iOS twins of `android/ui.py` and `android/login.py`. Usage,
-build and cleanup rules are in `.pi/skills/mobile-ios-e2e/SKILL.md`. They bound every Maestro
-call and keep Maestro's test output in a private temp dir that is removed afterwards, as it contains typed text.
+`ios/ui.py` (list, tap and has via `maestro hierarchy`; type, swipe and key via generated
+Maestro flows; screenshots via `xcrun simctl io`) and `ios/login.py` (log in as an e2e role)
+are the iOS twins of `android/ui.py` and `android/login.py`. Usage, build and cleanup rules
+are in `.pi/skills/mobile-ios-e2e/SKILL.md`. They bound every Maestro call and keep Maestro's
+test output in a private temp dir that is removed afterwards, as it contains typed text.
 
 ## 7. What was deliberately not committed
 

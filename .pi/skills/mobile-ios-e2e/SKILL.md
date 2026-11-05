@@ -97,7 +97,8 @@ architecture; without it x86_64 is built too and the build takes about twice as 
 `--no-install` stops prebuild from running `pod install` itself, so run it yourself (above).
 One build serves every simulator of the same architecture: install the same `.app` on the
 iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the end, as
-`apps/mobile/ios` is regenerated (if it existed before your run, do not delete it; if you did, say so in your report).
+`apps/mobile/ios` is regenerated (if it existed before your run, do not delete it; if you
+did, say so in your report).
 
 ## 5. Driving the UI
 
@@ -111,16 +112,28 @@ iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the e
 - Fresh install (verified 2026-11-05): "Connect to your server" -> type the URL -> Continue
   -> for `http://` a "Continue without encryption" button -> "Welcome back" login form.
   Log in with `tools/e2e/ios/login.py --udid "$UDID" owner`.
-- The login form has no accessibility labels for its inputs; `login.py` finds the two input
-  rows by geometry: the first two single-line boxes below the "Welcome back" / "Willkommen zurück"
-  heading, at least 60 % of the screen width (verified on iPhone 17 portrait only; iPad, the Duo
-  cover screen and landscape are not verified yet). It submits with "Log in" or "Anmelden". The password goes through a temporary Maestro flow file that is deleted
-  right after the run, never through argv or stdout. Use throwaway e2e accounts only.
+- The login form has no accessibility labels for its inputs. `login.py` finds the two input
+  rows by geometry: unlabelled single-line boxes below the "Welcome back" / "Willkommen
+  zurück" heading, at least 60 % of the screen width. The server chip above the email field
+  has the same shape but is labelled with the server URL, so labelled nodes are skipped
+  (without that the password would land in a plain visible field, found in review 2026-11-05).
+  Exactly two rows must be found, else nothing is typed. A filled input gets its text as a
+  label, so after the email the password row is the only unlabelled row left; it is looked up
+  again (the layout shifts after the keyboard hides), must carry the `hintText` "Password" /
+  "Passwort" with no text, and a keyboard must be up after the tap, else the password is not
+  typed. `focused` is always false for these inputs. Verified end to end on iPhone 17
+  portrait, English ("Log in") and German ("Anmelden"), 2026-11-05; iPad, the Duo cover
+  screen and landscape are not verified yet. The password goes through a temporary Maestro
+  flow file that is deleted right after the run, never through argv or stdout. Use
+  throwaway e2e accounts only.
 - iOS then shows a "Save Password?" sheet: `ui.py tap '^Not Now$'`.
 - Cold start check: `xcrun simctl terminate "$UDID" com.blaumedia.balu`, then `launch`. It
   lands on Today with the session kept (verified).
 
 ### 5.2 Helper and Maestro
+
+The helpers kill Maestro's process group on SIGINT, SIGTERM and SIGHUP and then clean up; a
+SIGKILL of the helper cannot be caught and leaves the Maestro JVM and the temp dir behind.
 
 Maestro writes typed text (`inputText`, so also passwords) verbatim into
 `~/.maestro/tests/<timestamp>/`. `ui.py` and `login.py` run `maestro test` with
@@ -131,7 +144,9 @@ Maestro writes typed text (`inputText`, so also passwords) verbatim into
 `maestro.log` and an xctest runner log there; it types nothing and the logs held no node
 text. Maestro also writes `~/Library/Logs/maestro/<timestamp>_<pid>.zip` per run (checked:
 empty `maestro.log`, no typed text). Never delete folders there by "what is new": other
-agents run Maestro too.
+agents run Maestro too. Every `list`, `has`, `tap`, `screen-size` and `login.py` call adds a
+hierarchy-only folder (no flow subfolder, about 20 KB, no typed text) to `~/.maestro/tests`;
+the machine owner may prune old ones while no Maestro run is active.
 
 `tools/e2e/ios/ui.py --udid "$UDID" <cmd>`:
 
