@@ -38,5 +38,8 @@ packageExtensions:
     dependencies:
       "@expo/config-plugins": "*"
 
+# expo-router: a late unmount must not unbind the imperative router after an Android activity
+# recreation (font scale / density change). When upgrading expo-router, check upstream first;
+# see apps/mobile/README.md "Troubleshooting" for how to re-check before dropping the patch.
 patchedDependencies:
   expo-router@58.0.30: patches/expo-router@58.0.30.patch

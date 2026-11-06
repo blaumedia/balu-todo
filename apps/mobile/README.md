@@ -198,6 +198,15 @@ test/                      vitest - pure logic and hooks-free helpers (reminders
 
 ## Troubleshooting
 
+- **expo-router patch** (`patches/expo-router@58.0.30.patch`): expo-router's imperative
+  router bridge unbinds the shared `router` on unmount even when a newer root has already
+  bound it, which an Android activity recreation (system font size or display size change)
+  triggers: the app then shows a blank start screen or crashes with "The imperative router
+  is unavailable before the first render has finished". A version bump makes `pnpm install`
+  fail on the patch. Before deleting the entry, check whether upstream fixed it, then on an
+  Android release build: cold start, wait ~8 s, `adb shell settings put system font_scale
+  1.3`; the app must land on Today (or onboarding), not a blank screen.
+
 - **"Project is incompatible with this version of Expo Go"** - the app must be on the
   same Expo SDK as the Expo Go app from the store. The store build lags new SDK
   releases, so this repo pins the SDK Expo Go actually supports (currently **58** -
