@@ -120,7 +120,11 @@ export function QuickAddSheet() {
         <TextInput
           key={inputEpoch}
           ref={inputRef}
-          autoFocus={open}
+          // Android: no autoFocus. It focuses the view at mount, before the window's IME focus has settled (first open
+          // after login or after the app returns to the front); the later focus() then does nothing because the view
+          // is already focused, and the IME never attaches: the field is focused with the keyboard up but takes no text
+          // (7 of 15 opens with autoFocus, 0 of 43 without, release build). The focus() timer above does the focusing.
+          autoFocus={open && Platform.OS !== 'android'}
           value={text}
           onChangeText={(v) => {
             // A hardware Return arrives here as a newline, not as an editor
