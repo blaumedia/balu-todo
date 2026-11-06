@@ -137,10 +137,10 @@ text: `ui.py`/`login.py` keep its output in a private `mktemp -d`; do the same f
 
 | Command | Use |
 |---|---|
-| `list [--full] [--all]` | visible nodes `[x1,y1][x2,y2] 'label'`; each prints twice (`awk 'NR%2==1'`); `--all` adds unlabelled nodes |
+| `list [--full] [--all]` | visible nodes `[x1,y1][x2,y2] 'label'`; some nodes print twice (iPad portrait top bar), others once (sidebar, Duo rail): do not dedupe with `awk 'NR%2==1'`, it drops lines; `--all` adds unlabelled nodes |
 | `has REGEX` / `tap REGEX [--nth N]` | match on the label, tap the centre. `NOT FOUND` = nothing tapped |
 | `point X Y` / `swipe X1 Y1 X2 Y2 [MS]` | absolute points (402 x 874 pt on iPhone 17) |
-| `type TEXT\|-` / `erase N` / `key NAME` / `hide-keyboard` | focused field; `key enter` submits quick add. Typed text is visible in `ps`: **never pass secrets** (`type -` reads stdin) |
+| `type TEXT\|-` / `erase N` / `key NAME` / `hide-keyboard` | focused field; `key enter` submits quick add (it hung to the 120 s timeout on iPad and Duo although the text landed: wrap it in `timeout`). Typed text is visible in `ps`: **never pass secrets** (`type -` reads stdin) |
 | `shot OUT.png` / `screen-size` | simctl screenshot (cite the path) / points |
 
 - `maestro hierarchy` gives labels, bounds, enabled, selected and focused, but **no class names**.
@@ -163,7 +163,9 @@ text: `ui.py`/`login.py` keep its output in a private `mktemp -d`; do the same f
 - **Tab labels differ by build:** classic bar `Upcoming, tab, 2 of 4`; NativeTabs `Upcoming`.
   Anchor on the prefix (`'^Upcoming'`) and check `list` after each tap: a missed tap silently
   leaves the old screen. Selected tab reads `Browse selected`. German: Heute, Demnächst,
-  Übersicht (Browse), Suche.
+  Übersicht (Browse), Suche. In the iPad sidebar and the Duo rail a row is a container labelled
+  with the tab name plus a nested icon labelled with the SF symbol name (`favorite`, `hdr`): read
+  the container, the symbol names are not a bug (2026-11-06).
 - **Date picker (Duo cover 2026-11-06):** the row `Deadline, None` -> tap `Deadline, Pick a date`
   -> `Date Picker` node -> day label. DB: `2026-11-12`. The row then reads `Deadline, Clear`:
   `^Deadline, Clear` -> DB NULL (verified). Reminder: `Remind me, Pick a date` opens a wheel

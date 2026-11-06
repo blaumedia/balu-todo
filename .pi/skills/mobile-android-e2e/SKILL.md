@@ -170,9 +170,9 @@ Dev client instead (only for hot reload): Metro in the background
   `ui.py tap '^Allow$'` (text, no `--desc`).
 - Screenshot: `adb exec-out screencap -p > /tmp/$ME-<name>.png`. Right after a rotation or `wm size` change
   it can write an empty file: retry in its own call (2026-11-06). Never open a PNG with `read`.
-- **Quick-add text is lost** (2026-11-06, 2 of 2 sessions): the focused EditText (`dumpsys input_method
-  | grep mInputShown=true`) showed only its hint, and neither `ui.py type` nor a raw `keyevent` reached it. `am force-stop` and
-  a relaunch fixed it; tap `Add task` again, then type.
+- Quick-add typed text never landing in a focused field (keyboard up, hint only) was an app bug, fixed
+  in 0bcf837 (autoFocus raced the window's IME focus). Repro loop if it returns: home, `am start`, open
+  quick add, type; with the bug ~1 in 2 opens were dead. `dumpsys input_method` cannot tell dead from healthy.
 - Quick-add: `keyevent 66` adds and keeps the sheet open. With the keyboard up, BACK hides it, the next
   BACK closes the sheet, and a third leaves the app (2026-11-06).
 - Sheet dismiss: the scrim is a full-screen `desc='Close'` node; tap a strip above the sheet or drag down
@@ -203,10 +203,11 @@ Dev client instead (only for hot reload): Metro in the background
   `tools/e2e/stack.sh psql -c "select title, notes from tasks"` after every close.
 - Inbox has no add button: quick-add without a project lands in Inbox. Projects: no `api.py` command (Browse, `New project`).
 - Attachment DATEI: use `Show roots` then `Downloads` (`adb push <file> /sdcard/Download/`); Recent does not show pushed files.
-- Language: change it in the app's Settings (`Deutsch` row), not the device locale (2026-11-06).
-- Font scale: `adb shell settings put system font_scale 2.0` resizes the rail live (2026-11-06). Check
-  `pidof <pkg>` after each change: once the process died with `The imperative router is unavailable before
-  the first render` (not reproduced in two retries).
+- Language: change it in the app's Settings (`Deutsch` row), not the device locale. After `pm clear` +
+  login it follows the account's server setting: match `Add task|Aufgabe hinzufügen` (2026-11-06).
+- Font scale: `adb shell settings put system font_scale 2.0` resizes the rail and the phone tab bar live
+  and recreates the activity (count `Running "main"` in logcat). A `uiautomator dump` right after it can
+  be empty for a few seconds: retry. The router crash on recreation is fixed by the expo-router patch.
 - Dark theme check (2026-11-06): `magick <png> -alpha off -crop 40x40+500+700 -format %[fx:mean] info:` gives ~0.08.
 - Drag (reorder): `input swipe` cannot do it. Use `input motionevent DOWN x y`, hold ~900 ms, stepped
   `MOVE` 0.1 s apart, then `UP`. Check `sort_order` in the DB.
