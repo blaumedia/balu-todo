@@ -24,6 +24,16 @@ describe('mergeConfigChanges', () => {
   it('handles a missing attribute', () => {
     expect(mergeConfigChanges(undefined).split('|').sort()).toEqual([...REQUIRED].sort());
   });
+  it('removes density from a template that has it, keeping the other flags in order', () => {
+    const merged = mergeConfigChanges('keyboard|density|uiMode').split('|');
+    expect(merged).not.toContain('density');
+    expect(merged.slice(0, 2)).toEqual(['keyboard', 'uiMode']);
+  });
+
+  it('rewrites a complete template that also carries density', () => {
+    expect(mergeConfigChanges([...REQUIRED, 'density'].join('|'))).toBe(REQUIRED.join('|'));
+    expect(mergeConfigChanges('density')).toBe(REQUIRED.join('|'));
+  });
 });
 
 describe('applyToManifest', () => {
@@ -38,12 +48,6 @@ describe('applyToManifest', () => {
     const m = manifestWith();
     applyToManifest(m);
     expect(flags(m)).not.toContain('density');
-  });
-
-  it('removes density from a template that has it, keeping the other flags in order', () => {
-    const merged = mergeConfigChanges('keyboard|density|uiMode').split('|');
-    expect(merged).not.toContain('density');
-    expect(merged.slice(0, 2)).toEqual(['keyboard', 'uiMode']);
   });
 
   it('throws when MainActivity is missing', () => {
