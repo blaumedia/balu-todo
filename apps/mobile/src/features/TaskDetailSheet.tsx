@@ -121,15 +121,16 @@ function DetailBody({
     root.measureInWindow((_rx, rootY, _rw, rootH) => {
       sv.measureInWindow((_sx, svY, _sw, svH) => {
         notes.measureInWindow((_x, y, _w, h) => {
+          if (!notes.isFocused()) return; // blurred while measuring: do not scroll for a field that lost focus
           // Android: the ScrollView layout may not have shrunk for the keyboard yet, so cap its bottom by the real keyboard top.
-          // While that layout is still stale the scroll may stop short, so it runs once more shortly after to catch up.
+          // While that layout is still stale the scroll may stop short, so it runs once more after the first animated scroll has finished.
           const bottom = visibleBottom(svY + svH, rootY + rootH, keyboardHeight.current);
           const delta = revealScrollDelta(y, h, space.s4, bottom, 0);
           if (delta > 0) {
             sv.scrollTo({ y: scrollY.current + delta, animated: true });
             if (catchUp) {
               clearTimeout(scrollTimer.current);
-              scrollTimer.current = setTimeout(() => revealNotes(false), 200);
+              scrollTimer.current = setTimeout(() => revealNotes(false), 400);
             }
           }
         });
@@ -500,6 +501,7 @@ function DetailBody({
         onChangeText={setNotes}
         onBlur={() => {
           notesPending.current = false;
+          clearTimeout(scrollTimer.current);
           commitNotes();
         }}
         placeholder={t('detail.notesPlaceholder')}
