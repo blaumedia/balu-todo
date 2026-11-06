@@ -41,6 +41,7 @@
     "plugins": [
       "expo-router",
       "expo-sqlite",
+      "./plugins/withConfigChanges",
       "@react-native-community/datetimepicker",
       [
         "expo-screen-orientation",
