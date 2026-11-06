@@ -160,7 +160,7 @@ Dev client instead (only for hot reload): Metro in the background
 - `cold.sh` is POSIX sh: `sh tools/e2e/android/cold.sh` (`python3 cold.sh` is a SyntaxError).
 - UI helper: `tools/e2e/android/ui.py list|tap|has|dump|swipe|scroll|state|type|desc`. `list` lines are
   `[x1,y1][x2,y2] ...`: `awk -F'[][,]' '{print $2,$3,$5,$6}'` gives x1 y1 x2 y2. Use `list --full` for
-  bounds without truncation. `dump FILE` masks password nodes; do not bypass it.
+  bounds without truncation. `dump FILE` masks password nodes; do not bypass it. A `uiautomator dump` that hangs (`timeout` exit 124) under host load of ~50-70 (2026-11-06) was cleared by `am force-stop <pkg>` and a relaunch; wrap `ui.py` calls in `timeout 90`. `ui.py type` refuses non-ASCII; raw `adb shell input text` with a German `ß` reached the field (2026-11-06).
 - `ui.py tap REGEX` matches `text`; add `--desc` for `content-desc`. Tabs with a badge read `3, Browse`
   (`ui.py tap '^(1, )?Browse$' --desc`). A language change changes the descriptions (Back reads `Zurück`).
 - Checkbox rows and switches have no text: find them in `dump` output (`checkable="true"`, or class
@@ -176,16 +176,13 @@ Dev client instead (only for hot reload): Metro in the background
 - Quick-add: `keyevent 66` adds and keeps the sheet open. With the keyboard up, BACK hides it, the next
   BACK closes the sheet, and a third leaves the app (2026-11-06).
 - Sheet dismiss: the scrim is a full-screen `desc='Close'` node; tap a strip above the sheet or drag down
-  (`input swipe 540 230 540 2200 300`). A plain BACK also closes a sheet with no keyboard up.
+  (`input swipe 540 230 540 2200 300`). A plain BACK also closes a sheet with no keyboard up, but wait 3 s before checking `ui.py list --full | grep -c "desc='Close'"`.
+  Never `ui.py tap` the scrim: its bounds cover the whole screen, so the tap hits the sheet's centre (a text field opens the spell menu, a row its picker) (2026-11-06).
 - Reminder (2026-11-06, EN): in the detail sheet the row is `desc='Remind me, Pick a date'`.
   1. Date cell `ui.py tap '^06 November 2026$' --desc`, then `OK` (`ui.py tap '^OK$'`).
-  2. Time: `Switch to text input mode` (`--desc`). The keyboard then moves the dialog up: re-dump
-     before each tap. Tap the hour field, `KEYCODE_MOVE_END`, two `KEYCODE_DEL`, `input text 06`;
-     same for minutes.
-  3. Tapping the AM field opens a `PopupWindow` with AM/PM: check `dumpsys window | grep mCurrentFocus`,
-     then tap `AM` inside the popup (`ui.py tap '^AM$'`). Without that the dialog stays under it.
-  4. `OK`. The row reads `Remind me, Today · 6:28 AM`; the DB stores UTC `reminder_at`.
-  Cancelling keeps the wrong date: `CANCEL` before reopening the picker.
+  2. Time: `Switch to text input mode` (`--desc`); the keyboard moves the dialog up, so re-dump before each tap. Hour and minute: tap the field, `KEYCODE_MOVE_END`, two `KEYCODE_DEL`, `input text 06`.
+  3. The AM field opens a `PopupWindow`: tap `AM` inside it (`ui.py tap '^AM$'`), or the dialog stays under it.
+  4. `OK`. The row reads `Remind me, Today · 6:28 AM`; the DB stores UTC `reminder_at`. To cancel a wrong date: `CANCEL` before reopening the picker.
 - Alarms (2026-11-06):
   - `adb shell dumpsys alarm | grep -A3 <pkg>`; the count of matching lines is two per alarm.
   - `am force-stop` removes all the app's alarms (0 after force-stop). The next launch re-arms them.
@@ -203,12 +200,11 @@ Dev client instead (only for hot reload): Metro in the background
   `tools/e2e/stack.sh psql -c "select title, notes from tasks"` after every close.
 - Inbox has no add button: quick-add without a project lands in Inbox. Projects: no `api.py` command (Browse, `New project`).
 - Attachment DATEI: use `Show roots` then `Downloads` (`adb push <file> /sdcard/Download/`); Recent does not show pushed files.
-- Language: change it in the app's Settings (`Deutsch` row), not the device locale. After `pm clear` +
-  login it follows the account's server setting: match `Add task|Aufgabe hinzufügen` (2026-11-06).
+- Language: change it in the app's Settings (`Deutsch` row), not the device locale. After `pm clear` + login it follows the account's server setting: match `Add task|Aufgabe hinzufügen` (2026-11-06).
 - Font scale: `adb shell settings put system font_scale 2.0` resizes the rail and the phone tab bar live
   and recreates the activity (count `Running "main"` in logcat). A `uiautomator dump` right after it can
   be empty for a few seconds: retry. The router crash on recreation is fixed by the expo-router patch.
-- Dark theme check (2026-11-06): `magick <png> -alpha off -crop 40x40+500+700 -format %[fx:mean] info:` gives ~0.08.
+- Dark theme (2026-11-06): a server-side theme change (`PATCH /me`) does NOT reach the app, which keeps a local setting. Pick `Dark` (`Dunkel`) in Settings with `ui.py tap '^Dark$' --desc`. Check: `magick <png> -alpha off -crop 200x200+700+1000 -format %[fx:mean] info:` gives ~0.08 dark, ~0.98 light.
 - Drag (reorder): `input swipe` cannot do it. Use `input motionevent DOWN x y`, hold ~900 ms, stepped
   `MOVE` 0.1 s apart, then `UP`. Check `sort_order` in the DB.
 - `api.py` changes show in the app after `api.py sync-probe` and a few seconds. Use `ui.py type` (not `input text`) for spaces.
