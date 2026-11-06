@@ -1,6 +1,7 @@
 import { selectList, todayLocalISO } from '@balu/domain';
 import { Tabs } from 'expo-router';
-import { Text, View, type ColorValue } from 'react-native';
+import { Label, useTheme as useNavTheme } from 'expo-router/react-navigation';
+import { View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fab } from '../../components/Fab';
 import { Icon, type IconName } from '../../components/Icon';
@@ -16,9 +17,13 @@ import { font, space } from '../../theme/tokens';
 
 export const unstable_settings = { anchor: 'today' };
 
+// The one label style: tabBarLabelStyle (bottom bar) and the rail label below.
+const tabLabelStyle = { fontSize: 11, fontWeight: font.weightMedium };
+
 // Android and web: the JS tabs. Bottom bar on phones exactly as before; from RAIL_MIN_WINDOW_WIDTH a navigation rail on the left, switched live when the window changes (rotation, unfold, multi-window). iOS uses _layout.ios.tsx (NativeTabs).
 export default function TabsLayout() {
   const theme = useTheme();
+  const { fonts } = useNavTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
   const openQuickAdd = useApp((s) => s.openQuickAdd);
@@ -33,12 +38,13 @@ export default function TabsLayout() {
       return <Icon name={name} size={size} color={color as string} strokeWidth={2} />;
     };
 
-  // Rail only: the navigator's own label is a single line with an ellipsis; this one wraps to two lines when a long
-  // (German) label still does not fit at a large font scale.
+  // Rail only: the navigator's own label (same component and theme font as the bottom bar), minus its one-line limit.
+  // Above the 176 dp cap of the rail a long label may break across two lines instead of ellipsizing (untested in practice).
+  // The navigator ignores tabBarLabelStyle for a function label, so tabLabelStyle is applied here.
   const railLabel = ({ color, children }: { color: ColorValue; children: string }) => (
-    <Text numberOfLines={2} style={{ color, fontSize: 11, fontWeight: font.weightMedium, textAlign: 'center' }}>
+    <Label tintColor={color} numberOfLines={2} style={[fonts.medium, tabLabelStyle]}>
       {children}
-    </Text>
+    </Label>
   );
 
   return (
@@ -49,7 +55,7 @@ export default function TabsLayout() {
             headerShown: false,
             tabBarActiveTintColor: theme.accent,
             tabBarInactiveTintColor: theme.textTertiary,
-            tabBarLabelStyle: { fontSize: 11, fontWeight: font.weightMedium },
+            tabBarLabelStyle: tabLabelStyle,
             // Phones: the defaults ('bottom', 'uikit'), unchanged. Rail: the navigator's own Material rail, so the
             // tab items (role, selected state, label, badge) are the same component as on the bottom bar.
             tabBarPosition: rail ? 'left' : 'bottom',
