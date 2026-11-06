@@ -40,6 +40,12 @@ describe('applyToManifest', () => {
     expect(flags(m)).not.toContain('density');
   });
 
+  it('removes density from a template that has it, keeping the other flags in order', () => {
+    const merged = mergeConfigChanges('keyboard|density|uiMode').split('|');
+    expect(merged).not.toContain('density');
+    expect(merged.slice(0, 2)).toEqual(['keyboard', 'uiMode']);
+  });
+
   it('throws when MainActivity is missing', () => {
     expect(() => applyToManifest({ application: [{ activity: [] }] })).toThrow(/MainActivity/);
     expect(() => applyToManifest({})).toThrow(/MainActivity/);

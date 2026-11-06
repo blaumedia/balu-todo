@@ -120,7 +120,7 @@ effect on this AVD base: do not use that route. Rotate with
 `adb shell settings put system user_rotation 1` (0 portrait, 1 landscape); set `user_rotation`
 again after the app has unlocked rotation. Check every screen in both orientations.
 Order matters (2026-11-06): set `accelerometer_rotation 0` before `user_rotation 1`. With it left at 1 the emulator follows its sensor (portrait) and the screen does not rotate, which looked like an app bug until the setting was checked.
-Verified tablet geometry at 1600x2560 px with `wm density 320` (800x1280 dp), 2026-11-06: rail 176 px wide (88 dp), tab items top-aligned under the status bar, content starts at x 176, FAB right edge at 1560 (right 20 dp); quick-add card 600 dp wide, centred right of the rail (x 144-744 dp); detail side sheet 560 dp (x 720-1280) in landscape. A 600 dp window (1200 px) gives a quick-add card that fills the area right of the rail (512 dp). Live `wm size` changes (1000x2560 = 500 dp, back to 1600x2560) keep the same pid and switch rail <-> bottom bar and card <-> bottom sheet without a restart; the typed text survives.
+Verified tablet geometry at 1600x2560 px with `wm density 320` (800x1280 dp), 2026-11-06: rail 176 px wide (88 dp at font scale 1.0; it grows with the font scale up to 176 dp, see `railWidth` in `layout.ts`), tab items top-aligned under the status bar, content starts at x 176, FAB right edge at 1560 (right 20 dp); quick-add card 600 dp wide, centred right of the rail (x 144-744 dp); detail side sheet 560 dp (x 720-1280) in landscape. A 600 dp window (1200 px) gives a quick-add card that fills the area right of the rail (512 dp). Live `wm size` changes (1000x2560 = 500 dp, back to 1600x2560) keep the same pid and switch rail <-> bottom bar and card <-> bottom sheet without a restart; the typed text survives.
 For a 7-inch window use `wm size 1200x1920` with `wm density 320` (600x960 dp); it is a rotation-allowed window (short side >= 600 dp).
 Android 12L+ large-screen letterboxing of portrait-manifest apps is off on a plain emulator;
 turn it on with `adb shell wm set-ignore-orientation-request true` to test a cold start held
@@ -176,12 +176,17 @@ Dev client instead (only when you need hot reload): Metro in the background
   `tools/e2e/stack.sh psql -c "select title, notes from tasks"`.
 - `uiautomator dump` lists views even when they are `importantForAccessibility="no-hide-descendants"`
   (it includes not-important views), so it cannot show TalkBack hiding; do not read it as a failure (2026-11-06).
-- The generated `MainActivity` `configChanges` lacks `density` (Expo template, SDK 58); the repo's
-  `plugins/withConfigChanges.js` adds it. Check after prebuild with
-  `grep -o 'configChanges="[^"]*"' android/app/src/main/AndroidManifest.xml`. To test: with a sheet open and text
-  typed, `wm size` below 600 dp, `wm density` change and rotation must keep the same pid and the text (2026-11-06). Take the pid with `adb shell pidof <package>` before and
-  after, and run `adb shell wm size reset` and `adb shell wm density reset` afterwards.
-  With `density` handled, a live `wm density 420` screenshot was byte-identical to a cold start at 420 (2026-11-06).
+- `configChanges`: the repo's `plugins/withConfigChanges.js` adds the size flags (screenSize,
+  smallestScreenSize, screenLayout, orientation, ...) and deliberately keeps `density` OUT. Check after
+  prebuild with `grep -o 'configChanges="[^"]*"' android/app/src/main/AndroidManifest.xml`. Test: with
+  a sheet open and text typed, `wm size` below 600 dp and back and a rotation keep the same pid and the
+  text; a `wm density` change recreates the activity (sheet reopens, typed quick-add text is lost) by
+  design. Take the pid with `adb shell pidof <package>` before and after; run `adb shell wm size reset`
+  and `adb shell wm density reset` afterwards (2026-11-06).
+- Handling `density` in-process broke layout: `wm size 1600x2560; wm density 320`, then `wm size reset;
+  wm density reset` back to back left the tab bar, FAB and header gear off screen (present in the dump,
+  bounds outside the screen) until a cold start; a 1 s gap or the reverse order did not. Check bounds,
+  not just presence, in dumps (2026-11-06).
 - Long-press drag (reorder): `adb shell input swipe` cannot do it. Use
   `adb shell input motionevent DOWN x y`, hold ~900 ms, several stepped `MOVE x y`, then
   `UP x y` (2026-11-05).

@@ -1,6 +1,8 @@
 import { selectList, todayLocalISO } from '@balu/domain';
-import { Tabs } from 'expo-router';
-import { Label, useTheme as useNavTheme } from 'expo-router/react-navigation';
+import { Tabs, useTheme as useNavTheme } from 'expo-router';
+// Label is deprecated in expo-router's react-navigation re-exports ("copy it into your codebase");
+// when a later SDK removes it, replace it with a local Text using the same numberOfLines, centring and tint.
+import { Label } from 'expo-router/react-navigation';
 import { View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fab } from '../../components/Fab';
