@@ -95,6 +95,8 @@ function Chrome() {
   const boot = useApp((s) => s.boot);
   const segments = useSegments();
   const navigationRef = useNavigationContainerRef();
+  // While a sheet is open TalkBack must not reach the screen behind it (accessibilityViewIsModal is iOS only).
+  const sheetOpen = useApp((s) => s.quickAddOpen || s.detailTaskId != null || s.scheduleTaskId != null || s.projectActionsId != null);
   // The single owner of leaving for onboarding once past the index gate (logout,
   // change server, expiry, a lost workspace, a cold deep link): those paths only set
   // boot 'onboarding'. The index gate owns the same step for segments [].
@@ -105,13 +107,15 @@ function Chrome() {
     <>
       <OrientationPolicy />
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="onboarding" />
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="project/[id]" />
-        <Stack.Screen name="settings" options={{ presentation: 'card' }} />
-      </Stack>
+      <View style={{ flex: 1 }} importantForAccessibility={sheetOpen ? 'no-hide-descendants' : 'auto'}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="onboarding" />
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="project/[id]" />
+          <Stack.Screen name="settings" options={{ presentation: 'card' }} />
+        </Stack>
+      </View>
       {/* Global, store-controlled overlays (Modals) above every screen. */}
       <QuickAddSheet />
       <TaskDetailSheet />
