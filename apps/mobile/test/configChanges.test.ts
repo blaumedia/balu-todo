@@ -27,10 +27,17 @@ describe('mergeConfigChanges', () => {
 });
 
 describe('applyToManifest', () => {
-  it('adds density to a MainActivity without the attribute', () => {
+  it('adds the size flags to a MainActivity without the attribute', () => {
     const m = manifestWith();
     applyToManifest(m);
-    expect(flags(m)).toContain('density');
+    expect(flags(m)).toEqual(expect.arrayContaining(['screenSize', 'smallestScreenSize', 'screenLayout', 'orientation']));
+  });
+
+  it('does not handle density: a live size + density pair needs the activity recreated', () => {
+    expect(REQUIRED).not.toContain('density');
+    const m = manifestWith();
+    applyToManifest(m);
+    expect(flags(m)).not.toContain('density');
   });
 
   it('throws when MainActivity is missing', () => {

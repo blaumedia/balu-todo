@@ -1,5 +1,5 @@
 // Pure merge logic of withConfigChanges (no Expo imports, so it can be unit-tested in plain node).
-const REQUIRED = ['keyboard', 'keyboardHidden', 'orientation', 'screenSize', 'smallestScreenSize', 'screenLayout', 'density', 'uiMode'];
+const REQUIRED = ['keyboard', 'keyboardHidden', 'orientation', 'screenSize', 'smallestScreenSize', 'screenLayout', 'uiMode'];
 
 /** `configChanges` value with every required flag present, existing ones kept in order; unchanged when complete. */
 function mergeConfigChanges(value) {

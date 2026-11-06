@@ -1,6 +1,9 @@
-// Expo's template lists most configChanges on MainActivity but not `density`. Without it a display
-// size change (fold, multi-window resize, `wm density`) recreates the activity and resets drafts and
-// open sheets. Appends whatever is missing, so a future template that has them all is left alone.
+// Makes sure MainActivity handles the window/size configuration changes itself (keyboard, orientation, screenSize, ...),
+// so a fold, rotation or multi-window resize switches the layout live instead of recreating the activity and
+// resetting drafts and open sheets. Appends whatever is missing, so a template that has them all is left alone.
+// `density` is deliberately NOT handled: a live `wm size` + `wm density` pair (or a display-size change that comes with
+// a size change) left the React surface laid out with the intermediate density (tab bar, FAB and header actions off
+// screen) until a cold start; letting Android recreate the activity on a density change avoids that.
 const { withAndroidManifest } = require('expo/config-plugins');
 const { applyToManifest } = require('./configChanges');
 
