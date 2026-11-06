@@ -119,8 +119,10 @@ did, say so in your report).
   hold since the labels were added). Exactly one empty email and one empty password input must
   be found, else nothing is typed. The keyboard must be down and the password input on screen
   before the password tap (the first `hideKeyboard` sometimes leaves the keyboard up: login.py
-  waits 1.5 s and asks again, at most twice); after the tap the keyboard must be up and the email input must
-  still hold the typed mail (compared in-process), else the password is not typed. With a
+  waits 1.5 s and asks again, at most twice); after the tap the keyboard must be up and the
+  email input must still hold the typed mail (compared in-process), else the password is not
+  typed. It also refuses to type unless the login heading is shown (the register form uses
+  the same input labels). With a
   connected hardware keyboard no on-screen keyboard appears, so login.py aborts safely there.
   `focused` is always false for these inputs. Verified end to end on iPhone 17 portrait,
   English ("Log in") and German ("Anmelden"), 2026-11-06, including the keyboard and
