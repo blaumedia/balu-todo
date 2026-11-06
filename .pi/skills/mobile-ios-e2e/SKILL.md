@@ -95,6 +95,8 @@ git checkout package.json                       # prebuild rewrites it
 architecture; without it x86_64 is built too and the build takes about twice as long.
 
 `--no-install` stops prebuild from running `pod install` itself, so run it yourself (above).
+
+**A second worktree (baseline build, 2026-11-06):** a worktree has no `node_modules`. A symlink to the main checkout's `node_modules` (root and `apps/mobile`) makes Metro fail with `Unable to resolve module ./../../../...` (the bundle entry resolves through the real path). Copy instead: `cp -cR <main>/node_modules ./node_modules` and `cp -cR <main>/apps/mobile/node_modules apps/mobile/node_modules` (APFS clones, seconds, little disk). Run `expo prebuild` there, then `git checkout -- apps/mobile/package.json` in that worktree. Remove the copies at cleanup (they are gitignored, so `git status` stays clean).
 One build serves every simulator of the same architecture: install the same `.app` on the
 iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the end, as
 `apps/mobile/ios` is regenerated (if it existed before your run, do not delete it; if you
@@ -104,7 +106,7 @@ did, say so in your report).
 
 ### 5.1 Backend and onboarding
 
-- Stack and seed (`tools/e2e/README.md` 2-3): `BALU_E2E_PORT=<port> tools/e2e/stack.sh up`,
+- Pick the port with `curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:<port>/healthz` (000 = free). `lsof` was unreliable here (hfs warnings, a port it called free was in use by another stack, 2026-11-06). `stack.sh up` refuses a port that answers. Stack and seed (`tools/e2e/README.md` 2-3): `BALU_E2E_PORT=<port> tools/e2e/stack.sh up`,
   then `BALU_E2E_PORT=<port> python3 tools/e2e/api.py setup --tasks 6`. `setup` reuses the
   accounts of an earlier run in the same state dir (409 is expected).
 - The simulator shares the host network: the server URL is `http://localhost:<port>`
@@ -126,7 +128,7 @@ did, say so in your report).
   connected hardware keyboard no on-screen keyboard appears, so login.py aborts safely there.
   `focused` is always false for these inputs. Verified end to end on iPhone 17 portrait,
   English ("Log in") and German ("Anmelden"), 2026-11-06, including the keyboard and
-  email-intact checks. iPad, the Duo cover screen and landscape are not verified yet.
+  email-intact checks. iPad 13" portrait and iPhone 17 Pro Max portrait were verified 2026-11-06 (English, `login.py owner` exit 0, Today reached). German login and the Duo cover screen are not verified yet; the iPad landscape was not driven (no rotation command in this run).
 - If login.py aborts after typing the email, a rerun stops with "inputs not empty": terminate
   and relaunch the app (the form resets), or clear the field (tap it, `ui.py erase N`), then
   rerun. The password goes through a temporary Maestro flow file that is deleted right after
@@ -186,6 +188,8 @@ the machine owner may prune old ones while no Maestro run is active.
 - **Dismiss a bottom sheet:** tap the dimmed strip just under the status bar, `point 200 65`
   (y < 54 is the iOS status bar, its taps never reach the app). A downward swipe did not
   close the task detail sheet, and the Schedule sheet was closed by a tap on the scrim at y 400.
+- **Notes and title drafts survive a scrim close (verified 2026-11-06, iPhone 17, iPhone 17 Pro Max, iPad 13" portrait):** type into "Add notes" or the title, then close with the scrim (`point 200 65` on the bottom sheet; `point 150 700` on the iPad side sheet, which is left of the sheet). `tools/e2e/stack.sh psql -c "select title, notes from tasks where ..."` held the typed text each time. Keep checking this after any sheet change.
+- **Tab labels differ by build:** the classic iOS tab bar (baseline build) exposes `Upcoming, tab, 2 of 4`; the NativeTabs bar (HEAD) exposes `Upcoming`. Anchor on the prefix (`'^Upcoming'`) and check `list` after each tap: a tap that matches nothing silently leaves the old screen, so a set of screenshots can be five copies of one screen (happened 2026-11-06).
 - **Date picker** (task detail): tap "Deadline, Pick a date", then the "Date Picker" node
   (opens the calendar), then the day label (`Thursday, 12. November`). The popover closes on
   the pick; the row reads "12 Nov" and the DB holds the date.
@@ -231,6 +235,8 @@ at every stage), task detail sheet. **Finding:** in the task detail sheet the "A
 editor (y 561-641) sits under the keyboard (top edge y 546) when focused, and the sheet
 does not move up. The quick-add sheet does move up. Check the detail sheet again after a
 fix before you mark it clean.
+
+Baseline pixel diff (2026-11-06, iPhone 17, HEAD vs baseline, same sim): `magick compare -metric AE` printed values above the pixel count in this ImageMagick (Q16-HDRI 7.1.2), so do not read them as pixels. Count instead: `magick a.png b.png -compose difference -composite -colorspace gray -threshold 6% -format '%[fx:mean*w*h]' info:`, and locate the differences with `-format '%@'` on horizontal bands of the mask. `xcrun simctl status_bar <udid> list` confirms the override is active; the Maestro hierarchy still reports the host clock, so judge the clock in a screenshot. Crop the tab bar off before comparing (the NativeTabs glass edge reaches a little above the bar, about y 2200 px at 3x).
 
 ## 8. Cleanup (always, also after a failure)
 
