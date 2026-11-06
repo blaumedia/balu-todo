@@ -1,5 +1,10 @@
 # Balu
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.png">
+  <img alt="Balu on an Android tablet, an iPad, an iPhone Duo, an iPhone and an Android phone" src="docs/screenshots/hero-light.png">
+</picture>
+
 A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 **The self-hostable todo app that feels like Things and syncs like Todoist.**
 
@@ -22,6 +27,13 @@ The same data, on the phone - the mobile apps are full clients, not a web view:
 | Today | Today, dark | Task detail |
 |---|---|---|
 | ![iOS Today, light](docs/screenshots/ios-today-light.png) | ![iOS Today, dark](docs/screenshots/ios-today-dark.png) | ![iOS task detail](docs/screenshots/ios-detail.png) |
+
+And on the big screens: iPad, the foldable iPhone Duo and Android tablets get a readable
+column, a side rail on Android, and the task detail as a side sheet next to the list.
+
+| iPad | iPhone Duo, unfolded | Android tablet |
+|---|---|---|
+| ![iPad, Today with the task detail side sheet](docs/screenshots/ipad-landscape.png) | ![iPhone Duo inner display, Today](docs/screenshots/duo-inner.png) | ![Android tablet, Today with the navigation rail and the task detail side sheet](docs/screenshots/android-tablet.png) |
 
 Point them at your own server on first launch - there is no account with us.
 [App Store](https://apps.apple.com/app/balu-private-todo-tasks/id6794310209) ·
