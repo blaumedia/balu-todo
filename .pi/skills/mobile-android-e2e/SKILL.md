@@ -112,14 +112,13 @@ export ANDROID_SERIAL=emulator-$PORT
 adb shell pm clear com.blaumedia.balutodo 2>/dev/null   # base AVD may carry a logged-in app
 ```
 
-**Tablet** *(unverified as of 2026-11-05 - confirm and remove this marker)*: the clone of the phone AVD can be turned into a tablet by editing its
-`config.ini` before the first boot: `hw.lcd.width=1600`, `hw.lcd.height=2560`,
-`hw.lcd.density=320` (10" tablet, ~800x1280 dp) or `1200`/`1920`/`320` (7", 600x960 dp), and
-`hw.initialOrientation=portrait`. Alternatively, on a booted phone emulator,
-`adb shell wm size 1600x2560 && adb shell wm density 320` (reset with `wm size reset` /
-`wm density reset`). Rotate with `adb shell settings put system accelerometer_rotation 0`
-then `adb shell settings put system user_rotation 1` (0 portrait, 1 landscape). Check every
-screen in both orientations.
+**Tablet** (verified 2026-11-06): on a booted phone emulator run
+`adb shell wm size 1600x2560 && adb shell wm density 320` (10" tablet, ~800x1280 dp; reset with
+`wm size reset` / `wm density reset`). Editing `hw.lcd.*` in the clone's `config.ini` had no
+effect on this AVD base: do not use that route. Rotate with
+`adb shell settings put system accelerometer_rotation 0` then
+`adb shell settings put system user_rotation 1` (0 portrait, 1 landscape). Check every screen
+in both orientations.
 
 ## 4. Build and install (release APK, no Metro)
 
@@ -127,6 +126,7 @@ screen in both orientations.
 cd apps/mobile
 npx expo prebuild --platform android                 # rewrites package.json, creates android/ and .expo/
 (cd android && ./gradlew :app:assembleRelease)       # foreground, bash timeout 2400 s
+# one ABI only: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a (~1.5 min, 2026-11-06)
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 git checkout package.json                            # unless the task changed it on purpose
 ```
@@ -150,6 +150,8 @@ Dev client instead (only when you need hot reload): Metro in the background
   `ui.py` for dumps (it masks password nodes). Never quote raw typed-text or log lines that
   could contain a password in a report.
 - Screenshot: `adb exec-out screencap -p > /tmp/$ME-<name>.png`, then look at it.
+  Right after a rotation or `wm size` change it can write an empty file: wait a moment and
+  retry (2026-11-06).
 - Avoid `%s` in quick-add text; use `ui.py type`.
 - Long-press drag (reorder): `adb shell input swipe` cannot do it. Use
   `adb shell input motionevent DOWN x y`, hold ~900 ms, several stepped `MOVE x y`, then

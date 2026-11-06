@@ -91,7 +91,7 @@ xcrun simctl launch "$UDID" com.blaumedia.balu
 git checkout package.json                       # prebuild rewrites it
 ```
 
-`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` (Apple Silicon) builds only the host simulator
+`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` (Apple Silicon; Release build verified 2026-11-06) builds only the host simulator
 architecture; without it x86_64 is built too and the build takes about twice as long.
 
 `--no-install` stops prebuild from running `pod install` itself, so run it yourself (above).
@@ -112,28 +112,23 @@ did, say so in your report).
 - Fresh install (verified 2026-11-05): "Connect to your server" -> type the URL -> Continue
   -> for `http://` a "Continue without encryption" button -> "Welcome back" login form.
   Log in with `tools/e2e/ios/login.py --udid "$UDID" owner`.
-- The login form has no accessibility labels for its inputs. `login.py` finds the two input
-  rows by geometry: unlabelled single-line boxes below the "Welcome back" / "Willkommen
-  zurück" heading, at least 60 % of the screen width. The server chip above the email field
-  has the same shape but is labelled with the server URL, so labelled nodes are skipped
-  (without that the password would land in a plain visible field, found in review 2026-11-05).
-  Exactly two rows must be found, else nothing is typed. A filled input gets its text as a
-  label, so after the email the password row is the only unlabelled row left; it is looked up
-  again (the layout shifts after the keyboard hides), must carry the `hintText` "Password" /
-  "Passwort" with no text. The keyboard must be down and the row centre on screen before the
-  password tap; after the tap the keyboard must be up and the email row must still equal the
-  typed mail (compared in-process), else the password is not typed. With a connected hardware
-  keyboard no on-screen keyboard appears, so login.py aborts safely there. `focused` is
-  always false for these inputs. Login was verified end to end on iPhone 17 portrait,
-  English ("Log in") and German ("Anmelden"), 2026-11-05, BEFORE the keyboard-down and
-  email-intact checks were added; those two checks are not device-verified yet (if login.py
-  now aborts every time, suspect them first). iPad, the Duo cover screen and landscape are
-  not verified yet.
-- If login.py aborts after typing the email, a rerun stops with "expected exactly 2 input
-  rows" (the email row now has a label): clear the field (tap it, `ui.py erase N`) or
-  terminate and relaunch the app, then rerun. The password goes through a temporary Maestro
-  flow file that is deleted right after the run, never through argv or stdout. Use
-  throwaway e2e accounts only.
+- The login inputs carry accessibility labels (`auth.email` / `auth.password`: "Email" /
+  "Password", German "E-Mail" / "Passwort"). `login.py` selects them by label. The label stays
+  when the input is filled: the typed text appears in the node's `value` and the placeholder
+  in `hint` (verified 2026-11-06; the earlier "filled input gets its text as label" does not
+  hold since the labels were added). Exactly one empty email and one empty password input must
+  be found, else nothing is typed. The keyboard must be down and the password input on screen
+  before the password tap (the first `hideKeyboard` sometimes leaves the keyboard up: login.py
+  waits and asks once more); after the tap the keyboard must be up and the email input must
+  still hold the typed mail (compared in-process), else the password is not typed. With a
+  connected hardware keyboard no on-screen keyboard appears, so login.py aborts safely there.
+  `focused` is always false for these inputs. Verified end to end on iPhone 17 portrait,
+  English ("Log in") and German ("Anmelden"), 2026-11-06, including the keyboard and
+  email-intact checks. iPad, the Duo cover screen and landscape are not verified yet.
+- If login.py aborts after typing the email, a rerun stops with "inputs not empty": terminate
+  and relaunch the app (the form resets), or clear the field (tap it, `ui.py erase N`), then
+  rerun. The password goes through a temporary Maestro flow file that is deleted right after
+  the run, never through argv or stdout. Use throwaway e2e accounts only.
 - iOS then shows a "Save Password?" sheet: `ui.py tap '^Not Now$'`.
 - Cold start check: `xcrun simctl terminate "$UDID" com.blaumedia.balu`, then `launch`. It
   lands on Today with the session kept (verified).
