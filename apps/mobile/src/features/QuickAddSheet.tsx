@@ -31,6 +31,8 @@ export function QuickAddSheet() {
   const [inputEpoch, setInputEpoch] = useState(0);
   const inputRef = useRef<TextInputInstance>(null);
   const lastSubmitAt = useRef(0);
+  // The 80 ms add-another focus timer in submit; cleared on close and unmount.
+  const refocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const today = todayLocalISO();
 
   // Refocus + clear each time the sheet opens (capture is sacred, DESIGN §1).
@@ -42,9 +44,14 @@ export function QuickAddSheet() {
       // text that a reopened composer would silently submit — remount too.
       if (Platform.OS === 'android') setInputEpoch((e) => e + 1);
       const timer = setTimeout(() => inputRef.current?.focus(), 250);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(refocusTimer.current);
+      };
     }
   }, [open]);
+
+  useEffect(() => () => clearTimeout(refocusTimer.current), []);
 
   // The role can drop while the sheet is open. Close it (the typed text is not
   // kept: the sheet clears on every open anyway). Unknown role stays open.
@@ -98,7 +105,8 @@ export function QuickAddSheet() {
     // then refocus so submit-and-add-another keeps the keyboard up.
     if (Platform.OS === 'android') {
       setInputEpoch((e) => e + 1);
-      setTimeout(() => inputRef.current?.focus(), 80);
+      clearTimeout(refocusTimer.current);
+      refocusTimer.current = setTimeout(() => inputRef.current?.focus(), 80);
     }
   };
 
@@ -123,7 +131,8 @@ export function QuickAddSheet() {
           // Android: no autoFocus. It focuses the view at mount, before the window's IME focus has settled (first open
           // after login or after the app returns to the front); the later focus() then does nothing because the view
           // is already focused, and the IME never attaches: the field is focused with the keyboard up but takes no text
-          // (7 of 15 opens with autoFocus, 0 of 43 without, release build). The focus() timer above does the focusing.
+          // (7 of 15 opens with autoFocus, 0 of 45 without, release build). The focus() timers do the focusing: the 250 ms one on open, the 80 ms
+          // one in submit after add-another.
           autoFocus={open && Platform.OS !== 'android'}
           value={text}
           onChangeText={(v) => {

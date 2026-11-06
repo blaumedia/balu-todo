@@ -19,10 +19,10 @@ import { font, space } from '../../theme/tokens';
 
 export const unstable_settings = { anchor: 'today' };
 
-// The one label style: tabBarLabelStyle (bottom bar) and the rail label below.
+// The one label style: tabBarLabelStyle (bottom bar), bottomLabel (bottom bar above font scale 1) and the rail label below.
 const tabLabelStyle = { fontSize: 11, fontWeight: font.weightMedium };
 
-// Android and web: the JS tabs. Bottom bar on phones exactly as before; from RAIL_MIN_WINDOW_WIDTH a navigation rail on the left, switched live when the window changes (rotation, unfold, multi-window). iOS uses _layout.ios.tsx (NativeTabs).
+// Android and web: the JS tabs. Bottom bar on phones exactly as before at font scale 1 or below (above it the bar grows, see bottomBarHeight); from RAIL_MIN_WINDOW_WIDTH a navigation rail on the left, switched live when the window changes (rotation, unfold, multi-window). iOS uses _layout.ios.tsx (NativeTabs).
 export default function TabsLayout() {
   const theme = useTheme();
   const { fonts } = useNavTheme();
