@@ -28,6 +28,13 @@ export const RAIL_MIN_WINDOW_WIDTH = 600;
 export const RAIL_WIDTH = 88;
 /** Upper bound of the rail width: 2x, the largest scale Android offers in Settings (labels wrap beyond that). */
 export const RAIL_MAX_WIDTH = 176;
+/** Height of the phone bottom tab bar above the bottom inset (react-navigation's uikit bar) at font scale 1 and below. */
+export const BOTTOM_BAR_HEIGHT = 49;
+/** Growth of the bar per unit of font scale above 1: one 11 sp label line (about 13 dp) plus 3 dp of air, which the label keeps at scale 1.
+ *  Measured at 2.0: with 14 the label ended flush with the bar bottom, so 16. */
+export const BOTTOM_BAR_LABEL_LINE = 16;
+/** FAB bottom offset above the inset on the phone bottom bar at font scale 1 (bar 49 + 15 gap). */
+export const FAB_BOTTOM_BAR_OFFSET = 64;
 /** Gap between the FAB and the bottom inset where no bottom bar sits under it (iOS tab screens, Android rail). */
 export const FAB_EDGE_GAP = 16;
 
@@ -64,6 +71,18 @@ export function showsNavRail(windowWidth: number): boolean {
 export function railWidth(fontScale: number): number {
   const scale = Number.isFinite(fontScale) ? fontScale : 1;
   return Math.min(RAIL_MAX_WIDTH, Math.max(RAIL_WIDTH, Math.round(RAIL_WIDTH * scale)));
+}
+
+/** Height of the phone bottom bar above the bottom inset. The label scales with the font, the icon does not, so the bar
+ *  grows by the extra label height only above scale 1; at 1 and below it is exactly BOTTOM_BAR_HEIGHT (unchanged phones). */
+export function bottomBarHeight(fontScale: number): number {
+  const scale = Number.isFinite(fontScale) ? fontScale : 1;
+  return BOTTOM_BAR_HEIGHT + (scale > 1 ? Math.ceil(BOTTOM_BAR_LABEL_LINE * (scale - 1)) : 0);
+}
+
+/** FAB bottom offset above the bottom inset on the phone bottom bar: it follows the bar height (64 at scale <= 1). */
+export function fabBottomBarOffset(fontScale: number): number {
+  return FAB_BOTTOM_BAR_OFFSET + bottomBarHeight(fontScale) - BOTTOM_BAR_HEIGHT;
 }
 
 /** Width the rail takes from the left window edge: railWidth(fontScale) plus the left inset it absorbs (cutout, left 3-button bar). 0 without a rail. */

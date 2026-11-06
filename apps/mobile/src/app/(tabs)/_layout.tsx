@@ -3,14 +3,14 @@ import { Tabs, useTheme as useNavTheme } from 'expo-router';
 // Label is deprecated in expo-router's react-navigation re-exports ("copy it into your codebase");
 // when a later SDK removes it, replace it with a local Text using the same numberOfLines, centring and tint.
 import { Label } from 'expo-router/react-navigation';
-import { View, type ColorValue } from 'react-native';
+import { useWindowDimensions, View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fab } from '../../components/Fab';
 import { Icon, type IconName } from '../../components/Icon';
 import { NavRailContext, useNavRailExtent } from '../../hooks/use-layout';
 import { useMyRole } from '../../hooks/use-my-role';
 import { useT } from '../../i18n';
-import { FAB_EDGE_GAP } from '../../lib/layout';
+import { bottomBarHeight, FAB_EDGE_GAP, fabBottomBarOffset } from '../../lib/layout';
 import { canQuickAddFromTabs } from '../../lib/role';
 import { useApp } from '../../store/app';
 import { useSnapshot } from '../../store/useSnapshot';
@@ -28,6 +28,7 @@ export default function TabsLayout() {
   const { fonts } = useNavTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const { fontScale } = useWindowDimensions();
   const openQuickAdd = useApp((s) => s.openQuickAdd);
   const role = useMyRole();
   const railExtent = useNavRailExtent();
@@ -49,6 +50,14 @@ export default function TabsLayout() {
     </Label>
   );
 
+  // Bottom bar above font scale 1 only: the label scales with the font but its item is a quarter of the width, so a long
+  // label ("Demnächst") would end in an ellipsis; shrink it to fit instead. Same component and style as the default label.
+  const bottomLabel = ({ color, children }: { color: ColorValue; children: string }) => (
+    <Label tintColor={color} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} style={[fonts.medium, tabLabelStyle]}>
+      {children}
+    </Label>
+  );
+
   return (
     <View style={{ flex: 1 }}>
       <NavRailContext.Provider value={railExtent}>
@@ -62,7 +71,7 @@ export default function TabsLayout() {
             // tab items (role, selected state, label, badge) are the same component as on the bottom bar.
             tabBarPosition: rail ? 'left' : 'bottom',
             tabBarVariant: rail ? 'material' : 'uikit',
-            tabBarLabel: rail ? railLabel : undefined,
+            tabBarLabel: rail ? railLabel : fontScale > 1 ? bottomLabel : undefined,
             tabBarLabelPosition: rail ? 'below-icon' : undefined, // below-icon keeps it a narrow rail, not a wide sidebar
             tabBarActiveBackgroundColor: rail ? 'transparent' : undefined, // tinted like the phone bar; a pill would span the whole rail
             tabBarStyle: rail
@@ -75,7 +84,12 @@ export default function TabsLayout() {
                   backgroundColor: theme.surface,
                   borderColor: theme.border,
                 }
-              : { backgroundColor: theme.surface, borderTopColor: theme.border },
+              : {
+                  backgroundColor: theme.surface,
+                  borderTopColor: theme.border,
+                  // Only above font scale 1: the default height (49 + inset) stays untouched, so phones at the default scale look as before.
+                  ...(fontScale > 1 ? { height: bottomBarHeight(fontScale) + insets.bottom } : null),
+                },
           }}
         >
           <Tabs.Screen name="today" options={{ title: t('nav.today'), tabBarIcon: icon('star') }} />
@@ -93,7 +107,7 @@ export default function TabsLayout() {
       </NavRailContext.Provider>
       {/* Hidden for read-only members; kept while the role is unknown (see canQuickAddFromTabs). */}
       {canQuickAddFromTabs(role) ? (
-        <Fab onPress={openQuickAdd} bottom={rail ? insets.bottom + FAB_EDGE_GAP : insets.bottom + 64} label={t('project.addTask')} />
+        <Fab onPress={openQuickAdd} bottom={rail ? insets.bottom + FAB_EDGE_GAP : insets.bottom + fabBottomBarOffset(fontScale)} label={t('project.addTask')} />
       ) : null}
     </View>
   );

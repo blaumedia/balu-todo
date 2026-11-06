@@ -7,6 +7,8 @@ import {
   RAIL_MAX_WIDTH,
   RAIL_WIDTH,
   railWidth,
+  bottomBarHeight,
+  fabBottomBarOffset,
   screenColumnPadding,
   sheetLayout,
   showsNavRail,
@@ -157,5 +159,23 @@ describe('sheetLayout', () => {
     for (const w of [360, 412, 599, 600, 800, 960, 1280]) {
       expect(showsNavRail(w)).toBe(sheetLayout(w, 0, 0, false).kind !== 'bottom');
     }
+  });
+});
+
+describe('bottomBarHeight / fabBottomBarOffset', () => {
+  it.each([
+    [0.85, 49, 64],
+    [1, 49, 64],
+    [1.15, 52, 67],
+    [1.3, 54, 69],
+    [2, 65, 80],
+    [Number.NaN, 49, 64],
+  ])('font scale %f -> bar %i, FAB offset %i', (scale, bar, fab) => {
+    expect(bottomBarHeight(scale)).toBe(bar);
+    expect(fabBottomBarOffset(scale)).toBe(fab);
+  });
+  it('is the unchanged phone bar at scale 1 and below, and never shrinks', () => {
+    for (let s = 0.5; s <= 1; s += 0.05) expect(bottomBarHeight(s)).toBe(49);
+    for (let s = 1; s <= 3; s += 0.05) expect(bottomBarHeight(s + 0.05)).toBeGreaterThanOrEqual(bottomBarHeight(s));
   });
 });
