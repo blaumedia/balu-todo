@@ -119,6 +119,9 @@ effect on this AVD base: do not use that route. Rotate with
 `adb shell settings put system accelerometer_rotation 0` then
 `adb shell settings put system user_rotation 1` (0 portrait, 1 landscape); set `user_rotation`
 again after the app has unlocked rotation. Check every screen in both orientations.
+Order matters (2026-11-06): set `accelerometer_rotation 0` before `user_rotation 1`. With it left at 1 the emulator follows its sensor (portrait) and the screen does not rotate, which looked like an app bug until the setting was checked.
+Verified tablet geometry at 1600x2560 px with `wm density 320` (800x1280 dp), 2026-11-06: rail 176 px wide (88 dp), tab items top-aligned under the status bar, content starts at x 176, FAB right edge at 1560 (right 20 dp); quick-add card 600 dp wide, centred right of the rail (x 144-744 dp); detail side sheet 560 dp (x 720-1280) in landscape. A 600 dp window (1200 px) gives a quick-add card that fills the area right of the rail (512 dp). Live `wm size` changes (1000x2560 = 500 dp, back to 1600x2560) keep the same pid and switch rail <-> bottom bar and card <-> bottom sheet without a restart; the typed text survives.
+For a 7-inch window use `wm size 1200x1920` with `wm density 320` (600x960 dp); it is a rotation-allowed window (short side >= 600 dp).
 Android 12L+ large-screen letterboxing of portrait-manifest apps is off on a plain emulator;
 turn it on with `adb shell wm set-ignore-orientation-request true` to test a cold start held
 in landscape (2026-11-06).
@@ -148,9 +151,13 @@ Dev client instead (only when you need hot reload): Metro in the background
   `balu`; pick a port no other local stack uses). If another agent's e2e stack is running, use
   your own: `BALU_E2E_PROJECT=balu-e2e-<you> BALU_E2E_PORT=<free port>` (2026-11-06). Seed: `tools/e2e/api.py setup [--tasks N]`.
 - Server URL in the app: `http://10.0.2.2:<port>`.
-- Login: `tools/e2e/android/login.py ROLE` (password goes via stdin to the device shell). On
+- Login: `tools/e2e/android/login.py ROLE` (password goes via stdin to the device shell). Export the same `BALU_E2E_PROJECT` and `BALU_E2E_PORT` as the stack first, or it stops with `missing owner.pw in the state dir` (2026-11-06). On
   a fresh install enter the server URL first, and on an `http://` server confirm "Continue
   without encryption" before the login form appears (2026-11-05).
+- `cold.sh` is POSIX sh: run `sh tools/e2e/android/cold.sh`. `python3 cold.sh` is a SyntaxError (2026-11-06).
+- Tabs with a badge change their content-desc (the Browse tab reads `1, Browse`). Tap with `ui.py tap '^(1, )?Browse$' --desc`, or the tap reports `NOT FOUND` and the screen does not change (2026-11-06).
+- The Today row checkbox is an `android.widget.CheckBox` with no content-desc. `ui.py list` does not show it. Find it in a raw `uiautomator dump` (class `android.widget.CheckBox`, left edge < 137 px) and tap the centre of its bounds (2026-11-06). The task then leaves Today and the DB row gets `completed_at`.
+- Inbox: the Inbox screen has no add button. Create the inbox task from Today's quick-add without a project; it lands in Inbox and gives the Browse tab its `1, Browse` badge (2026-11-06).
 - UI: `tools/e2e/android/ui.py list|tap|has|dump|swipe|scroll|state|type|desc`. Do not bypass
   `ui.py` for dumps (it masks password nodes). Never quote raw typed-text or log lines that
   could contain a password in a report.
@@ -162,7 +169,7 @@ Dev client instead (only when you need hot reload): Metro in the background
 - Release builds still log `console.log` to logcat as `ReactNativeJS`
   (`adb logcat -d -s ReactNativeJS`), handy for a temporary debug value (remove it after).
 - Avoid `%s` in quick-add text; use `ui.py type`.
-- Quick-add sheet: the Return key (`keyevent 66`) adds and keeps the sheet open; BACK with no sheet open leaves the app to the launcher. Offline (`cmd connectivity airplane-mode enable`) tasks keep their temp id across an app restart and sync within ~45 s after disabling it (2026-11-06).
+- Quick-add sheet: the Return key (`keyevent 66`) adds and keeps the sheet open; BACK with no sheet open leaves the app to the launcher. With the keyboard up, the first BACK only hides the keyboard; the second closes the sheet; a third leaves the app (2026-11-06). Offline (`cmd connectivity airplane-mode enable`) tasks keep their temp id across an app restart and sync within ~45 s after disabling it (2026-11-06).
 - Sheet dismiss taps (2026-11-06, phone 1080x2400): the scrim is one full-screen node `desc='Close'` (English UI only, it is `t('common.close')`);
   tap its visible strip above the sheet (e.g. y=100), a drag-down closes it with `input swipe 540 230 540 2200 300`.
   `adb shell input text` types into a focused field directly, but cannot handle spaces or `%s` (use `ui.py type`). Check stored values with
@@ -192,6 +199,7 @@ For each screen and each device/orientation you were asked to cover:
    interactive nodes overlap. A label at x beyond the screen width is a real bug (seen in
    TaskRow before, Yoga flexWrap).
 3. Open the keyboard on input screens: the input stays visible above it.
+4. Pixel diff against a baseline build (2026-11-06). Demo mode fixes the status bar so the clock does not differ: `adb shell settings put global sysui_demo_allowed 1`, then `am broadcast -a com.android.systemui.demo -e command enter` and `-e command clock -e hhmm 1000`, `battery`, `network`, `notifications -e visible false`; exit with `-e command exit`. Compare with `magick` after dropping alpha (`magick a.png -alpha off a2.png`), a difference composite, `-threshold 0` and `-format %[fx:mean*W*H]`. Plain `magick compare -metric AE` on RGBA PNGs returned counts above the pixel count here, so do not trust it. Check a second capture of the same screen against itself: a state still settling (a just-added row) can differ by a few thousand pixels that a repeat capture does not show.
 
 ## 7. Cleanup (always, also after a failure)
 
