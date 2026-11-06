@@ -62,13 +62,16 @@ xcrun simctl boot "$UDID" && timeout 300 xcrun simctl bootstatus "$UDID" -b
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100
 ```
 
-- The override did not show on the iPhone 17 or the iPad (2026-11-06): the clock was real time.
+- **Status bar (2026-11-07, iPhone 17 Pro Max, iPhone 17, iPad Pro 13, Duo, iOS 27.2):** `status_bar override` shows in `simctl status_bar list` and in the PNG (OCR with `tesseract` reads 09:41), while the `ui.py list` Toolbar label keeps the real clock. Judge the image, not the hierarchy. Re-apply after a Duo `open`/`rotate` (the clock was real again there).
 - **The iPhone Duo needs the second iOS 27.2 runtime build.** `iPhone-Duo` on
   `SimRuntime.iOS-27-2` fails with "Incompatible device" (2026-11-06); it works on
   `com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`.
 - Cover: a classic iPhone, the largest iPhone, an iPad 13", the Duo. Act only on your own UDIDs.
 - **iPad:** set full-screen apps multitasking in Settings, else a resize grip shows in
   screenshots. Set language per run (`-AppleLanguages`/`-AppleLocale`) if the status bar matters.
+  (2026-11-07: an iPad Pro 13 at default settings showed no resize grip in `list`.)
+- **Stack project name:** `stack.sh` refuses a name that does not start with `balu-e2e-`
+  (`balu-e2e-<your-run>`), so `BALU_E2E_PROJECT=balu-store-ios` fails at `up` (2026-11-07).
 
 ## 4. Build and install (Release, no Metro)
 
@@ -147,6 +150,11 @@ text: `ui.py`/`login.py` keep its output in a private `mktemp -d`; do the same f
   A rail item's label can be an SF symbol name when not selected (Duo rail: `favorite`, `calendar`,
   `hdr`; landscape iPad sidebar: `favorite`, `hdr`; 2026-11-06).
 - **The keyboard covers buttons.** `hide-keyboard` before tapping anything below y ~546 on iPhone.
+  2026-11-07: `hide-keyboard` and a tap on the sheet's hint row did NOT dismiss the quick-add keyboard
+  (iPhone 17 Pro Max); the chip stayed visible. Keep the keyboard in that shot or close the sheet.
+- **Hierarchy lag (2026-11-07, iPad Pro 13):** after login `ui.py list` showed only the status bar while
+  the Today list and the Save Password dialog were on screen. `tesseract` on a screenshot gave the button
+  position (`--psm 11 tsv`, pixels / 2 = points); `ui.py point` then worked.
 - Maestro's `swipeLeft`/`swipeRight` take no start/end: use `swipe`.
 - Deep link: `xcrun simctl openurl "$UDID" 'balu://settings'`; the "Open in Balu?" dialog: `ui.py tap '^Open$'`.
 
@@ -196,6 +204,8 @@ Verified 2026-11-06 on a Duo from section 3 (runtime build 19-4), `duoctl` 0.2.1
   `tap X Y`, `swipe X1 Y1 X2 Y2 [--duration]`, `long-press X Y` (interface points of the active
   screen); `screenshot PATH.png`. `--label`, `--id` and `elements` need the AXe CLI (not installed).
 - **Timing:** wait ~20 s after boot before the first `state`; wait ~4 s after `open` or `rotate`.
+- **Screenshots (2026-11-07):** `xcrun simctl io <udid> screenshot` fails on the Duo ("Cannot choose between 2 displays"). Use `duoctl -d <udid> screenshot PATH.png`: inner 2007 x 2853, cover 1398 x 2034.
+- **Inner screen listing:** after `open`/`rotate` the `ui.py list` rows were incomplete (top rows missing). Verify with the screenshot and `tesseract` (`--psm 3`), and tap with `duoctl tap` on the converted points (Heute (191, 899), Demnächst (287, 899), Übersicht (382, 899), FAB (619, 822) in portrait).
 - **Coordinates:** `ui.py list`/`tap` use one shared space where the cover is at (0,0)-(466,678)
   and the inner display is bottom-right aligned, origin `(466-w, 678-h)`: (-203,-273) in portrait
   and landscape. **Inner point = hierarchy point minus the root origin** (+203, +273 on inner).
