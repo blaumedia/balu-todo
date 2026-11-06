@@ -28,6 +28,7 @@ import {
 } from '../lib/collab';
 import { revealScrollDelta, visibleBottom } from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
+import { pendingDraftPatch } from '../lib/taskDraft';
 import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
 import { useMyRole } from '../hooks/use-my-role';
@@ -168,15 +169,29 @@ function DetailBody({
   }, [writable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A viewer must not write (the server rejects it).
-  const commitTitle = () => {
-    if (!writable) return;
-    const v = title.trim();
-    if (v && v !== task.title) updateTask(task.id, { title: v });
+  // What is stored (the task, or what a commit just wrote) and the latest draft, in refs so the commit can also
+  // run from the unmount cleanup below: closing the sheet (scrim tap, VoiceOver escape, drag-down) or opening another
+  // task (key remount) unmounts this body before the native blur arrives, so onBlur alone would drop the draft.
+  const saved = useRef({ title: task.title, notes: task.notes });
+  const latest = useRef({ title, notes, writable });
+  useEffect(() => {
+    saved.current = { title: task.title, notes: task.notes };
+  }, [task.id, task.title, task.notes]);
+  useEffect(() => {
+    latest.current = { title, notes, writable };
+  });
+  const commitDraft = () => {
+    const { writable: canEdit, ...draft } = latest.current;
+    const patch = pendingDraftPatch(draft, saved.current, canEdit);
+    if (!patch) return;
+    saved.current = { ...saved.current, ...patch };
+    updateTask(task.id, patch);
   };
-  const commitNotes = () => {
-    if (!writable) return;
-    if (notes !== task.notes) updateTask(task.id, { notes });
-  };
+  const commitDraftRef = useRef(commitDraft);
+  useEffect(() => {
+    commitDraftRef.current = commitDraft;
+  });
+  useEffect(() => () => commitDraftRef.current(), []);
 
   return (
     <>
@@ -199,7 +214,7 @@ function DetailBody({
           value={title}
           editable={writable}
           onChangeText={setTitle}
-          onBlur={commitTitle}
+          onBlur={commitDraft}
           style={[styles.titleInput, { color: theme.textPrimary }]}
           multiline
         />
@@ -501,7 +516,7 @@ function DetailBody({
         onChangeText={setNotes}
         onBlur={() => {
           notesPending.current = false;
-          commitNotes();
+          commitDraft();
         }}
         placeholder={t('detail.notesPlaceholder')}
         placeholderTextColor={theme.textTertiary}
