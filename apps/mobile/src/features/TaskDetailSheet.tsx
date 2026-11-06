@@ -28,7 +28,8 @@ import {
 } from '../lib/collab';
 import { revealScrollDelta, visibleBottom } from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
-import { pendingDraftPatch } from '../lib/taskDraft';
+import { mayCommitDraft, pendingDraftPatch } from '../lib/taskDraft';
+import { getSync } from '../lib/clients';
 import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
 import { useMyRole } from '../hooks/use-my-role';
@@ -53,6 +54,12 @@ export function TaskDetailSheet() {
   const snap = useSnapshot();
   const task = taskId ? snap.tasks.find((x) => x.id === taskId) : undefined;
 
+  // The task can vanish (deleted on another client, a reminder for a task that is gone) while its id is set; clear it
+  // so the store does not dangle, like ProjectActionsSheet. Only after a sync: before it the replica may still be empty.
+  useEffect(() => {
+    if (taskId && snap.hasSynced && (!task || task.is_deleted)) close();
+  }, [taskId, task, snap.hasSynced, close]);
+
   return (
     <BottomSheet visible={taskId != null && task != null} onClose={close} full>
       {task ? <DetailBody key={task.id} task={task} onClose={close} theme={theme} t={t} snap={snap} /> : null}
@@ -75,15 +82,34 @@ function DetailBody({
 }) {
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes);
+  const user = useApp((s) => s.user);
+  const myRole = useMyRole();
+  const writable = canWrite(myRole);
   const [showProjects, setShowProjects] = useState(false);
   const [showSections, setShowSections] = useState(false);
   const [showRecurrence, setShowRecurrence] = useState(false);
   const [showAssignee, setShowAssignee] = useState(false);
-  const user = useApp((s) => s.user);
+
+  // What is stored (the task, or what a commit just wrote) and the latest draft, in refs so the commit can also
+  // run from the unmount cleanup below: closing the sheet (scrim tap, VoiceOver escape, drag-down) or opening another
+  // task (key remount) unmounts this body before the native blur arrives, so onBlur alone would drop the draft.
+  const saved = useRef({ title: task.title, notes: task.notes });
+  const latest = useRef({ title, notes, writable });
+  // The client the sheet opened with and whether the draft was thrown away (Delete): both stop the unmount commit.
+  const openedWith = useRef(getSync());
+  const discarded = useRef(false);
+  latest.current.writable = writable;
+  // Every draft change goes through here so `latest` is current in the same step, not after the next render: an
+  // unmount in between must not see a stale draft and write it over a newer remote value.
+  const setDraft = (next: { title?: string; notes?: string }) => {
+    latest.current = { ...latest.current, ...next };
+    if (next.title !== undefined) setTitle(next.title);
+    if (next.notes !== undefined) setNotes(next.notes);
+  };
 
   useEffect(() => {
-    setTitle(task.title);
-    setNotes(task.notes);
+    saved.current = { title: task.title, notes: task.notes };
+    setDraft({ title: task.title, notes: task.notes });
   }, [task.id, task.title, task.notes]);
 
   const completed = task.completed_at != null;
@@ -98,8 +124,6 @@ function DetailBody({
   const members = snap.members.filter((m) => !m.is_deleted);
   const multiMember = members.length > 1;
   const assignee = task.assigned_to ? members.find((m) => m.id === task.assigned_to) : undefined;
-  const myRole = useMyRole();
-  const writable = canWrite(myRole);
   const scrollRef = useRef<ScrollViewInstance>(null);
   // The composer sits at the sheet's bottom — when it gains focus the keyboard
   // pads the sheet, but the ScrollView doesn't follow on its own.
@@ -162,28 +186,18 @@ function DetailBody({
   // A role drop must not leave an unsaved draft behind: it would show as if
   // kept and be committed by the next blur after a promotion back to writer.
   useEffect(() => {
-    if (!writable) {
-      setTitle(task.title);
-      setNotes(task.notes);
-    }
+    if (!writable) setDraft({ title: task.title, notes: task.notes });
   }, [writable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A viewer must not write (the server rejects it).
-  // What is stored (the task, or what a commit just wrote) and the latest draft, in refs so the commit can also
-  // run from the unmount cleanup below: closing the sheet (scrim tap, VoiceOver escape, drag-down) or opening another
-  // task (key remount) unmounts this body before the native blur arrives, so onBlur alone would drop the draft.
-  const saved = useRef({ title: task.title, notes: task.notes });
-  const latest = useRef({ title, notes, writable });
-  useEffect(() => {
-    saved.current = { title: task.title, notes: task.notes };
-  }, [task.id, task.title, task.notes]);
-  useEffect(() => {
-    latest.current = { title, notes, writable };
-  });
   const commitDraft = () => {
     const { writable: canEdit, ...draft } = latest.current;
     const patch = pendingDraftPatch(draft, saved.current, canEdit);
     if (!patch) return;
+    // Look the task up in the live replica: it may have been deleted meanwhile, or the workspace switched.
+    const sync = getSync();
+    const live = sync?.getSnapshot().tasks.find((x) => x.id === task.id);
+    if (!mayCommitDraft(live, sync === openedWith.current, discarded.current)) return;
     saved.current = { ...saved.current, ...patch };
     updateTask(task.id, patch);
   };
@@ -213,7 +227,7 @@ function DetailBody({
         <TextInput
           value={title}
           editable={writable}
-          onChangeText={setTitle}
+          onChangeText={(v) => setDraft({ title: v })}
           onBlur={commitDraft}
           style={[styles.titleInput, { color: theme.textPrimary }]}
           multiline
@@ -513,7 +527,7 @@ function DetailBody({
         ref={notesRef}
         value={notes}
         editable={writable}
-        onChangeText={setNotes}
+        onChangeText={(v) => setDraft({ notes: v })}
         onBlur={() => {
           notesPending.current = false;
           commitDraft();
@@ -545,6 +559,7 @@ function DetailBody({
         <Pressable
           style={styles.delete}
           onPress={() => {
+            discarded.current = true;
             deleteTask(task.id);
             onClose();
           }}

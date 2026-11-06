@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pendingDraftPatch } from '../src/lib/taskDraft';
+import { mayCommitDraft, pendingDraftPatch } from '../src/lib/taskDraft';
 
 // The detail sheet unmounts before the native blur arrives (scrim tap, VoiceOver escape,
 // drag-down, opening another task), so the unmount cleanup must commit what blur would have.
@@ -38,5 +38,25 @@ describe('pendingDraftPatch', () => {
 
   it('can clear notes', () => {
     expect(pendingDraftPatch({ title: 'Buy milk', notes: '' }, { title: 'Buy milk', notes: 'old' }, true)).toEqual({ notes: '' });
+  });
+});
+
+describe('mayCommitDraft', () => {
+  it('allows a live task on the same client', () => {
+    expect(mayCommitDraft({ is_deleted: false }, true, false)).toBe(true);
+  });
+
+  it('refuses a task that is missing or deleted (here or on another client)', () => {
+    expect(mayCommitDraft(undefined, true, false)).toBe(false);
+    expect(mayCommitDraft(null, true, false)).toBe(false);
+    expect(mayCommitDraft({ is_deleted: true }, true, false)).toBe(false);
+  });
+
+  it('refuses after a workspace switch (another sync client)', () => {
+    expect(mayCommitDraft({ is_deleted: false }, false, false)).toBe(false);
+  });
+
+  it('refuses a draft discarded by Delete', () => {
+    expect(mayCommitDraft({ is_deleted: false }, true, true)).toBe(false);
   });
 });

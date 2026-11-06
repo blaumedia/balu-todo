@@ -11,7 +11,7 @@ export interface DetailDraft {
  *
  * `saved` is the last value known to be stored (the task, or what a commit already wrote), so
  * calling this again after a commit yields null: the blur commit and the unmount commit never
- * write twice. A viewer never writes, and a blank title is not a title (the field reverts).
+ * write twice. A viewer never writes, and a blank title is not written (the field keeps showing it).
  */
 export function pendingDraftPatch(
   draft: DetailDraft,
@@ -24,4 +24,13 @@ export function pendingDraftPatch(
   if (title && title !== saved.title) patch.title = title;
   if (draft.notes !== saved.notes) patch.notes = draft.notes;
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/**
+ * Whether an unmount commit may still write. The task must still exist (live, not deleted by this user or another
+ * client), the sync client must be the one the sheet opened with (a workspace switch builds a new one, and the old
+ * task id must not reach it), and the user must not have discarded the draft by deleting the task.
+ */
+export function mayCommitDraft(live: { is_deleted?: boolean } | null | undefined, sameClient: boolean, discarded: boolean): boolean {
+  return !discarded && sameClient && live != null && !live.is_deleted;
 }
