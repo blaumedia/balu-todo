@@ -26,6 +26,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useT } from '../i18n';
 import { useVisibleNavRailExtent } from '../hooks/use-layout';
 import { sheetLayout } from '../lib/layout';
 import { useTheme } from '../theme/ThemeProvider';
@@ -60,6 +61,7 @@ function useKeyboardHeight(): number {
 }
 
 export function BottomSheet({ visible, onClose, children, full }: BottomSheetProps) {
+  const { t } = useT();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const offset = useSharedValue(SLIDE_FROM);
@@ -120,6 +122,8 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
     <View style={[StyleSheet.absoluteFill, styles.container, !side && { paddingLeft: insetLeft, paddingRight: insets.right }]}>
       <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('common.close')}
           style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
           onPress={() => {
             Keyboard.dismiss();
@@ -128,6 +132,11 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
         />
       </Animated.View>
       <Animated.View
+        accessibilityViewIsModal
+        onAccessibilityEscape={() => {
+          Keyboard.dismiss();
+          onClose();
+        }}
         style={[
           styles.sheet,
           layout.kind === 'card' ? { width: layout.width, alignSelf: 'center' } : null,

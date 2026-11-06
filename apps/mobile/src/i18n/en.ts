@@ -223,6 +223,7 @@ export const en = {
 
   'common.back': 'Back',
   'common.cancel': 'Cancel',
+  'common.close': 'Close',
   'common.ok': 'OK',
   'common.copy': 'Copy',
   'common.done': 'Done',
