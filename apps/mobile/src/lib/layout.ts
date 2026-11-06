@@ -40,6 +40,13 @@ export function allowsRotation(width: number, height: number): boolean {
   return Math.min(width, height) >= ROTATION_MIN_SHORT_SIDE;
 }
 
+/** iOS decides from the window. Android decides from the screen: a large screen that letterboxes a portrait-locked app
+ *  shows a narrow window, which would keep the lock forever (a trap); the screen's short side does not shrink. */
+export function rotationAllowedFor(os: string, window: { width: number; height: number }, screen: { width: number; height: number }): boolean {
+  const size = os === 'android' ? screen : window;
+  return allowsRotation(size.width, size.height);
+}
+
 export function showsNavRail(windowWidth: number): boolean {
   return windowWidth >= RAIL_MIN_WINDOW_WIDTH;
 }

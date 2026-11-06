@@ -83,8 +83,13 @@ export default function RootLayout() {
   );
 }
 
-function Chrome() {
+/** Own component so window size changes re-render only this, not all of Chrome. */
+function OrientationPolicy() {
   useOrientationPolicy();
+  return null;
+}
+
+function Chrome() {
   const scheme = useScheme();
   const theme = useTheme();
   const boot = useApp((s) => s.boot);
@@ -98,6 +103,7 @@ function Chrome() {
   }, [boot, segments, navigationRef]);
   return (
     <>
+      <OrientationPolicy />
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
         <Stack.Screen name="index" />
