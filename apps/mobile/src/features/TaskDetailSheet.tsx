@@ -106,13 +106,14 @@ function DetailBody({
   useEffect(() => () => clearTimeout(scrollTimer.current), []);
   const scrollToComposer = () => {
     clearTimeout(scrollTimer.current);
+    notesPending.current = false; // the composer has focus now, a pending notes reveal would steal the scroll
     scrollTimer.current = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
   const notesRef = useRef<TextInputInstance>(null);
   const scrollY = useRef(0);
   const keyboardHeight = useRef(0);
   const notesPending = useRef(false);
-  const revealNotes = () => {
+  const revealNotes = (catchUp = true) => {
     const sv = scrollRef.current;
     const notes = notesRef.current;
     const root = rootViewRef.current;
@@ -121,9 +122,16 @@ function DetailBody({
       sv.measureInWindow((_sx, svY, _sw, svH) => {
         notes.measureInWindow((_x, y, _w, h) => {
           // Android: the ScrollView layout may not have shrunk for the keyboard yet, so cap its bottom by the real keyboard top.
+          // While that layout is still stale the scroll may stop short, so it runs once more shortly after to catch up.
           const bottom = visibleBottom(svY + svH, rootY + rootH, keyboardHeight.current);
           const delta = revealScrollDelta(y, h, space.s4, bottom, 0);
-          if (delta > 0) sv.scrollTo({ y: scrollY.current + delta, animated: true });
+          if (delta > 0) {
+            sv.scrollTo({ y: scrollY.current + delta, animated: true });
+            if (catchUp) {
+              clearTimeout(scrollTimer.current);
+              scrollTimer.current = setTimeout(() => revealNotes(false), 200);
+            }
+          }
         });
       });
     });
@@ -137,7 +145,7 @@ function DetailBody({
       notesPending.current = true; // wait until the IME has settled, its height is not known yet
       return;
     }
-    scrollTimer.current = setTimeout(revealNotes, Platform.OS === 'android' ? 50 : 300);
+    scrollTimer.current = setTimeout(() => revealNotes(), Platform.OS === 'android' ? 50 : 300);
   };
   const onKeyboardSettled = (kh: number) => {
     keyboardHeight.current = kh;
@@ -145,7 +153,7 @@ function DetailBody({
     else if (notesPending.current) {
       notesPending.current = false;
       clearTimeout(scrollTimer.current);
-      scrollTimer.current = setTimeout(revealNotes, 50);
+      scrollTimer.current = setTimeout(() => revealNotes(), 50);
     }
   };
 
@@ -490,7 +498,10 @@ function DetailBody({
         value={notes}
         editable={writable}
         onChangeText={setNotes}
-        onBlur={commitNotes}
+        onBlur={() => {
+          notesPending.current = false;
+          commitNotes();
+        }}
         placeholder={t('detail.notesPlaceholder')}
         placeholderTextColor={theme.textTertiary}
         style={[styles.notes, { color: theme.textPrimary }]}

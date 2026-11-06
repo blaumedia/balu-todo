@@ -43,7 +43,9 @@ export function allowsRotation(width: number, height: number): boolean {
 /** iOS decides from the window. Android decides from the screen: a large screen that letterboxes a portrait-locked app
  *  shows a narrow window, which would keep the lock forever (a trap). Verified on an API 35 emulator at 800x1280 dp with
  *  ignore-orientation-request on: the letterboxed window was 600x800 while Dimensions 'screen' stayed 1280x800, so the
- *  screen is not shrunk by the letterbox there. Not verified on other OEM builds. */
+ *  screen is not shrunk by the letterbox there. Not verified on other OEM builds.
+ *  If an OEM shrinks 'screen' under the letterbox, drop the manifest portrait lock and lock at runtime instead (costs a
+ *  landscape flash on phones started sideways). */
 export function rotationAllowedFor(os: string, window: { width: number; height: number }, screen: { width: number; height: number }): boolean {
   const size = os === 'android' ? screen : window;
   return allowsRotation(size.width, size.height);
