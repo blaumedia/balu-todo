@@ -188,8 +188,35 @@ Dev client instead (only when you need hot reload): Metro in the background
   bounds outside the screen) until a cold start; a 1 s gap or the reverse order did not. Check bounds,
   not just presence, in dumps (2026-11-06).
 - Long-press drag (reorder): `adb shell input swipe` cannot do it. Use
-  `adb shell input motionevent DOWN x y`, hold ~900 ms, several stepped `MOVE x y`, then
-  `UP x y` (2026-11-05).
+  `adb shell input motionevent DOWN x y`, hold ~900 ms (`sleep 0.9` in the same call), several
+  stepped `MOVE x y` (`sleep 0.1` between), then `UP x y`. Verified 2026-11-06 on a phone and on a
+  10 inch tablet (drag beside the rail, x well left of the row's action button): the DB `sort_order`
+  followed the drop. Check the DB, not only the list order.
+- Creating a project for a test: no `api.py` command. Use Browse, the `New project` row, tap
+  `Project name`, `ui.py type`, then `keyevent 66` (2026-11-06).
+- Parsing `ui.py list`: lines are `[x1,y1][x2,y2] ...`. Use `awk -F'[][,]' '{print $2,$3,$5,$6}'` (x1 y1 x2 y2);
+  `$3` is y1, not `$4` (2026-11-06).
+- Side sheet (landscape tablet, 560 dp): the scrim is the full-screen `desc='Close'` node and covers
+  the list. `ui.py tap REGEX` matches the list row first, so the tap lands on the scrim and closes the
+  sheet. Tap the sheet's own node by its bounds with `adb shell input tap X Y` (2026-11-06).
+- Card width: the outer container of a centred card is the node to measure (288-1488 px = 600 dp at
+  1600 px); the ScrollView inside is inset 20 dp each side (`space.s5`) and reads ~559 dp (2026-11-06).
+- Language: change it in the app's Settings (the `Deutsch` row), not in the device locale. The tab
+  labels then read German at once (2026-11-06).
+- Font scale: `adb shell settings put system font_scale 2.0` resizes the rail live (rail 352 px = 176 dp,
+  German labels one line each, no overlap; 2026-11-06). Once, a font-scale change killed the process
+  (pid gone, `Process ... has died` in logcat): a JS error `The imperative router is unavailable before
+  the first render` (`ReactNativeJS`) after the activity restarted. Not reproduced in two retries. After
+  every setting change, check `adb shell pidof <package>` and keep `adb logcat -d > file` for the report.
+- Date picker (Material): the day cell has `desc='20 November 2026'`, then `ui.py tap '^OK$'`. A
+  reminder opens a time picker next (default 09:00): `OK` again. The field desc then reads
+  `Erinnerung, 21. Nov. · 09:00`; the DB stores UTC `reminder_at`. Clear with the `..., Löschen` desc
+  (2026-11-06; labels are German, use the EN desc when the UI is English).
+- Attachment on a release build: `Anhang hinzufügen` opens a sheet with FOTO / DATEI. DATEI opens the
+  system picker, whose Recent tab does not show files pushed with adb. Use `Show roots` then
+  `Downloads` (push with `adb push <file> /sdcard/Download/`). The upload row appears in
+  `attachments` (2026-11-06).
+- `uiautomator dump` lists views even when they are `importantForAccessibility="no-hide-descendants"`
 - Reminders: the notification permission is requested only from the Settings toggle, not
   when a reminder is set. Android delivers reminders as inexact alarms, observed up to
   ~2.5 min late: wait at least 3 min before calling a reminder missing (2026-11-05).
