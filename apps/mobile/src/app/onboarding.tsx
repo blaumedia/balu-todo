@@ -125,7 +125,7 @@ function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: s
       <Text style={[styles.hint, { color: theme.textSecondary }]}>{t('onboarding.serverHint')}</Text>
       <Field
         icon="server"
-        accessibilityLabel={t('settings.server')}
+        accessibilityLabel={Platform.OS === 'ios' ? t('settings.server') : undefined}
         placeholder={t('onboarding.serverPlaceholder')}
         value={value}
         onChangeText={(next) => {
@@ -257,10 +257,10 @@ function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: stri
       ) : null}
 
       {mode === 'register' ? (
-        <Field icon="settings" accessibilityLabel={t('auth.name')} placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
+        <Field icon="settings" accessibilityLabel={Platform.OS === 'ios' ? t('auth.name') : undefined} placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
       ) : null}
-      <Field icon="server" accessibilityLabel={t('auth.email')} placeholder={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" theme={theme} hideIcon />
-      <Field icon="server" accessibilityLabel={t('auth.password')} placeholder={t('auth.password')} value={password} onChangeText={setPassword} secureTextEntry theme={theme} hideIcon />
+      <Field icon="server" accessibilityLabel={Platform.OS === 'ios' ? t('auth.email') : undefined} placeholder={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" theme={theme} hideIcon />
+      <Field icon="server" accessibilityLabel={Platform.OS === 'ios' ? t('auth.password') : undefined} placeholder={t('auth.password')} value={password} onChangeText={setPassword} secureTextEntry theme={theme} hideIcon />
       {error ? <Text style={[styles.error, { color: theme.danger }]}>{error}</Text> : null}
 
       <Button
