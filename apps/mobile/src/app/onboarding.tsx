@@ -125,7 +125,7 @@ function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: s
       <Text style={[styles.hint, { color: theme.textSecondary }]}>{t('onboarding.serverHint')}</Text>
       <Field
         icon="server"
-        accessibilityLabel={Platform.OS === 'ios' ? t('settings.server') : undefined}
+        label={t('settings.server')}
         placeholder={t('onboarding.serverPlaceholder')}
         value={value}
         onChangeText={(next) => {
@@ -257,10 +257,10 @@ function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: stri
       ) : null}
 
       {mode === 'register' ? (
-        <Field icon="settings" accessibilityLabel={Platform.OS === 'ios' ? t('auth.name') : undefined} placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
+        <Field icon="settings" label={t('auth.name')} placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
       ) : null}
-      <Field icon="server" accessibilityLabel={Platform.OS === 'ios' ? t('auth.email') : undefined} placeholder={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" theme={theme} hideIcon />
-      <Field icon="server" accessibilityLabel={Platform.OS === 'ios' ? t('auth.password') : undefined} placeholder={t('auth.password')} value={password} onChangeText={setPassword} secureTextEntry theme={theme} hideIcon />
+      <Field icon="server" label={t('auth.email')} placeholder={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" theme={theme} hideIcon />
+      <Field icon="server" label={t('auth.password')} placeholder={t('auth.password')} value={password} onChangeText={setPassword} secureTextEntry theme={theme} hideIcon />
       {error ? <Text style={[styles.error, { color: theme.danger }]}>{error}</Text> : null}
 
       <Button
@@ -280,20 +280,27 @@ function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: stri
   );
 }
 
+// The placeholder is the label on Android (TalkBack reads it); iOS needs an explicit one because VoiceOver drops the placeholder once text is typed.
+function iosLabel(label: string): string | undefined {
+  return Platform.OS === 'ios' ? label : undefined;
+}
+
 function Field({
   icon,
   theme,
   hideIcon,
+  label,
   ...props
 }: {
   icon: 'server' | 'settings';
+  label: string;
   theme: ReturnType<typeof useTheme>;
   hideIcon?: boolean;
 } & React.ComponentProps<typeof TextInput>) {
   return (
     <View style={[styles.field, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       {!hideIcon ? <Icon name={icon} size={18} color={theme.textTertiary} strokeWidth={2} /> : null}
-      <TextInput style={[styles.input, { color: theme.textPrimary }]} placeholderTextColor={theme.textTertiary} {...props} />
+      <TextInput style={[styles.input, { color: theme.textPrimary }]} placeholderTextColor={theme.textTertiary} accessibilityLabel={iosLabel(label)} {...props} />
     </View>
   );
 }
