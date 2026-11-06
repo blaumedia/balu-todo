@@ -134,6 +134,10 @@ npx expo prebuild --platform android --no-install     # rewrites package.json, c
 (cd android && ./gradlew :app:assembleRelease)       # foreground, bash timeout 2400 s
 # one ABI only (must match the emulator image, arm64-v8a on Apple Silicon), ~1.5 min (2026-11-06):
 # (cd android && ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a)
+# Older tag (expo 54, reanimated 4.1.7 + worklets 0.5.1) fails with `ninja: ... libworklets.so missing` (2026-11-06).
+# Workaround in a throwaway tree: rm -rf reanimated's android/.cxx and worklets' android/build, copy worklets'
+# RelWithDebInfo libworklets.so to its intermediates/cmake/release/obj/arm64-v8a/, rebuild with --no-parallel.
+# Never run two release builds at the same time.
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 git checkout package.json                            # unless the task changed it on purpose
 ```
@@ -161,13 +165,10 @@ Dev client instead (only when you need hot reload): Metro in the background
 - UI: `tools/e2e/android/ui.py list|tap|has|dump|swipe|scroll|state|type|desc`. Do not bypass
   `ui.py` for dumps (it masks password nodes). Never quote raw typed-text or log lines that
   could contain a password in a report.
-- Screenshot: `adb exec-out screencap -p > /tmp/$ME-<name>.png`, then look at it.
-  Right after a rotation or `wm size` change it can write an empty file: wait a moment and
-  retry, and run it as its own call, not chained after `input tap; sleep` (2026-11-06).
-- Changes made through `api.py` show in the app only after a sync: run `api.py sync-probe`
-  and wait a few seconds (2026-11-06).
-- Release builds still log `console.log` to logcat as `ReactNativeJS`
-  (`adb logcat -d -s ReactNativeJS`), handy for a temporary debug value (remove it after).
+- Screenshot: `adb exec-out screencap -p > /tmp/$ME-<name>.png`. Right after a rotation or `wm size`
+  change it can write an empty file: retry in its own call (2026-11-06).
+- `api.py` changes show in the app only after `api.py sync-probe` and a few seconds (2026-11-06).
+- Release builds still log `console.log` to logcat as `ReactNativeJS` (remove a temporary log after).
 - Avoid `%s` in quick-add text; use `ui.py type`.
 - Quick-add sheet: the Return key (`keyevent 66`) adds and keeps the sheet open; BACK with no sheet open leaves the app to the launcher. With the keyboard up, the first BACK only hides the keyboard; the second closes the sheet; a third leaves the app (2026-11-06). Offline (`cmd connectivity airplane-mode enable`) tasks keep their temp id across an app restart and sync within ~45 s after disabling it (2026-11-06).
 - Sheet dismiss taps (2026-11-06, phone 1080x2400): the scrim is one full-screen node `desc='Close'` (English UI only, it is `t('common.close')`);
@@ -187,39 +188,41 @@ Dev client instead (only when you need hot reload): Metro in the background
   wm density reset` back to back left the tab bar, FAB and header gear off screen (present in the dump,
   bounds outside the screen) until a cold start; a 1 s gap or the reverse order did not. Check bounds,
   not just presence, in dumps (2026-11-06).
-- Long-press drag (reorder): `adb shell input swipe` cannot do it. Use
-  `adb shell input motionevent DOWN x y`, hold ~900 ms (`sleep 0.9` in the same call), several
-  stepped `MOVE x y` (`sleep 0.1` between), then `UP x y`. Verified 2026-11-06 on a phone and on a
-  10 inch tablet (drag beside the rail, x well left of the row's action button): the DB `sort_order`
-  followed the drop. Check the DB, not only the list order.
-- Creating a project for a test: no `api.py` command. Use Browse, the `New project` row, tap
-  `Project name`, `ui.py type`, then `keyevent 66` (2026-11-06).
+- Long-press drag (reorder): `input swipe` cannot do it. Use `input motionevent DOWN x y`, hold ~900 ms,
+  stepped `MOVE x y` (0.1 s apart), then `UP x y`. Check the DB `sort_order`, not only the list (2026-11-06).
+- Creating a project: no `api.py` command. Browse, `New project`, `Project name`, `ui.py type`, `keyevent 66`.
 - Parsing `ui.py list`: lines are `[x1,y1][x2,y2] ...`. Use `awk -F'[][,]' '{print $2,$3,$5,$6}'` (x1 y1 x2 y2);
   `$3` is y1, not `$4` (2026-11-06).
-- Side sheet (landscape tablet, 560 dp): the scrim is the full-screen `desc='Close'` node and covers
-  the list. `ui.py tap REGEX` matches the list row first, so the tap lands on the scrim and closes the
-  sheet. Tap the sheet's own node by its bounds with `adb shell input tap X Y` (2026-11-06).
+- Side sheet (landscape tablet): the full-screen `desc='Close'` scrim covers the list, and `ui.py tap REGEX`
+  hits the list row first and closes the sheet. Tap the sheet's node by bounds with `input tap X Y` (2026-11-06).
 - Card width: the outer container of a centred card is the node to measure (288-1488 px = 600 dp at
   1600 px); the ScrollView inside is inset 20 dp each side (`space.s5`) and reads ~559 dp (2026-11-06).
 - Language: change it in the app's Settings (the `Deutsch` row), not in the device locale. The tab
   labels then read German at once (2026-11-06).
-- Font scale: `adb shell settings put system font_scale 2.0` resizes the rail live (rail 352 px = 176 dp,
-  German labels one line each, no overlap; 2026-11-06). Once, a font-scale change killed the process
-  (pid gone, `Process ... has died` in logcat): a JS error `The imperative router is unavailable before
-  the first render` (`ReactNativeJS`) after the activity restarted. Not reproduced in two retries. After
-  every setting change, check `adb shell pidof <package>` and keep `adb logcat -d > file` for the report.
-- Date picker (Material): the day cell has `desc='20 November 2026'`, then `ui.py tap '^OK$'`. A
-  reminder opens a time picker next (default 09:00): `OK` again. The field desc then reads
-  `Erinnerung, 21. Nov. · 09:00`; the DB stores UTC `reminder_at`. Clear with the `..., Löschen` desc
-  (2026-11-06; labels are German, use the EN desc when the UI is English).
+- Font scale: `settings put system font_scale 2.0` resizes the rail live (rail 352 px = 176 dp; 2026-11-06).
+  Once it killed the process: `The imperative router is unavailable before the first render` (`ReactNativeJS`)
+  after the activity restarted; not reproduced in two retries. After every setting change check
+  `adb shell pidof <package>` and keep `adb logcat -d > file`.
+- Reminder (2026-11-06, EN): in the task detail sheet the row `desc='Remind me, Pick a date'` (the sheet has no
+  reminder control in quick-add). Date cell `ui.py tap '^07 November 2026$' --desc` (needs `--desc`), `OK`, then
+  time: `OK`. Time dialog: `Switch to text input mode` (`--desc`), tap the hour field, `KEYCODE_MOVE_END` and two
+  `KEYCODE_DEL`, `adb shell input text 06`. The keyboard then moves the dialog up: re-dump before tapping minutes
+  or `OK`. The row desc then reads `Remind me, Tomorrow · 6:00 AM`; the DB stores UTC `reminder_at`.
+  Cancelling the time dialog keeps the wrong date: `CANCEL` before reopening the picker.
 - Attachment on a release build: `Anhang hinzufügen` opens a sheet with FOTO / DATEI. DATEI opens the
   system picker, whose Recent tab does not show files pushed with adb. Use `Show roots` then
   `Downloads` (push with `adb push <file> /sdcard/Download/`). The upload row appears in
   `attachments` (2026-11-06).
-- `uiautomator dump` lists views even when they are `importantForAccessibility="no-hide-descendants"`
-- Reminders: the notification permission is requested only from the Settings toggle, not
-  when a reminder is set. Android delivers reminders as inexact alarms, observed up to
-  ~2.5 min late: wait at least 3 min before calling a reminder missing (2026-11-05).
+- Reminders: the notification permission is requested only from the Settings toggle (its `Allow`
+  button, 2026-11-06). Reminders are inexact alarms, up to ~2.5 min late: wait 3 min before calling one missing.
+  `dumpsys alarm | grep -c <pkg>` counts lines, two per alarm (2 reminders = 4). Do not install a build
+  within ~3 min before a reminder is due: on 2026-11-06 a 1.6.0 -> HEAD `install -r` one minute after the
+  06:08 reminder left no notification and no alarm; logcat showed `lost permission to set exact alarms` right
+  after the update (cause not isolated). Check `dumpsys notification --noredact` and the shade text
+  (`cmd statusbar expand-notifications` then `uiautomator dump`), not a screenshot.
+- Quick-add after a detail sheet: the EditText had focus but typed text never reached it (2026-11-06). `am force-stop`
+  and a relaunch fixed it. Hardware BACK twice after typing in detail Notes (1.6.0, 2 of 2) left no notes in the DB
+  and an empty field on reopen; a scrim tap closed it with the text kept. Check with psql after every close.
 
 ## 6. Layout checks (overlap / clipping)
 
