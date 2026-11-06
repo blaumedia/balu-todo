@@ -1,8 +1,17 @@
-import { describe, expect, it, vi } from 'vitest';
-import { anySheetOpen, registerOpenSheet, subscribeOpenSheets } from '../src/lib/openSheets';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The module keeps a counter, so every test gets a fresh copy and none depends on another's cleanup.
+async function load() {
+  return import('../src/lib/openSheets');
+}
 
 describe('openSheets', () => {
-  it('is open only while a sheet is registered', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('is open only while a sheet is registered', async () => {
+    const { anySheetOpen, registerOpenSheet } = await load();
     expect(anySheetOpen()).toBe(false);
     const a = registerOpenSheet();
     const b = registerOpenSheet();
@@ -13,7 +22,8 @@ describe('openSheets', () => {
     expect(anySheetOpen()).toBe(false);
   });
 
-  it('unregistering twice does not underflow the count', () => {
+  it('unregistering twice does not underflow the count', async () => {
+    const { anySheetOpen, registerOpenSheet } = await load();
     const a = registerOpenSheet();
     a();
     a();
@@ -23,7 +33,8 @@ describe('openSheets', () => {
     expect(anySheetOpen()).toBe(false);
   });
 
-  it('notifies subscribers on every change until unsubscribed', () => {
+  it('notifies subscribers on every change until unsubscribed', async () => {
+    const { registerOpenSheet, subscribeOpenSheets } = await load();
     const fn = vi.fn();
     const off = subscribeOpenSheets(fn);
     const a = registerOpenSheet();

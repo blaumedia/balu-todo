@@ -34,3 +34,17 @@ export function pendingDraftPatch(
 export function mayCommitDraft(live: { is_deleted?: boolean } | null | undefined, sameClient: boolean, discarded: boolean): boolean {
   return !discarded && sameClient && live != null && !live.is_deleted;
 }
+
+/**
+ * The live task for an id the sheet was opened with. A task created offline is opened under its temporary id; once the
+ * server confirms it only the real id remains and `idAliases` maps the temporary one to it, so follow the alias.
+ */
+export function findLiveTask<T extends { id: string }>(
+  tasks: readonly T[],
+  aliases: Readonly<Record<string, string>>,
+  id: string | null | undefined,
+): T | undefined {
+  if (!id) return undefined;
+  const real = aliases[id] ?? id;
+  return tasks.find((x) => x.id === real);
+}

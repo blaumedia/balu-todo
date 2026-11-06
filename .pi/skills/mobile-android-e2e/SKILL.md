@@ -162,6 +162,7 @@ Dev client instead (only when you need hot reload): Metro in the background
 - Release builds still log `console.log` to logcat as `ReactNativeJS`
   (`adb logcat -d -s ReactNativeJS`), handy for a temporary debug value (remove it after).
 - Avoid `%s` in quick-add text; use `ui.py type`.
+- Quick-add sheet: the Return key (`keyevent 66`) adds and keeps the sheet open; BACK with no sheet open leaves the app to the launcher. Offline (`cmd connectivity airplane-mode enable`) tasks keep their temp id across an app restart and sync within ~45 s after disabling it (2026-11-06).
 - Sheet dismiss taps (2026-11-06, phone 1080x2400): the scrim is one full-screen node `desc='Close'` (English UI only, it is `t('common.close')`);
   tap its visible strip above the sheet (e.g. y=100), a drag-down closes it with `input swipe 540 230 540 2200 300`.
   `adb shell input text` types into a focused field directly, but cannot handle spaces or `%s` (use `ui.py type`). Check stored values with

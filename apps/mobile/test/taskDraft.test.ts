@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mayCommitDraft, pendingDraftPatch } from '../src/lib/taskDraft';
+import { findLiveTask, mayCommitDraft, pendingDraftPatch } from '../src/lib/taskDraft';
 
 // The detail sheet unmounts before the native blur arrives (scrim tap, VoiceOver escape,
 // drag-down, opening another task), so the unmount cleanup must commit what blur would have.
@@ -58,5 +58,22 @@ describe('mayCommitDraft', () => {
 
   it('refuses a draft discarded by Delete', () => {
     expect(mayCommitDraft({ is_deleted: false }, true, true)).toBe(false);
+  });
+});
+
+describe('findLiveTask', () => {
+  const tasks = [{ id: 'real-1' }, { id: 'other' }];
+
+  it('finds a task by its own id', () => {
+    expect(findLiveTask(tasks, {}, 'other')).toBe(tasks[1]);
+  });
+
+  it('follows the alias from a temporary id to the confirmed task', () => {
+    expect(findLiveTask(tasks, { 'tmp-1': 'real-1' }, 'tmp-1')).toBe(tasks[0]);
+  });
+
+  it('finds nothing for an unconfirmed temporary id whose entry is gone, or no id', () => {
+    expect(findLiveTask(tasks, {}, 'tmp-2')).toBeUndefined();
+    expect(findLiveTask(tasks, {}, null)).toBeUndefined();
   });
 });

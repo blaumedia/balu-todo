@@ -28,7 +28,7 @@ import {
 } from '../lib/collab';
 import { revealScrollDelta, visibleBottom } from '../lib/keyboardSpacer';
 import { rootViewRef } from '../lib/rootViewRef';
-import { mayCommitDraft, pendingDraftPatch } from '../lib/taskDraft';
+import { findLiveTask, mayCommitDraft, pendingDraftPatch } from '../lib/taskDraft';
 import { getSync } from '../lib/clients';
 import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
@@ -52,7 +52,8 @@ export function TaskDetailSheet() {
   const taskId = useApp((s) => s.detailTaskId);
   const close = useApp((s) => s.closeDetail);
   const snap = useSnapshot();
-  const task = taskId ? snap.tasks.find((x) => x.id === taskId) : undefined;
+  // Follows idAliases: a task created offline is confirmed under a real id while the sheet is open on its temp id.
+  const task = findLiveTask(snap.tasks, snap.idAliases, taskId);
 
   // The task can vanish (deleted on another client, a reminder for a task that is gone) while its id is set; clear it
   // so the store does not dangle, like ProjectActionsSheet. Only after a sync: before it the replica may still be empty.
@@ -62,7 +63,7 @@ export function TaskDetailSheet() {
 
   return (
     <BottomSheet visible={taskId != null && task != null} onClose={close} full>
-      {task ? <DetailBody key={task.id} task={task} onClose={close} theme={theme} t={t} snap={snap} /> : null}
+      {task ? <DetailBody key={taskId} task={task} onClose={close} theme={theme} t={t} snap={snap} /> : null}
     </BottomSheet>
   );
 }
@@ -98,7 +99,9 @@ function DetailBody({
   // The client the sheet opened with and whether the draft was thrown away (Delete): both stop the unmount commit.
   const openedWith = useRef(getSync());
   const discarded = useRef(false);
-  latest.current.writable = writable;
+  useEffect(() => {
+    latest.current.writable = writable;
+  }, [writable]);
   // Every draft change goes through here so `latest` is current in the same step, not after the next render: an
   // unmount in between must not see a stale draft and write it over a newer remote value.
   const setDraft = (next: { title?: string; notes?: string }) => {
@@ -110,7 +113,7 @@ function DetailBody({
   useEffect(() => {
     saved.current = { title: task.title, notes: task.notes };
     setDraft({ title: task.title, notes: task.notes });
-  }, [task.id, task.title, task.notes]);
+  }, [task.title, task.notes]);
 
   const completed = task.completed_at != null;
   const project = task.project_id ? snap.projects.find((p) => p.id === task.project_id) : undefined;
@@ -196,7 +199,8 @@ function DetailBody({
     if (!patch) return;
     // Look the task up in the live replica: it may have been deleted meanwhile, or the workspace switched.
     const sync = getSync();
-    const live = sync?.getSnapshot().tasks.find((x) => x.id === task.id);
+    const snapshot = sync?.getSnapshot();
+    const live = snapshot ? findLiveTask(snapshot.tasks, snapshot.idAliases, task.id) : undefined;
     if (!mayCommitDraft(live, sync === openedWith.current, discarded.current)) return;
     saved.current = { ...saved.current, ...patch };
     updateTask(task.id, patch);
