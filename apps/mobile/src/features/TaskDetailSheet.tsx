@@ -110,6 +110,8 @@ function DetailBody({
     if (next.notes !== undefined) setNotes(next.notes);
   };
 
+  // No task.id in the deps: DetailBody is keyed by the store id, and task.id changes from the
+  // temporary to the real id on confirmation, which must not reset the draft.
   useEffect(() => {
     saved.current = { title: task.title, notes: task.notes };
     setDraft({ title: task.title, notes: task.notes });

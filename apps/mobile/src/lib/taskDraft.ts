@@ -1,6 +1,8 @@
 // Which unsaved title/notes edits of the task detail sheet still have to be written.
 // Pure - no React Native imports - so it can be unit-tested in plain node.
 
+import { resolveProjectId } from '@balu/nl-parser';
+
 export interface DetailDraft {
   title: string;
   notes: string;
@@ -45,6 +47,7 @@ export function findLiveTask<T extends { id: string }>(
   id: string | null | undefined,
 ): T | undefined {
   if (!id) return undefined;
-  const real = aliases[id] ?? id;
+  // the shared alias resolver only follows own keys (an id like 'constructor' stays itself)
+  const real = resolveProjectId(aliases, id);
   return tasks.find((x) => x.id === real);
 }

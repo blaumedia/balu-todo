@@ -76,4 +76,8 @@ describe('findLiveTask', () => {
     expect(findLiveTask(tasks, {}, 'tmp-2')).toBeUndefined();
     expect(findLiveTask(tasks, {}, null)).toBeUndefined();
   });
+
+  it('does not resolve an id through Object.prototype', () => {
+    expect(findLiveTask([{ id: 'constructor' }], {}, 'constructor')).toEqual({ id: 'constructor' });
+  });
 });
