@@ -1,7 +1,8 @@
 import type { Comment, Priority, Role, Task } from '@balu/domain';
 import { canWrite } from '@balu/domain';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, type ScrollViewInstance, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, type ScrollViewInstance, StyleSheet, Switch, Text, TextInput, type TextInputInstance, View } from 'react-native';
+import { AndroidKeyboardSettledProbe } from '../components/AndroidKeyboardSpacer';
 import { BottomSheet } from '../components/BottomSheet';
 import { Checkbox } from '../components/Checkbox';
 import { Icon } from '../components/Icon';
@@ -25,6 +26,8 @@ import {
   commentsForTask,
   initials,
 } from '../lib/collab';
+import { revealScrollDelta, visibleBottom } from '../lib/keyboardSpacer';
+import { rootViewRef } from '../lib/rootViewRef';
 import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
 import { useMyRole } from '../hooks/use-my-role';
@@ -105,17 +108,45 @@ function DetailBody({
     clearTimeout(scrollTimer.current);
     scrollTimer.current = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
-  const notesY = useRef(0);
-  const notesHeight = useRef(0);
-  const viewportHeight = useRef(0);
+  const notesRef = useRef<TextInputInstance>(null);
+  const scrollY = useRef(0);
+  const keyboardHeight = useRef(0);
+  const notesPending = useRef(false);
+  const revealNotes = () => {
+    const sv = scrollRef.current;
+    const notes = notesRef.current;
+    const root = rootViewRef.current;
+    if (!sv || !notes || !root) return;
+    root.measureInWindow((_rx, rootY, _rw, rootH) => {
+      sv.measureInWindow((_sx, svY, _sw, svH) => {
+        notes.measureInWindow((_x, y, _w, h) => {
+          // Android: the ScrollView layout may not have shrunk for the keyboard yet, so cap its bottom by the real keyboard top.
+          const bottom = visibleBottom(svY + svH, rootY + rootH, keyboardHeight.current);
+          const delta = revealScrollDelta(y, h, space.s4, bottom, 0);
+          if (delta > 0) sv.scrollTo({ y: scrollY.current + delta, animated: true });
+        });
+      });
+    });
+  };
   // Same reason as the composer: the keyboard pads the sheet but the ScrollView does not follow.
-  // Bring the BOTTOM of the notes field (where the caret is when appending) above the keyboard.
+  // Scrolls only forward and only as far as needed to bring the BOTTOM of the notes field (where the caret is when
+  // appending) above the keyboard; a field that is already visible does not move.
   const scrollToNotes = () => {
     clearTimeout(scrollTimer.current);
-    scrollTimer.current = setTimeout(() => {
-      const y = notesY.current + notesHeight.current - viewportHeight.current + space.s4;
-      scrollRef.current?.scrollTo({ y: Math.max(0, y), animated: true });
-    }, 300);
+    if (Platform.OS === 'android' && keyboardHeight.current <= 0) {
+      notesPending.current = true; // wait until the IME has settled, its height is not known yet
+      return;
+    }
+    scrollTimer.current = setTimeout(revealNotes, Platform.OS === 'android' ? 50 : 300);
+  };
+  const onKeyboardSettled = (kh: number) => {
+    keyboardHeight.current = kh;
+    if (kh <= 0) notesPending.current = false;
+    else if (notesPending.current) {
+      notesPending.current = false;
+      clearTimeout(scrollTimer.current);
+      scrollTimer.current = setTimeout(revealNotes, 50);
+    }
   };
 
   // A role drop must not leave an unsaved draft behind: it would show as if
@@ -139,7 +170,15 @@ function DetailBody({
   };
 
   return (
-    <ScrollView ref={scrollRef} onLayout={(e) => { viewportHeight.current = e.nativeEvent.layout.height; }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <>
+    <AndroidKeyboardSettledProbe onSettled={onKeyboardSettled} />
+    <ScrollView
+      ref={scrollRef}
+      onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+      scrollEventThrottle={16}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
       {/* Title row */}
       <View style={styles.titleRow}>
         <Checkbox
@@ -447,6 +486,7 @@ function DetailBody({
       </View>
       {/* Notes */}
       <TextInput
+        ref={notesRef}
         value={notes}
         editable={writable}
         onChangeText={setNotes}
@@ -456,10 +496,6 @@ function DetailBody({
         style={[styles.notes, { color: theme.textPrimary }]}
         multiline
         onFocus={scrollToNotes}
-        onLayout={(e) => {
-          notesY.current = e.nativeEvent.layout.y;
-          notesHeight.current = e.nativeEvent.layout.height;
-        }}
       />
 
       {/* Task meta */}
@@ -492,6 +528,7 @@ function DetailBody({
       )}
       <View style={{ height: space.s8 }} />
     </ScrollView>
+    </>
   );
 }
 
