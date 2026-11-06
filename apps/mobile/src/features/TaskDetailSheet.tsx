@@ -99,13 +99,23 @@ function DetailBody({
   const scrollRef = useRef<ScrollViewInstance>(null);
   // The composer sits at the sheet's bottom — when it gains focus the keyboard
   // pads the sheet, but the ScrollView doesn't follow on its own.
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(scrollTimer.current), []);
   const scrollToComposer = () => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
+    clearTimeout(scrollTimer.current);
+    scrollTimer.current = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
   };
   const notesY = useRef(0);
+  const notesHeight = useRef(0);
+  const viewportHeight = useRef(0);
   // Same reason as the composer: the keyboard pads the sheet but the ScrollView does not follow.
+  // Bring the BOTTOM of the notes field (where the caret is when appending) above the keyboard.
   const scrollToNotes = () => {
-    setTimeout(() => scrollRef.current?.scrollTo({ y: Math.max(0, notesY.current - space.s4), animated: true }), 300);
+    clearTimeout(scrollTimer.current);
+    scrollTimer.current = setTimeout(() => {
+      const y = notesY.current + notesHeight.current - viewportHeight.current + space.s4;
+      scrollRef.current?.scrollTo({ y: Math.max(0, y), animated: true });
+    }, 300);
   };
 
   // A role drop must not leave an unsaved draft behind: it would show as if
@@ -129,7 +139,7 @@ function DetailBody({
   };
 
   return (
-    <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <ScrollView ref={scrollRef} onLayout={(e) => { viewportHeight.current = e.nativeEvent.layout.height; }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
       {/* Title row */}
       <View style={styles.titleRow}>
         <Checkbox
@@ -448,6 +458,7 @@ function DetailBody({
         onFocus={scrollToNotes}
         onLayout={(e) => {
           notesY.current = e.nativeEvent.layout.y;
+          notesHeight.current = e.nativeEvent.layout.height;
         }}
       />
 
