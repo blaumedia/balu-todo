@@ -1,6 +1,6 @@
 import { selectList, todayLocalISO } from '@balu/domain';
 import { Tabs } from 'expo-router';
-import { View, type ColorValue } from 'react-native';
+import { Text, View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Fab } from '../../components/Fab';
 import { Icon, type IconName } from '../../components/Icon';
@@ -33,6 +33,14 @@ export default function TabsLayout() {
       return <Icon name={name} size={size} color={color as string} strokeWidth={2} />;
     };
 
+  // Rail only: the navigator's own label is a single line with an ellipsis; this one wraps to two lines when a long
+  // (German) label still does not fit at a large font scale.
+  const railLabel = ({ color, children }: { color: ColorValue; children: string }) => (
+    <Text numberOfLines={2} style={{ color, fontSize: 11, fontWeight: font.weightMedium, textAlign: 'center' }}>
+      {children}
+    </Text>
+  );
+
   return (
     <View style={{ flex: 1 }}>
       <NavRailContext.Provider value={railExtent}>
@@ -46,11 +54,12 @@ export default function TabsLayout() {
             // tab items (role, selected state, label, badge) are the same component as on the bottom bar.
             tabBarPosition: rail ? 'left' : 'bottom',
             tabBarVariant: rail ? 'material' : 'uikit',
+            tabBarLabel: rail ? railLabel : undefined,
             tabBarLabelPosition: rail ? 'below-icon' : undefined, // below-icon keeps it a narrow rail, not a wide sidebar
             tabBarActiveBackgroundColor: rail ? 'transparent' : undefined, // tinted like the phone bar; a pill would span the whole rail
             tabBarStyle: rail
               ? {
-                  // The rail absorbs the left inset (cutout, left 3-button bar); items get RAIL_WIDTH.
+                  // The rail absorbs the left inset (cutout, left 3-button bar); items get the rail width (railWidth(fontScale)).
                   width: railExtent,
                   paddingStart: insets.left,
                   paddingEnd: 0,

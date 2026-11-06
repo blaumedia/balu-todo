@@ -19,9 +19,9 @@ export function useColumnPadding(maxWidth: number = CONTENT_MAX_WIDTH): ColumnPa
 
 /** Rail extent of the JS tabs for the current window. Always 0 on iOS, where NativeTabs draws its own chrome. */
 export function useNavRailExtent(): number {
-  const { width } = useWindowDimensions();
+  const { width, fontScale } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  return Platform.OS === 'ios' ? 0 : navRailExtent(width, insets.left);
+  return Platform.OS === 'ios' ? 0 : navRailExtent(width, insets.left, fontScale);
 }
 
 /** The rail extent while the tabs are the visible screen - for root-level overlays (sheets) that must clear it. */

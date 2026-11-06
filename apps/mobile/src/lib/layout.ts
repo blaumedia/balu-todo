@@ -24,7 +24,10 @@ export const FORM_MAX_WIDTH = 600;
  * on purpose: a full-width bottom sheet never meets a rail.
  */
 export const RAIL_MIN_WINDOW_WIDTH = 600;
+/** Rail width at the default font scale (and below). */
 export const RAIL_WIDTH = 88;
+/** Upper bound of the rail width: 2x, the largest scale Android offers in Settings (labels wrap beyond that). */
+export const RAIL_MAX_WIDTH = 176;
 /** Gap between the FAB and the bottom inset where no bottom bar sits under it (iOS tab screens, Android rail). */
 export const FAB_EDGE_GAP = 16;
 
@@ -55,9 +58,17 @@ export function showsNavRail(windowWidth: number): boolean {
   return windowWidth >= RAIL_MIN_WINDOW_WIDTH;
 }
 
-/** Width the rail takes from the left window edge: RAIL_WIDTH plus the left inset it absorbs (cutout, left 3-button bar). 0 without a rail. */
-export function navRailExtent(windowWidth: number, insetLeft: number): number {
-  return showsNavRail(windowWidth) ? RAIL_WIDTH + insetLeft : 0;
+/** Rail width for a system font scale. The labels scale with the font, so the rail grows in proportion:
+ *  round(88 * fontScale), never below 88 (fontScale <= 1 changes nothing), capped at 176 (2.0, so an
+ *  800 dp tablet keeps most of its width; beyond that the label wraps instead of growing the rail further). */
+export function railWidth(fontScale: number): number {
+  const scale = Number.isFinite(fontScale) ? fontScale : 1;
+  return Math.min(RAIL_MAX_WIDTH, Math.max(RAIL_WIDTH, Math.round(RAIL_WIDTH * scale)));
+}
+
+/** Width the rail takes from the left window edge: railWidth(fontScale) plus the left inset it absorbs (cutout, left 3-button bar). 0 without a rail. */
+export function navRailExtent(windowWidth: number, insetLeft: number, fontScale: number): number {
+  return showsNavRail(windowWidth) ? railWidth(fontScale) + insetLeft : 0;
 }
 
 /** L/R padding that centres a column of at most maxWidth inside the safe area. 0/0 on a portrait phone. */

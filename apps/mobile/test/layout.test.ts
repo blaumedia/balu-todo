@@ -4,7 +4,9 @@ import {
   rotationAllowedFor,
   columnPadding,
   navRailExtent,
+  RAIL_MAX_WIDTH,
   RAIL_WIDTH,
+  railWidth,
   screenColumnPadding,
   sheetLayout,
   showsNavRail,
@@ -68,7 +70,33 @@ describe('navRailExtent', () => {
     [1280, 0, 88],
     [960, 48, 136], // left cutout absorbed
   ])('(%i, %i) -> %i', (w, inset, expected) => {
-    expect(navRailExtent(w, inset)).toBe(expected);
+    expect(navRailExtent(w, inset, 1)).toBe(expected);
+  });
+  it('grows with the font scale and the cutout is added on top', () => {
+    expect(navRailExtent(800, 0, 2)).toBe(176);
+    expect(navRailExtent(960, 48, 1.3)).toBe(114 + 48);
+    expect(navRailExtent(412, 0, 2)).toBe(0); // phones: no rail at any scale
+  });
+});
+
+describe('railWidth', () => {
+  it.each([
+    [0.85, 88],
+    [1, 88],
+    [1.15, 101],
+    [1.3, 114],
+    [1.5, 132],
+    [2, 176],
+    [3, 176],
+    [Number.NaN, 88],
+  ])('font scale %f -> %i', (scale, expected) => {
+    expect(railWidth(scale)).toBe(expected);
+  });
+  it('stays within [RAIL_WIDTH, RAIL_MAX_WIDTH]', () => {
+    for (let s = 0.5; s <= 4; s += 0.05) {
+      expect(railWidth(s)).toBeGreaterThanOrEqual(RAIL_WIDTH);
+      expect(railWidth(s)).toBeLessThanOrEqual(RAIL_MAX_WIDTH);
+    }
   });
 });
 
