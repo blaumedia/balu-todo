@@ -70,6 +70,16 @@ describe('leaveGate', () => {
     expect(router.replace).toHaveBeenCalledWith('/today');
   });
 
+  it('does not throw while the imperative router is unbound (root torn down by an activity recreation)', () => {
+    const unbound = () => {
+      throw new Error('The imperative router is unavailable before the first render has finished.');
+    };
+    router.dismissAll.mockImplementationOnce(unbound);
+    expect(() => leaveGate('/today', true)).not.toThrow();
+    router.replace.mockImplementationOnce(unbound);
+    expect(() => leaveGate('/onboarding', false)).not.toThrow();
+  });
+
   it('trusts the given answer, not the router store (which lags on a cold start)', () => {
     router.canDismiss.mockReturnValue(false);
     leaveGate('/onboarding', true);
