@@ -110,7 +110,7 @@ function Chrome() {
       <OrientationPolicy />
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <View collapsable={false} style={{ flex: 1 }} importantForAccessibility={sheetOpen ? 'no-hide-descendants' : 'auto'}>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg }, statusBarStyle: scheme === 'dark' ? 'light' : 'dark' }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="onboarding" />
           <Stack.Screen name="(tabs)" />
