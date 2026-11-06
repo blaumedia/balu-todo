@@ -29,6 +29,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useT } from '../i18n';
 import { useVisibleNavRailExtent } from '../hooks/use-layout';
 import { sheetLayout } from '../lib/layout';
+import { registerOpenSheet } from '../lib/openSheets';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, space } from '../theme/tokens';
 import { AndroidKeyboardSpacer } from './AndroidKeyboardSpacer';
@@ -81,6 +82,9 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
     }
     // A resize while open must not replay the entrance, so slideFrom is not a dependency.
   }, [visible, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The root layout hides the screen behind from TalkBack only while a sheet is really on screen.
+  useEffect(() => (visible ? registerOpenSheet() : undefined), [visible]);
 
   // Android hardware back closes the sheet (the Modal used to do this).
   useEffect(() => {

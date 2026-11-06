@@ -3,7 +3,7 @@ import { useLastNotificationResponse } from 'expo-notifications';
 import { Stack, useNavigationContainerRef, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { AppState, Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -17,6 +17,7 @@ import { ScheduleSheet } from '../features/ScheduleSheet';
 import { TaskDetailSheet } from '../features/TaskDetailSheet';
 import { bootApp, navigateToOnboarding } from '../lib/boot';
 import { getSync, subscribeSyncClient } from '../lib/clients';
+import { anySheetOpen, subscribeOpenSheets } from '../lib/openSheets';
 import { canDismissState, leaveForOnboarding } from '../lib/goBack';
 import { watchLocaleRetries } from '../lib/localeChoice';
 import { configureNotifications, openTaskFromNotification, taskIdFromResponse } from '../lib/notifications';
@@ -96,7 +97,8 @@ function Chrome() {
   const segments = useSegments();
   const navigationRef = useNavigationContainerRef();
   // While a sheet is open TalkBack must not reach the screen behind it (accessibilityViewIsModal is iOS only).
-  const sheetOpen = useApp((s) => s.quickAddOpen || s.detailTaskId != null || s.scheduleTaskId != null || s.projectActionsId != null);
+  // Driven by the sheets that are actually visible, not by store ids (an id can outlive its sheet).
+  const sheetOpen = useSyncExternalStore(subscribeOpenSheets, anySheetOpen, anySheetOpen);
   // The single owner of leaving for onboarding once past the index gate (logout,
   // change server, expiry, a lost workspace, a cold deep link): those paths only set
   // boot 'onboarding'. The index gate owns the same step for segments [].
@@ -107,7 +109,7 @@ function Chrome() {
     <>
       <OrientationPolicy />
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
-      <View style={{ flex: 1 }} importantForAccessibility={sheetOpen ? 'no-hide-descendants' : 'auto'}>
+      <View collapsable={false} style={{ flex: 1 }} importantForAccessibility={sheetOpen ? 'no-hide-descendants' : 'auto'}>
         <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="onboarding" />
