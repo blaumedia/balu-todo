@@ -127,6 +127,7 @@ git checkout package.json                       # prebuild rewrites it (skip if 
   refuses to type unless the login heading is shown. Verified: iPhone 17 portrait English and
   German ("Anmelden"), iPad 13", iPhone 17 Pro Max, Duo cover (English).
 - login.py aborts after typing the email: "inputs not empty" on rerun. Relaunch or `ui.py erase N`.
+  iPad: `hideKeyboard` leaves the soft keyboard up; login.py taps its `Hide keyboard` key (2026-11-06).
 - Cold start: `simctl terminate` then `launch` lands on Today, session kept (verified 2026-11-06).
 - **Logout:** Settings bottom (`Abmelden` in German). `ui.py list` did not print it; `has`/`tap` did.
 

@@ -60,12 +60,30 @@ def on_screen(all_nodes: list[dict], node: dict) -> bool:
     return 0 < x < width and 0 < y < height
 
 
+# iPad soft keyboard keys have no single-character labels; these named keys mark it (2026-11-06).
+IPAD_KEYBOARD_LABELS = ("Hide keyboard", "Next keyboard", "space")
+
+
 def keyboard_up(all_nodes: list[dict]) -> bool:
-    """A key (single-character label) in the lower half of the screen: some field has focus."""
+    """A key (single-character or iPad named key) in the lower half: some field has focus."""
     _, height = ui.screen_size(all_nodes)
     return any(
-        len(n["label"]) == 1 and n["bounds"] and n["bounds"][1] > height / 2 for n in all_nodes
+        (len(n["label"]) == 1 or n["label"] in IPAD_KEYBOARD_LABELS)
+        and n["bounds"]
+        and n["bounds"][1] > height / 2
+        for n in all_nodes
     )
+
+
+def hide_keyboard(udid: str, all_nodes: list[dict]) -> list[dict]:
+    """hideKeyboard, plus a tap on the iPad 'Hide keyboard' key when it is still shown."""
+    key = next((n for n in all_nodes if n["label"] == "Hide keyboard" and n["bounds"]), None)
+    if key is None:
+        ui.maestro_flow(udid, "- hideKeyboard")
+    else:
+        x, y = ui.center(key["bounds"])
+        ui.maestro_flow(udid, f'- tapOn:\n    point: "{x},{y}"')
+    return ui.nodes(udid)
 
 
 def email_intact(all_nodes: list[dict], mail: str) -> bool:
@@ -111,8 +129,7 @@ def main() -> int:
         if not keyboard_up(before):
             break
         time.sleep(1.5)
-        ui.maestro_flow(a.udid, "- hideKeyboard")
-        before = ui.nodes(a.udid)
+        before = hide_keyboard(a.udid, before)
     password_node = single(before, PASSWORD_LABEL)
     if password_node is None or password_node["value"] or not email_intact(before, mail):
         raise SystemExit("inputs not as expected after the email; password not typed")
