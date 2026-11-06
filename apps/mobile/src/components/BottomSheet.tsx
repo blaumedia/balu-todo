@@ -119,7 +119,14 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
       : insets.bottom + space.s4;
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.container, !side && { paddingLeft: insetLeft, paddingRight: insets.right }]}>
+    <View
+      accessibilityViewIsModal
+      onAccessibilityEscape={() => {
+        Keyboard.dismiss();
+        onClose();
+      }}
+      style={[StyleSheet.absoluteFill, styles.container, !side && { paddingLeft: insetLeft, paddingRight: insets.right }]}
+    >
       <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
         <Pressable
           accessibilityRole="button"
@@ -132,11 +139,6 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
         />
       </Animated.View>
       <Animated.View
-        accessibilityViewIsModal
-        onAccessibilityEscape={() => {
-          Keyboard.dismiss();
-          onClose();
-        }}
         style={[
           styles.sheet,
           layout.kind === 'card' ? { width: layout.width, alignSelf: 'center' } : null,
