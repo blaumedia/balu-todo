@@ -1,4 +1,4 @@
-// Floating add button — brand-gradient circle, bottom-right above the tab bar or, with the
+// Floating add button - brand-gradient circle, bottom-right above the tab bar or, with the
 // Android rail, above the bottom inset
 // (DESIGN §7 mobile). Tap creates in the current context.
 import { LinearGradient } from 'expo-linear-gradient';

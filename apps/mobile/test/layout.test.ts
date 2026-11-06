@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   allowsRotation,
+  rotationAllowedFor,
   columnPadding,
   navRailExtent,
+  RAIL_WIDTH,
   screenColumnPadding,
   sheetLayout,
   showsNavRail,
@@ -30,6 +32,21 @@ describe('allowsRotation', () => {
     [1280, 800],
   ])('rotates large windows (%i x %i)', (w, h) => {
     expect(allowsRotation(w, h)).toBe(true);
+  });
+});
+
+describe('rotationAllowedFor', () => {
+  const phone = { width: 412, height: 915 };
+  const tabletScreen = { width: 800, height: 1280 };
+  const letterbox = { width: 560, height: 1280 }; // narrow portrait window on a landscape-held large screen
+  it('iOS follows the window', () => {
+    expect(rotationAllowedFor('ios', phone, tabletScreen)).toBe(false);
+    expect(rotationAllowedFor('ios', tabletScreen, phone)).toBe(true);
+  });
+  it('Android follows the screen, so a letterboxed window cannot trap the lock', () => {
+    expect(rotationAllowedFor('android', letterbox, tabletScreen)).toBe(true);
+    expect(rotationAllowedFor('android', tabletScreen, phone)).toBe(false);
+    expect(rotationAllowedFor('android', phone, phone)).toBe(false);
   });
 });
 
@@ -74,13 +91,13 @@ describe('screenColumnPadding', () => {
     [412, 0, 0, 0, 840, { left: 0, right: 0 }], // Android phone, unchanged
     [1032, 0, 0, 0, 840, { left: 96, right: 96 }], // no rail = columnPadding
     [951, 84, 0, 0, 840, { left: 97, right: 13 }], // no rail = columnPadding
-    [600, 0, 0, 80, 840, { left: 0, right: 0 }],
-    [800, 0, 0, 80, 840, { left: 0, right: 0 }],
-    [960, 0, 0, 80, 840, { left: 20, right: 20 }],
-    [1280, 0, 0, 80, 840, { left: 180, right: 180 }],
-    [960, 48, 0, 128, 840, { left: 0, right: 0 }], // left inset not counted twice
-    [960, 0, 48, 80, 840, { left: 0, right: 48 }],
-    [1280, 0, 0, 80, 600, { left: 300, right: 300 }],
+    [600, 0, 0, RAIL_WIDTH, 840, { left: 0, right: 0 }],
+    [800, 0, 0, RAIL_WIDTH, 840, { left: 0, right: 0 }],
+    [960, 0, 0, RAIL_WIDTH, 840, { left: 16, right: 16 }],
+    [1280, 0, 0, RAIL_WIDTH, 840, { left: 176, right: 176 }],
+    [960, 48, 0, RAIL_WIDTH + 48, 840, { left: 0, right: 0 }], // left inset not counted twice
+    [960, 0, 48, RAIL_WIDTH, 840, { left: 0, right: 48 }],
+    [1280, 0, 0, RAIL_WIDTH, 600, { left: 296, right: 296 }],
   ])('(%i, %i, %i, %i, %i)', (frame, l, r, rail, max, expected) => {
     expect(screenColumnPadding(frame, l, r, rail, max)).toEqual(expected);
   });
@@ -100,11 +117,11 @@ describe('sheetLayout', () => {
     [951, 0, 84, true, { kind: 'side', width: 392 }],
     [960, 0, 0, true, { kind: 'side', width: 480 }],
     [900, 0, 200, true, { kind: 'card', width: 600 }], // side too narrow, falls back
-    [600, 80, 0, true, { kind: 'card', width: 520 }], // 7" portrait over the rail
+    [600, RAIL_WIDTH, 0, true, { kind: 'card', width: 512 }], // 7" portrait over the rail
     [600, 0, 0, true, { kind: 'card', width: 600 }], // 7" portrait over a stack screen
-    [800, 80, 0, false, { kind: 'card', width: 600 }],
-    [960, 80, 0, true, { kind: 'side', width: 480 }],
-    [1280, 80, 0, true, { kind: 'side', width: 560 }],
+    [800, RAIL_WIDTH, 0, false, { kind: 'card', width: 600 }],
+    [960, RAIL_WIDTH, 0, true, { kind: 'side', width: 480 }],
+    [1280, RAIL_WIDTH, 0, true, { kind: 'side', width: 560 }],
   ])('(%i, %i, %i, %s)', (w, l, r, side, expected) => {
     expect(sheetLayout(w, l, r, side)).toEqual(expected);
   });
