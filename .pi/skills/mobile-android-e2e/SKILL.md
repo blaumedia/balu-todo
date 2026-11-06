@@ -126,7 +126,8 @@ in both orientations.
 cd apps/mobile
 npx expo prebuild --platform android                 # rewrites package.json, creates android/ and .expo/
 (cd android && ./gradlew :app:assembleRelease)       # foreground, bash timeout 2400 s
-# one ABI only: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a (~1.5 min, 2026-11-06)
+# one ABI only (must match the emulator image, arm64-v8a on Apple Silicon), ~1.5 min (2026-11-06):
+# (cd android && ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a)
 adb install -r android/app/build/outputs/apk/release/app-release.apk
 git checkout package.json                            # unless the task changed it on purpose
 ```
