@@ -501,7 +501,6 @@ function DetailBody({
         onChangeText={setNotes}
         onBlur={() => {
           notesPending.current = false;
-          clearTimeout(scrollTimer.current);
           commitNotes();
         }}
         placeholder={t('detail.notesPlaceholder')}
