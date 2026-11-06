@@ -117,14 +117,17 @@ adb shell pm clear com.blaumedia.balutodo 2>/dev/null   # base AVD may carry a l
 `wm size reset` / `wm density reset`). Editing `hw.lcd.*` in the clone's `config.ini` had no
 effect on this AVD base: do not use that route. Rotate with
 `adb shell settings put system accelerometer_rotation 0` then
-`adb shell settings put system user_rotation 1` (0 portrait, 1 landscape). Check every screen
-in both orientations.
+`adb shell settings put system user_rotation 1` (0 portrait, 1 landscape); set `user_rotation`
+again after the app has unlocked rotation. Check every screen in both orientations.
+Android 12L+ large-screen letterboxing of portrait-manifest apps is off on a plain emulator;
+turn it on with `adb shell wm set-ignore-orientation-request true` to test a cold start held
+in landscape (2026-11-06).
 
 ## 4. Build and install (release APK, no Metro)
 
 ```sh
 cd apps/mobile
-npx expo prebuild --platform android                 # rewrites package.json, creates android/ and .expo/
+npx expo prebuild --platform android --no-install     # rewrites package.json, creates android/ and .expo/
 (cd android && ./gradlew :app:assembleRelease)       # foreground, bash timeout 2400 s
 # one ABI only (must match the emulator image, arm64-v8a on Apple Silicon), ~1.5 min (2026-11-06):
 # (cd android && ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a)
@@ -142,7 +145,8 @@ Dev client instead (only when you need hot reload): Metro in the background
 ## 5. Backend, login, driving the UI
 
 - Stack: `tools/e2e/stack.sh up` (port `BALU_E2E_PORT`, default 8090; never compose project
-  `balu`; pick a port no other local stack uses). Seed: `tools/e2e/api.py setup [--tasks N]`.
+  `balu`; pick a port no other local stack uses). If another agent's e2e stack is running, use
+  your own: `BALU_E2E_PROJECT=balu-e2e-<you> BALU_E2E_PORT=<free port>` (2026-11-06). Seed: `tools/e2e/api.py setup [--tasks N]`.
 - Server URL in the app: `http://10.0.2.2:<port>`.
 - Login: `tools/e2e/android/login.py ROLE` (password goes via stdin to the device shell). On
   a fresh install enter the server URL first, and on an `http://` server confirm "Continue
@@ -152,7 +156,11 @@ Dev client instead (only when you need hot reload): Metro in the background
   could contain a password in a report.
 - Screenshot: `adb exec-out screencap -p > /tmp/$ME-<name>.png`, then look at it.
   Right after a rotation or `wm size` change it can write an empty file: wait a moment and
-  retry (2026-11-06).
+  retry, and run it as its own call, not chained after `input tap; sleep` (2026-11-06).
+- Changes made through `api.py` show in the app only after a sync: run `api.py sync-probe`
+  and wait a few seconds (2026-11-06).
+- Release builds still log `console.log` to logcat as `ReactNativeJS`
+  (`adb logcat -d -s ReactNativeJS`), handy for a temporary debug value (remove it after).
 - Avoid `%s` in quick-add text; use `ui.py type`.
 - Long-press drag (reorder): `adb shell input swipe` cannot do it. Use
   `adb shell input motionevent DOWN x y`, hold ~900 ms, several stepped `MOVE x y`, then
