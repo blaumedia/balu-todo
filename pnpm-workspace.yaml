@@ -37,3 +37,6 @@ packageExtensions:
   "@react-native-community/datetimepicker":
     dependencies:
       "@expo/config-plugins": "*"
+
+patchedDependencies:
+  expo-router@58.0.30: patches/expo-router@58.0.30.patch

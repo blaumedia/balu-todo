@@ -1,0 +1,33 @@
+diff --git a/build/global-state/routingQueueContext.js b/build/global-state/routingQueueContext.js
+index 54629aaf6eb7a8fd169c94405ff167884217106f..fd0bc42c802482d2a0c035cdf49a439155ec082e 100644
+--- a/build/global-state/routingQueueContext.js
++++ b/build/global-state/routingQueueContext.js
+@@ -60,6 +60,7 @@ const _router = require("./router");
+ const _routingQueue = require("./routingQueue");
+ const EMPTY = [];
+ let boundBridges = 0;
++let activeBinding = null;
+ const throwMissingRoutingQueue = ()=>{
+     throw new Error('Attempted to navigate from a component rendered outside the Expo Router root. Render the component inside `ExpoRoot`. If this happened inside `ExpoRoot`, please report a bug at https://github.com/expo/expo/issues.');
+ };
+@@ -131,10 +132,18 @@ function ImperativeRoutingQueueBridge({ enqueue, setTransitionMode }) {
+         }
+         boundBridges++;
+         // The exported router identity must stay stable, so the bridge mutates it in place.
+-        Object.assign(_router.router, (0, _router.createImperativeRouter)(enqueue, setTransitionMode));
++        const binding = (0, _router.createImperativeRouter)(enqueue, setTransitionMode);
++        Object.assign(_router.router, binding);
++        activeBinding = binding;
+         return ()=>{
+             boundBridges--;
+-            Object.assign(_router.router, _router.unboundRouter);
++            // Patched (balu): only unbind when this bridge still owns the shared router. After an
++            // Android activity recreation the old tree is unmounted AFTER the new one mounted, and
++            // its cleanup left the new tree with an unbound router for good.
++            if (activeBinding === binding) {
++                activeBinding = null;
++                Object.assign(_router.router, _router.unboundRouter);
++            }
+         };
+     }, [
+         enqueue,
