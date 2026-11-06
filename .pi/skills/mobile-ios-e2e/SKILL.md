@@ -30,26 +30,27 @@ way (replace the old step, do not append a variant).
 
 | Command | Why it hangs | Use instead |
 |---|---|---|
-| `npx expo run:ios` | After install + launch it stays attached to `simctl log stream` forever | `xcodebuild ... build` (section 4), then `xcrun simctl install` + `xcrun simctl launch` |
+| `npx expo run:ios` | Stays attached to `simctl log stream` after install + launch | `xcodebuild ... build` (section 4), then `simctl install` + `launch` |
 | `npx expo start` / Metro | Dev server | Background with a log file and `&`, record the PID |
-| `xcrun simctl spawn <udid> log stream` | Streams forever | `xcrun simctl spawn <udid> log show --last 2m --predicate 'process == "Balu"'` |
-| `xcrun simctl io <udid> recordVideo` | Runs until interrupted (wrote 0-byte files on Xcode 27.2) | Screenshots |
-| `xcrun simctl bootstatus <udid>` without `-b` | Waits forever on a sim nobody boots | `timeout 300 xcrun simctl bootstatus <udid> -b` (returned in seconds, 2026-11-05) |
-| `maestro test` without a timeout | Can wait on an element forever | a bounded call (the helpers bound every Maestro call internally, 90-180 s) |
+| `xcrun simctl spawn <udid> log stream` | Streams forever | `log show --last 2m --predicate 'process == "Balu"'` |
+| `xcrun simctl io <udid> recordVideo` | Runs until interrupted (0-byte files on Xcode 27.2) | Screenshots |
+| `xcrun simctl bootstatus <udid>` without `-b` | Waits forever on a sim nobody boots | `timeout 300 xcrun simctl bootstatus <udid> -b` |
+| `maestro test` without a timeout | Can wait on an element forever | the helpers bound every Maestro call (90-180 s) |
+| `duoctl ... tap --label` / `elements` | Needs the AXe CLI (not installed): "needs the AXe CLI" (2026-11-06) | point taps (section 6) |
 
-Wrap anything that waits on a device in `timeout` (GNU coreutils; on macOS
-`gtimeout` or `timeout` from coreutils). Long but finite commands (`pod install`,
+Wrap anything that waits on a device in `timeout`. Long but finite commands (`pod install`,
 `xcodebuild`, first build 10-20 min) run in the foreground with a bash timeout up to 2400 s;
 never background them and end your turn, never `sleep`-poll.
 
 ## 2. Preflight
 
 ```sh
-xcodebuild -version                  # 27.2 verified 2026-11-05; Duo needs 27.1+ SDK; the app needs Expo SDK 58+
-xcrun simctl list runtimes           # e.g. "iOS 27.2 - com.apple.CoreSimulator.SimRuntime.iOS-27-2"
+xcodebuild -version              # 27.2 verified 2026-11-05; Duo needs the 27.1+ SDK; the app needs Expo SDK 58+
+xcrun simctl list runtimes       # two iOS 27.2 entries exist; the Duo needs the second (section 3)
 xcrun simctl list devicetypes | grep -i -E 'duo|ipad|iphone'
-maestro --version                    # 2.12.0 verified; `hierarchy` and `test --device` need it
-df -h ~ | tail -1                    # ~20 GB free for a clean build
+maestro --version                # 2.12.0 verified; `hierarchy` and `test --device` need it
+duoctl --version                 # 0.2.1 verified 2026-11-06 (Duo only)
+df -h ~ | tail -1                # ~20 GB free for a clean build
 ```
 
 Xcode 27 has no Simulator.app; simulators are shown in **Device Hub**. **Quitting Device Hub
@@ -57,197 +58,215 @@ shuts down booted simulators**, including other agents' ones. Do not quit it.
 
 ## 3. Your own simulators
 
-Never boot or reuse a simulator another agent might run. Create your own and delete it at
-the end (verified 2026-11-05 with an iPhone 17 on the iOS 27.2 runtime):
+Never boot or reuse a simulator another agent might run. Create your own and delete it at the
+end (verified 2026-11-05 with an iPhone 17 on the iOS 27.2 runtime):
 
 ```sh
 ME=balu-e2e-ios-$$
 UDID=$(xcrun simctl create "$ME-iphone" com.apple.CoreSimulator.SimDeviceType.iPhone-17 com.apple.CoreSimulator.SimRuntime.iOS-27-2)
-echo "$UDID" > /tmp/$ME-udid                 # keep it: every later call needs it
+echo "$UDID" > /tmp/$ME-udid           # every later call needs it
 xcrun simctl boot "$UDID" && timeout 300 xcrun simctl bootstatus "$UDID" -b
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100
 ```
 
-Device types to cover for layout work (`xcrun simctl list devicetypes`): a classic iPhone
-(must look unchanged), the largest iPhone, an iPad (13" for store shots), and the iPhone Duo.
-
-**iPad:** set it to full-screen apps multitasking in Settings, else a window resize grip
-shows in screenshots. Set language/locale per run (`-AppleLanguages`/`-AppleLocale` launch
-args or the sim's Settings) if the status bar date matters.
+- **The iPhone Duo needs the second iOS 27.2 runtime build.** `iPhone-Duo` on
+  `SimRuntime.iOS-27-2` fails with "Incompatible device" (2026-11-06); it works on
+  `com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`.
+- Cover: a classic iPhone (must look unchanged), the largest iPhone, an iPad 13", the Duo.
+  Other agents' simulators share the list (some with names like "duo ..."): act only on
+  the UDID you created.
+- **iPad:** set full-screen apps multitasking in Settings, else a resize grip shows in
+  screenshots. Set language per run (`-AppleLanguages`/`-AppleLocale`) if the status bar matters.
 
 ## 4. Build and install (Release, no Metro)
 
 ```sh
 cd apps/mobile
-npx expo prebuild --platform ios --no-install   # verified 2026-11-05: clears and recreates ios/, rewrites package.json
-(cd ios && timeout 2400 pod install)            # foreground; prints harmless "added script phase" notes
+npx expo prebuild --platform ios --no-install   # clears and recreates ios/, rewrites package.json
+(cd ios && timeout 2400 pod install)            # foreground; "added script phase" notes are harmless
 (cd ios && timeout 2400 xcodebuild -workspace Balu.xcworkspace -scheme Balu -configuration Release \
   -sdk iphonesimulator -destination "id=$UDID" -derivedDataPath /tmp/$ME-dd \
   ARCHS=arm64 ONLY_ACTIVE_ARCH=YES build) > /tmp/$ME-build.log 2>&1
 grep -E '\*\* BUILD' /tmp/$ME-build.log          # "** BUILD SUCCEEDED **" (verified)
-APP=/tmp/$ME-dd/Build/Products/Release-iphonesimulator/Balu.app   # contains main.jsbundle (verified)
+APP=/tmp/$ME-dd/Build/Products/Release-iphonesimulator/Balu.app
 xcrun simctl install "$UDID" "$APP"
 xcrun simctl launch "$UDID" com.blaumedia.balu
 git checkout package.json                       # prebuild rewrites it
 ```
 
-`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` (Apple Silicon; Release build verified 2026-11-06) builds only the host simulator
-architecture; without it x86_64 is built too and the build takes about twice as long.
+`ARCHS=arm64 ONLY_ACTIVE_ARCH=YES` (Apple Silicon) builds only the host architecture; without
+it the build takes about twice as long. One build serves every simulator of the same
+architecture: install the same `.app` on the iPad and the Duo. A prebuilt `.app` from the same
+commit set may be reused: check its README and install it instead of rebuilding (done 2026-11-06).
+`ios/` is gitignored: remove it at the end if you created it (if it existed before, leave it).
 
-`--no-install` stops prebuild from running `pod install` itself, so run it yourself (above).
-
-**A second worktree (baseline build, 2026-11-06):** a worktree has no `node_modules`. A symlink to the main checkout's `node_modules` (root and `apps/mobile`) makes Metro fail with `Unable to resolve module ./../../../...` (the bundle entry resolves through the real path). Copy instead: `cp -cR <main>/node_modules ./node_modules` and `cp -cR <main>/apps/mobile/node_modules apps/mobile/node_modules` (APFS clones, seconds, little disk). Run `expo prebuild` there, then `git checkout -- apps/mobile/package.json` in that worktree. Remove the copies at cleanup (they are gitignored, so `git status` stays clean).
-One build serves every simulator of the same architecture: install the same `.app` on the
-iPad and the Duo instead of rebuilding. `ios/` is gitignored: remove it at the end, as
-`apps/mobile/ios` is regenerated (if it existed before your run, do not delete it; if you
-did, say so in your report).
+**Second worktree (baseline, 2026-11-06):** symlinked `node_modules` make Metro fail with
+`Unable to resolve module ./../../../...`. Copy instead: `cp -cR <main>/node_modules ./` and
+`cp -cR <main>/apps/mobile/node_modules apps/mobile/` (APFS clones, seconds). Remove the
+copies at cleanup.
 
 ## 5. Driving the UI
 
 ### 5.1 Backend and onboarding
 
-- Pick the port with `curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:<port>/healthz` (000 = free). `lsof` was unreliable here (hfs warnings, a port it called free was in use by another stack, 2026-11-06). `stack.sh up` refuses a port that answers. Stack and seed (`tools/e2e/README.md` 2-3): `BALU_E2E_PORT=<port> tools/e2e/stack.sh up`,
-  then `BALU_E2E_PORT=<port> python3 tools/e2e/api.py setup --tasks 6`. `setup` reuses the
-  accounts of an earlier run in the same state dir (409 is expected).
-- The simulator shares the host network: the server URL is `http://localhost:<port>`
-  (verified; Android uses `10.0.2.2`).
-- Fresh install (verified 2026-11-05): "Connect to your server" -> type the URL -> Continue
-  -> for `http://` a "Continue without encryption" button -> "Welcome back" login form.
-  Log in with `tools/e2e/ios/login.py --udid "$UDID" owner`.
-- The login inputs carry accessibility labels (`auth.email` / `auth.password`: "Email" /
-  "Password", German "E-Mail" / "Passwort"). `login.py` selects them by label. The label stays
-  when the input is filled: the typed text appears in the node's `value` and the placeholder
-  in `hint` (verified 2026-11-06; the earlier "filled input gets its text as label" does not
-  hold since the labels were added). Exactly one empty email and one empty password input must
-  be found, else nothing is typed. The keyboard must be down and the password input on screen
-  before the password tap (the first `hideKeyboard` sometimes leaves the keyboard up: login.py
-  waits 1.5 s and asks again, at most twice); after the tap the keyboard must be up and the
-  email input must still hold the typed mail (compared in-process), else the password is not
-  typed. It also refuses to type unless the login heading is shown (the register form uses
-  the same input labels). With a
-  connected hardware keyboard no on-screen keyboard appears, so login.py aborts safely there.
-  `focused` is always false for these inputs. Verified end to end on iPhone 17 portrait,
-  English ("Log in") and German ("Anmelden"), 2026-11-06, including the keyboard and
-  email-intact checks. iPad 13" portrait and iPhone 17 Pro Max portrait were verified 2026-11-06 (English, `login.py owner` exit 0, Today reached). German login and the Duo cover screen are not verified yet; the iPad landscape was not driven (no rotation command in this run).
-- If login.py aborts after typing the email, a rerun stops with "inputs not empty": terminate
-  and relaunch the app (the form resets), or clear the field (tap it, `ui.py erase N`), then
-  rerun. The password goes through a temporary Maestro flow file that is deleted right after
-  the run, never through argv or stdout. Use throwaway e2e accounts only.
-- iOS then shows a "Save Password?" sheet: `ui.py tap '^Not Now$'`.
-- Cold start check: `xcrun simctl terminate "$UDID" com.blaumedia.balu`, then `launch`. It
-  lands on Today with the session kept (verified).
+- Port: `curl -s -m 3 -o /dev/null -w '%{http_code}' http://127.0.0.1:<port>/healthz` (000 =
+  free). `lsof` was unreliable (2026-11-06). `stack.sh up` refuses a port that answers.
+  `BALU_E2E_PROJECT=<project> BALU_E2E_PORT=<port> tools/e2e/stack.sh up`, then the same two
+  variables with `python3 tools/e2e/api.py setup --tasks 6` (409 = reused accounts, expected).
+  **Every later `stack.sh psql` needs the same two variables** or it hits the wrong stack.
+- The simulator shares the host network: the server URL is `http://localhost:<port>`.
+- Fresh install (2026-11-05/06): "Connect to your server" -> type the URL -> Continue -> for
+  `http://` "Continue without encryption" -> "Welcome back" login form. Then
+  `tools/e2e/ios/login.py --udid "$UDID" owner`: exit 0 and `login submitted as owner` is the
+  pass, and Today is reached. The "Save Password?" sheet: `ui.py tap '^Not Now$'`.
+- **Duo cover URL entry (2026-11-06):** the keyboard can stay up over the Continue button, and
+  a first Continue showed "That doesn't look like a valid URL" (the text had not landed).
+  What worked: tap the field, `erase 40`, `type`, `key enter`, then Continue. Check the next
+  screen before going on.
+- login.py selects the inputs by their labels (`auth.email`/`auth.password`: "Email"/"Password",
+  German "E-Mail"/"Passwort") and refuses to type unless the login heading is shown. It waits
+  for the keyboard to drop before the password tap and aborts safely with a hardware keyboard.
+  Verified: iPhone 17 portrait English and German ("Anmelden"), iPad 13" and iPhone 17 Pro Max
+  portrait (English), Duo cover (English).
+- If login.py aborts after typing the email, a rerun says "inputs not empty": relaunch the app
+  (the form resets) or `ui.py erase N`. The password goes through a temporary flow file deleted
+  after the run, never through argv or stdout. Throwaway e2e accounts only.
+- Cold start: `xcrun simctl terminate "$UDID" com.blaumedia.balu`, then `launch`: lands on
+  Today with the session kept (portrait, verified 2026-11-05).
 
 ### 5.2 Helper and Maestro
 
-The helpers kill Maestro's process group on SIGINT, SIGTERM and SIGHUP and then clean up; a
-SIGKILL of the helper cannot be caught and leaves the Maestro JVM and the temp dir behind.
+The helpers kill Maestro's process group on SIGINT, SIGTERM and SIGHUP; a SIGKILL of the
+helper leaves the Maestro JVM and its temp dir behind.
 
-Maestro writes typed text (`inputText`, so also passwords) verbatim into
-`~/.maestro/tests/<timestamp>/`. `ui.py` and `login.py` run `maestro test` with
-`--test-output-dir`, `--debug-output` and `--flatten-debug-output` pointing at a private
-`mktemp -d` directory (0700) that is removed after the call; do the same if you call
-`maestro test` directly (verified 2026-11-05, Maestro 2.12.0: nothing lands in
-`~/.maestro/tests`). `maestro hierarchy` has no such flag and writes a folder with
-`maestro.log` and an xctest runner log there; it types nothing and the logs held no node
-text. Maestro also writes `~/Library/Logs/maestro/<timestamp>_<pid>.zip` per run (checked:
-empty `maestro.log`, no typed text). Never delete folders there by "what is new": other
-agents run Maestro too. Every `list`, `has`, `tap`, `screen-size` and `login.py` call adds a
-hierarchy-only folder (no flow subfolder, about 20 KB, no typed text) to `~/.maestro/tests`;
-the machine owner may prune old ones while no Maestro run is active.
+Maestro writes typed text (`inputText`, so also passwords) verbatim into `~/.maestro/tests/`.
+`ui.py` and `login.py` pass `--test-output-dir`, `--debug-output` and `--flatten-debug-output`
+to a private `mktemp -d` (0700) removed after the call; do the same if you call `maestro test`
+directly. Every `list`/`has`/`tap`/`screen-size`/`login.py` call adds a hierarchy-only folder
+there (about 20 KB). Never delete folders by "what is new" or by timestamp: other agents run
+Maestro too.
 
 `tools/e2e/ios/ui.py --udid "$UDID" <cmd>`:
 
 | Command | Use |
 |---|---|
-| `list [--full] [--all]` | visible nodes: `[x1,y1][x2,y2] 'label'`; `--all` adds unlabelled nodes, `--full` keeps long labels |
-| `has REGEX` / `tap REGEX [--nth N]` | match on the accessibility label; tap the centre |
+| `list [--full] [--all]` | visible nodes `[x1,y1][x2,y2] 'label'`; each prints twice (`awk 'NR%2==1'`); `--all` adds unlabelled nodes |
+| `has REGEX` / `tap REGEX [--nth N]` | match on the label, tap the centre. `NOT FOUND` = nothing tapped |
 | `point X Y` / `swipe X1 Y1 X2 Y2 [MS]` | absolute points (402 x 874 pt on iPhone 17) |
-| `type TEXT\|-` / `erase N` / `key NAME` / `hide-keyboard` | focused field; `key enter` submits quick add. `type` text is visible in `ps` and the transcript: **never pass secrets** (passwords go through `login.py`; `type -` reads stdin). Text containing `${` is rejected |
-| `shot OUT.png` | screenshot via simctl (save under /tmp, cite the path) |
-| `screen-size` | width and height in points |
+| `type TEXT\|-` / `erase N` / `key NAME` / `hide-keyboard` | focused field; `key enter` submits quick add and dismisses a single-line keyboard. Typed text is visible in `ps` and transcripts: **never pass secrets** (`type -` reads stdin). Text with `${` is rejected |
+| `shot OUT.png` / `screen-size` | simctl screenshot (cite the path) / points |
 
-- `maestro hierarchy` gives labels, bounds, enabled, checked, selected and focused, but **no
-  class names**. Select by label or by geometry.
-- **The keyboard covers buttons.** A tap on a button under the keyboard hits a key (2026-11-05:
-  a stray letter ended up in the server URL). Run `hide-keyboard` before tapping a button
-  that sits below y ~546 while the keyboard is up.
-- Maestro's `swipeLeft`/`swipeRight` do not take start/end: use the generic `swipe` (the helper
-  does).
-- Deep links: `xcrun simctl openurl "$UDID" 'balu://settings'`. The first call shows an
-  "Open in Balu?" dialog: `ui.py tap '^Open$'`. Verified: Settings opens, Back returns to Today.
-- Screenshot paths: always the portrait framebuffer. Judge the layout from the hierarchy
-  bounds first; open a PNG only for the checks in section 7.
+- `maestro hierarchy` gives labels, bounds, enabled, selected and focused, but **no class
+  names**. Select by label or geometry. A rail item's label can be an SF symbol name when not
+  selected (2026-11-06, Duo rail: `favorite`, `calendar`, `hdr`).
+- **The keyboard covers buttons.** `hide-keyboard` before tapping anything below y ~546 on
+  iPhone. On the Duo `hide-keyboard` sometimes left the keyboard up; `key enter` worked.
+- Maestro's `swipeLeft`/`swipeRight` take no start/end: use `swipe`.
+- Deep link: `xcrun simctl openurl "$UDID" 'balu://settings'`; the "Open in Balu?" dialog:
+  `ui.py tap '^Open$'`.
 
-### 5.3 Gestures (verified on iPhone 17, 2026-11-05)
+### 5.3 Gestures and flows (verified 2026-11-05/06)
 
-- **Left edge back swipe:** `ui.py swipe 3 500 330 500` (start x 3 pt, mid-height) pops the
-  pushed project screen back to Browse. A swipe that starts mid-screen does not pop.
-- **Row swipe, mid-row:** a leftward swipe on a task row opens the Schedule sheet; a rightward
-  swipe completes the task (the row leaves the list; `completed_at` set in the DB). Neither
-  navigates back.
-- **Dismiss a bottom sheet:** tap the dimmed strip just under the status bar, `point 200 65`
-  (y < 54 is the iOS status bar, its taps never reach the app). A downward swipe did not
-  close the task detail sheet, and the Schedule sheet was closed by a tap on the scrim at y 400.
-- **Notes and title drafts survive a scrim close (verified 2026-11-06, iPhone 17, iPhone 17 Pro Max, iPad 13" portrait):** type into "Add notes" or the title, then close with the scrim (`point 200 65` on the bottom sheet; `point 150 700` on the iPad side sheet, which is left of the sheet). `tools/e2e/stack.sh psql -c "select title, notes from tasks where ..."` held the typed text each time. Keep checking this after any sheet change.
-- **Tab labels differ by build:** the classic iOS tab bar (baseline build) exposes `Upcoming, tab, 2 of 4`; the NativeTabs bar (HEAD) exposes `Upcoming`. Anchor on the prefix (`'^Upcoming'`) and check `list` after each tap: a tap that matches nothing silently leaves the old screen, so a set of screenshots can be five copies of one screen (happened 2026-11-06).
-- **Date picker** (task detail): tap "Deadline, Pick a date", then the "Date Picker" node
-  (opens the calendar), then the day label (`Thursday, 12. November`). The popover closes on
-  the pick; the row reads "12 Nov" and the DB holds the date.
-- **Long-press drag (reorder):** not reproduced. A Maestro `swipe` with `duration` 1800 ms on a
-  project row did not reorder the list (2026-11-05). Do not claim a drag PASS without a
-  working method. Untested: `cliclick` on the host (mouse down/move/up); the Device Hub window
-  is reachable via System Events but its screen mapping is not known.
-
-### 5.4 Attachments
-
-- `xcrun simctl addmedia "$UDID" /tmp/<name>.png` puts a PNG in the simulator's library
-  (verified). Create it with ImageMagick: `magick -size 320x240 xc:'#3a7bd5' /tmp/<name>.png`.
-- Task detail -> "Add attachment" -> action sheet: "Photo" or "File". "Photo" opens the
-  Photos picker in limited-access mode with a banner; the newest item is the one you added.
-  Tap it: the attachment list shows it (verified). The "File" branch is not tried yet.
-- Verify at the server: `tools/e2e/stack.sh psql -c "select filename, content_type, size_bytes
-  from attachments where task_id = (select id from tasks where title = '<title>') and not is_deleted"`.
+- **Left edge back swipe:** `ui.py swipe 3 500 330 500` pops a pushed screen. Mid-screen swipes
+  do not pop. Rows: left swipe opens Schedule; right swipe completes the task.
+- **Dismiss a bottom sheet:** tap the dimmed strip above the sheet: iPhone 17 `point 200 65`;
+  Duo cover `point 200 30` (`point 200 65` hit the sheet header). Stay below the status bar
+  (y < 54 on iPhone never reaches the app). A downward swipe did not close the detail sheet.
+- **Drafts survive a scrim close** (notes and title; iPhone 17, iPhone 17 Pro Max, iPad 13"
+  portrait, Duo cover and landscape; 2026-11-06): type, close with the scrim, check
+  `stack.sh psql -c "select title, notes from tasks where ..."`.
+- **Tab labels differ by build:** classic bar `Upcoming, tab, 2 of 4`; NativeTabs `Upcoming`.
+  Anchor on the prefix (`'^Upcoming'`) and check `list` after each tap: a missed tap silently
+  leaves the old screen.
+- **Date picker (verified Duo cover 2026-11-06):** the row `Deadline, None` -> tap
+  `Deadline, Pick a date` -> `Date Picker` node -> day label (`Thursday, 12. November`). DB:
+  `2026-11-12`. The row then reads `Deadline, Clear` (its label changes with the date; match it
+  fresh). `^Deadline, Clear` -> DB NULL (verified). Reminder: `Remind me, Pick a date` opens a
+  wheel (day, hour, minute); not completed (2026-11-06).
+- **Attachments:** `xcrun simctl addmedia "$UDID" /tmp/<name>.png`, then task detail -> "Add
+  attachment" -> "Photo" (limited Photos picker; tap the newest item). DB:
+  `select filename, content_type, size_bytes from attachments where task_id = (...) and not is_deleted`.
+- **Long-press drag (reorder):** not reproduced with a Maestro `swipe` (2026-11-05).
+  `duoctl long-press` returns before any move, so there is no hold-and-drag on the Duo either
+  (2026-11-06). Do not claim a drag PASS without a working method.
 
 ## 6. iPhone Duo
 
-- Displays (points): cover 466 x 678 (portrait only), inner 669 x 951 portrait / 951 x 669
-  landscape. Store screenshots: cover 1398 x 2034, inner 2007 x 2853 (and landscape
-  variants).
-- In most poses iOS draws a vertical **rail** (~84 pt, status bar, back button, tab bar) on
-  the left or right edge, so check left/right safe-area insets, not only top/bottom. On the
-  cover the status bar is a column on the right that overlaps full-bleed content.
-- `simctl` and Maestro cannot fold or rotate the Duo. Use a fold-control CLI such as
-  `duoctl` (open source, built from source; `state|open|close|half|hinge|rotate|tap|swipe|screenshot`)
-  or Device Hub. Wait ~20 s after boot before using it. *(tool choice unverified for balu)*
-- Check every screen: folded, open portrait, open landscape, half-open (nothing to read or
-  tap in the fold), and folding with a screen open (same screen, same scroll, same state).
+Verified 2026-11-06 on a Duo from section 3 (runtime build 19-4), `duoctl` 0.2.1 (on PATH).
+
+- Displays (points): cover 466 x 678 (portrait), inner 669 x 951 portrait / 951 x 669 landscape.
+- **duoctl:** always pass `-d <udid>` (else it wants "the only booted iPhone Duo").
+  `state` (JSON: hingeAngle, activeScreen cover|inner, orientation, sizePoints); `open`,
+  `close`, `half` (hinge 180 / 0 / 90; `--duration 1` animates); `rotate portrait|landscape`
+  (inner screen, works); `tap X Y`, `swipe X1 Y1 X2 Y2 [--duration]`, `long-press X Y`
+  (interface points of the active screen); `screenshot PATH.png`. `--label`, `--id` and
+  `elements` need the AXe CLI (not installed).
+- **Timing:** wait ~20 s after boot before the first `state`; wait ~4 s after `open` or
+  `rotate` before reading the screen.
+- **Coordinates (verified 2026-11-06):** `ui.py list`/`tap` use one shared space where the cover
+  is at (0,0)-(466,678) and the inner display is bottom-right aligned to it, origin
+  `(466-w, 678-h)`: (-203,-273) in portrait and landscape. **Inner point = hierarchy point minus
+  the root origin** (+203, +273 on inner). `ui.py tap` only works on the cover; on the inner
+  screen use `duoctl tap` with the converted point (Upcoming tab (287, 899), FAB (619, 822),
+  both checked by their effect).
+- **Folded cover:** the status column and the tab rail are on the right (rail about 84 pt, x
+  382-466). Content and header end at x 382. FAB right edge 362 = 466 - 84 - 20 (`insets.right
+  + 20`). Quick-add input x 60-361, above the keyboard.
+- **Landscape inner (951 x 669):** the system rail is on the **right** (84 pt, x 867-951). The
+  detail side sheet spans x 475-867 (width 392 = 951 - 84 - 475): the left edge sits on the fold
+  (spec 475 +-1; measured 475).
+- **Portrait inner (669 x 951):** no rail. Quick-add and detail are 600 cards, measured edges
+  x 34 and x 634 (centred). The notes editor scrolls above the keyboard.
+- **Half-open (hinge 91):** the inner screen stays active, landscape, side sheet unchanged (edge
+  475), no task or draft lost. The pixel diff against the open frame was large (538k px at 6%)
+  while mean brightness matched; the cause is not known.
+- **Fold to cover with the detail open:** `close` left the detail nodes on the cover (sheet
+  kind not confirmed). `open` brings the inner screen back. Draft after fold/unfold/close:
+  `E2E Task C|<typed notes>` in the DB (verified).
+- **Not verified on the Duo:** rotate-live with the detail open in portrait, German, tab bar
+  contrast, drag.
+- **Screenshots:** if the agent is text-only, do not open PNGs; judge with numbers (section 7).
 
 ## 7. Layout checks (overlap / clipping)
 
-Per screen, device and pose: screenshot and look; nothing cut off, no text running out of
-its container, nothing drawn under the rail, the Dynamic Island or the home indicator, FAB
-and sheets clear of system bars, keyboard not covering the focused input. A classic iPhone
-must look as before.
+Per screen, device and pose: nothing cut off, no text running out of its container, nothing
+under the rail, Dynamic Island or home indicator, FAB and sheets clear of system bars, the
+keyboard not covering the focused input. A classic iPhone must look as before.
 
-Checked 2026-11-05, iPhone 17: onboarding, Today, Settings (the server row ends at y 875,
-the screen bottom edge), Browse, project screen, quick-add sheet (input above the keyboard
-at every stage), task detail sheet. **Finding:** in the task detail sheet the "Add notes..."
-editor (y 561-641) sits under the keyboard (top edge y 546) when focused, and the sheet
-does not move up. The quick-add sheet does move up. Check the detail sheet again after a
-fix before you mark it clean.
+Judge from the hierarchy bounds first. For edges without viewing the PNG, write a 40-line
+`prof.py` in /tmp (not in the repo): `magick IN.png -crop <W>x1+0+<Y*S> -resize <WPT>x1! -depth 8
+txt:-` (S = PNG width / points), then print the x positions where mean luminance steps by more
+than 18. This measured card edges, rail columns and the fold line (2026-11-06).
 
-Baseline pixel diff (2026-11-06, iPhone 17, HEAD vs baseline, same sim): `magick compare -metric AE` printed values above the pixel count in this ImageMagick (Q16-HDRI 7.1.2), so do not read them as pixels. Count instead: `magick a.png b.png -compose difference -composite -colorspace gray -threshold 6% -format '%[fx:mean*w*h]' info:`, and locate the differences with `-format '%@'` on horizontal bands of the mask. `xcrun simctl status_bar <udid> list` confirms the override is active; the Maestro hierarchy still reports the host clock, so judge the clock in a screenshot. Crop the tab bar off before comparing (the NativeTabs glass edge reaches a little above the bar, about y 2200 px at 3x).
+Checked 2026-11-06 (iPhone Duo): cover Today, Upcoming, Browse, Search, Settings top, quick-add
+and detail bottom sheets with notes and keyboard; inner portrait quick-add and detail cards
+(600); inner landscape detail side sheet (475 edge); fold (half, close) with the detail open.
+Not checked: Settings scrolled to the end, inner landscape Today and quick-add.
+
+**Finding (2026-11-05, iPhone 17):** the "Add notes..." editor sits under the keyboard when
+focused in the task detail sheet, and the sheet does not move up. The Duo scrolled the editor
+above the keyboard (2026-11-06). Check again after any sheet change.
+
+Pixel diff: `magick compare -metric AE` printed values above the pixel count here (Q16-HDRI
+7.1.2). Count instead: `magick a.png b.png -compose difference -composite -colorspace gray
+-threshold 6% -format '%[fx:mean*w*h]' info:`. Crop the tab bar off first (the NativeTabs glass
+edge reaches about y 2200 px at 3x). `xcrun simctl status_bar <udid> list` confirms the override.
 
 ## 8. Cleanup (always, also after a failure)
 
 ```sh
-xcrun simctl shutdown "$UDID"; xcrun simctl delete "$UDID"      # only YOUR simulators
+xcrun simctl shutdown "$UDID"; xcrun simctl delete "$UDID"       # only YOUR simulators
 rm -rf /tmp/$ME-dd /tmp/$ME-udid
-rm -rf "$MAESTRO_OUT"                       # only if you called `maestro test` yourself with --test-output-dir
-cd apps/mobile && git checkout package.json && rm -rf ios .expo
-tools/e2e/stack.sh purge                    # if you started the stack (also removes its state dir)
+cd apps/mobile && git checkout package.json && rm -rf ios .expo  # only what you created
+BALU_E2E_PROJECT=<project> BALU_E2E_PORT=<port> tools/e2e/stack.sh purge   # if you started it
 ```
 
-Never `xcrun simctl shutdown all` / `delete all` / `erase all`, never quit Device Hub while
-other simulators may be in use, never delete DerivedData you did not create. Never delete
-`~/.maestro/tests` folders by timestamp: other agents' runs live there too.
+Never `simctl shutdown all` / `delete all` / `erase all`, never quit Device Hub while other
+simulators may run, never delete DerivedData you did not create, never delete `~/.maestro/tests`
+folders by timestamp. Keep screenshots as evidence and cite their paths.
+
+## 9. Not possible on this simulator set (2026-11-06)
+
+- **iPad rotation:** `duoctl` drives only the Duo; there is no `simctl` rotation command and
+  XCUIDevice is not available here. *(unverified: Device Hub rotate)*
+- **iPad Split View / Slide Over:** not tried; needs Device Hub or a multitasking setup.
