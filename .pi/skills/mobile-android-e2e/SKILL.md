@@ -162,6 +162,16 @@ Dev client instead (only when you need hot reload): Metro in the background
 - Release builds still log `console.log` to logcat as `ReactNativeJS`
   (`adb logcat -d -s ReactNativeJS`), handy for a temporary debug value (remove it after).
 - Avoid `%s` in quick-add text; use `ui.py type`.
+- Sheet dismiss taps (2026-11-06, phone 1080x2400): the scrim is one full-screen node `desc='Close'`;
+  tap its visible strip above the sheet (e.g. y=100), a drag-down closes it with `input swipe 540 230 540 2200 300`.
+  `adb shell input text` types into a focused field directly. Check stored values with
+  `tools/e2e/stack.sh psql -c "select title, notes from tasks"`.
+- `uiautomator dump` lists views even when they are `importantForAccessibility="no-hide-descendants"`
+  (it includes not-important views), so it cannot show TalkBack hiding; do not read it as a failure (2026-11-06).
+- The generated `MainActivity` `configChanges` lacks `density` (Expo template, SDK 58); the repo's
+  `plugins/withConfigChanges.js` adds it. Check after prebuild with
+  `grep -o 'configChanges="[^"]*"' android/app/src/main/AndroidManifest.xml`. To test: with a sheet open and text
+  typed, `wm size` below 600 dp, `wm density` change and rotation must keep the same pid and the text (2026-11-06).
 - Long-press drag (reorder): `adb shell input swipe` cannot do it. Use
   `adb shell input motionevent DOWN x y`, hold ~900 ms, several stepped `MOVE x y`, then
   `UP x y` (2026-11-05).
