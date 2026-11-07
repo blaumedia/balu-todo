@@ -222,6 +222,7 @@ export const en = {
   'date.overdue': 'Overdue',
 
   'common.back': 'Back',
+  'common.close': 'Close',
   'common.cancel': 'Cancel',
   'common.ok': 'OK',
   'common.copy': 'Copy',

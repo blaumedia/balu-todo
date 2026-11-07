@@ -1,7 +1,8 @@
 import type { Comment, Priority, Role, Task } from '@balu/domain';
 import { canWrite } from '@balu/domain';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, type ScrollViewInstance, StyleSheet, Switch, Text, TextInput, type TextInputInstance, View } from 'react-native';
+import { AndroidKeyboardSettledProbe } from '../components/AndroidKeyboardSpacer';
 import { BottomSheet } from '../components/BottomSheet';
 import { Checkbox } from '../components/Checkbox';
 import { Icon } from '../components/Icon';
@@ -25,6 +26,10 @@ import {
   commentsForTask,
   initials,
 } from '../lib/collab';
+import { revealScrollDelta, visibleBottom } from '../lib/keyboardSpacer';
+import { rootViewRef } from '../lib/rootViewRef';
+import { findLiveTask, mayCommitDraft, pendingDraftPatch } from '../lib/taskDraft';
+import { getSync } from '../lib/clients';
 import { relativeTime, timestampLabel } from '../lib/format';
 import { useT } from '../i18n';
 import { useMyRole } from '../hooks/use-my-role';
@@ -47,11 +52,18 @@ export function TaskDetailSheet() {
   const taskId = useApp((s) => s.detailTaskId);
   const close = useApp((s) => s.closeDetail);
   const snap = useSnapshot();
-  const task = taskId ? snap.tasks.find((x) => x.id === taskId) : undefined;
+  // Follows idAliases: a task created offline is confirmed under a real id while the sheet is open on its temp id.
+  const task = findLiveTask(snap.tasks, snap.idAliases, taskId);
+
+  // The task can vanish (deleted on another client, a reminder for a task that is gone) while its id is set; clear it
+  // so the store does not dangle, like ProjectActionsSheet. Only after a sync: before it the replica may still be empty.
+  useEffect(() => {
+    if (taskId && snap.hasSynced && (!task || task.is_deleted)) close();
+  }, [taskId, task, snap.hasSynced, close]);
 
   return (
     <BottomSheet visible={taskId != null && task != null} onClose={close} full>
-      {task ? <DetailBody key={task.id} task={task} onClose={close} theme={theme} t={t} snap={snap} /> : null}
+      {task ? <DetailBody key={taskId} task={task} onClose={close} theme={theme} t={t} snap={snap} /> : null}
     </BottomSheet>
   );
 }
@@ -71,16 +83,39 @@ function DetailBody({
 }) {
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes);
+  const user = useApp((s) => s.user);
+  const myRole = useMyRole();
+  const writable = canWrite(myRole);
   const [showProjects, setShowProjects] = useState(false);
   const [showSections, setShowSections] = useState(false);
   const [showRecurrence, setShowRecurrence] = useState(false);
   const [showAssignee, setShowAssignee] = useState(false);
-  const user = useApp((s) => s.user);
 
+  // What is stored (the task, or what a commit just wrote) and the latest draft, in refs so the commit can also
+  // run from the unmount cleanup below: closing the sheet (scrim tap, VoiceOver escape, drag-down) or opening another
+  // task (key remount) unmounts this body before the native blur arrives, so onBlur alone would drop the draft.
+  const saved = useRef({ title: task.title, notes: task.notes });
+  const latest = useRef({ title, notes, writable });
+  // The client the sheet opened with and whether the draft was thrown away (Delete): both stop the unmount commit.
+  const openedWith = useRef(getSync());
+  const discarded = useRef(false);
   useEffect(() => {
-    setTitle(task.title);
-    setNotes(task.notes);
-  }, [task.id, task.title, task.notes]);
+    latest.current.writable = writable;
+  }, [writable]);
+  // Every draft change goes through here so `latest` is current in the same step, not after the next render: an
+  // unmount in between must not see a stale draft and write it over a newer remote value.
+  const setDraft = (next: { title?: string; notes?: string }) => {
+    latest.current = { ...latest.current, ...next };
+    if (next.title !== undefined) setTitle(next.title);
+    if (next.notes !== undefined) setNotes(next.notes);
+  };
+
+  // No task.id in the deps: DetailBody is keyed by the store id, and task.id changes from the
+  // temporary to the real id on confirmation, which must not reset the draft.
+  useEffect(() => {
+    saved.current = { title: task.title, notes: task.notes };
+    setDraft({ title: task.title, notes: task.notes });
+  }, [task.title, task.notes]);
 
   const completed = task.completed_at != null;
   const project = task.project_id ? snap.projects.find((p) => p.id === task.project_id) : undefined;
@@ -94,37 +129,100 @@ function DetailBody({
   const members = snap.members.filter((m) => !m.is_deleted);
   const multiMember = members.length > 1;
   const assignee = task.assigned_to ? members.find((m) => m.id === task.assigned_to) : undefined;
-  const myRole = useMyRole();
-  const writable = canWrite(myRole);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   // The composer sits at the sheet's bottom — when it gains focus the keyboard
   // pads the sheet, but the ScrollView doesn't follow on its own.
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(scrollTimer.current), []);
   const scrollToComposer = () => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
+    clearTimeout(scrollTimer.current);
+    notesPending.current = false; // the composer has focus now, a pending notes reveal would steal the scroll
+    scrollTimer.current = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
+  };
+  const notesRef = useRef<TextInputInstance>(null);
+  const scrollY = useRef(0);
+  const keyboardHeight = useRef(0);
+  const notesPending = useRef(false);
+  const revealNotes = (catchUp = true) => {
+    const sv = scrollRef.current;
+    const notes = notesRef.current;
+    const root = rootViewRef.current;
+    if (!sv || !notes || !root) return;
+    root.measureInWindow((_rx, rootY, _rw, rootH) => {
+      sv.measureInWindow((_sx, svY, _sw, svH) => {
+        notes.measureInWindow((_x, y, _w, h) => {
+          if (!notes.isFocused()) return; // blurred while measuring: do not scroll for a field that lost focus
+          // Android: the ScrollView layout may not have shrunk for the keyboard yet, so cap its bottom by the real keyboard top.
+          // While that layout is still stale the scroll may stop short, so it runs once more after the first animated scroll has finished.
+          const bottom = visibleBottom(svY + svH, rootY + rootH, keyboardHeight.current);
+          const delta = revealScrollDelta(y, h, space.s4, bottom, 0);
+          if (delta > 0) {
+            sv.scrollTo({ y: scrollY.current + delta, animated: true });
+            if (catchUp) {
+              clearTimeout(scrollTimer.current);
+              scrollTimer.current = setTimeout(() => revealNotes(false), 400);
+            }
+          }
+        });
+      });
+    });
+  };
+  // Same reason as the composer: the keyboard pads the sheet but the ScrollView does not follow.
+  // Scrolls only forward and only as far as needed to bring the BOTTOM of the notes field (where the caret is when
+  // appending) above the keyboard; a field that is already visible does not move.
+  const scrollToNotes = () => {
+    clearTimeout(scrollTimer.current);
+    if (Platform.OS === 'android' && keyboardHeight.current <= 0) {
+      notesPending.current = true; // wait until the IME has settled, its height is not known yet
+      return;
+    }
+    scrollTimer.current = setTimeout(() => revealNotes(), Platform.OS === 'android' ? 50 : 300);
+  };
+  const onKeyboardSettled = (kh: number) => {
+    keyboardHeight.current = kh;
+    if (kh <= 0) notesPending.current = false;
+    else if (notesPending.current) {
+      notesPending.current = false;
+      clearTimeout(scrollTimer.current);
+      scrollTimer.current = setTimeout(() => revealNotes(), 50);
+    }
   };
 
   // A role drop must not leave an unsaved draft behind: it would show as if
   // kept and be committed by the next blur after a promotion back to writer.
   useEffect(() => {
-    if (!writable) {
-      setTitle(task.title);
-      setNotes(task.notes);
-    }
+    if (!writable) setDraft({ title: task.title, notes: task.notes });
   }, [writable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // A viewer must not write (the server rejects it).
-  const commitTitle = () => {
-    if (!writable) return;
-    const v = title.trim();
-    if (v && v !== task.title) updateTask(task.id, { title: v });
+  const commitDraft = () => {
+    const { writable: canEdit, ...draft } = latest.current;
+    const patch = pendingDraftPatch(draft, saved.current, canEdit);
+    if (!patch) return;
+    // Look the task up in the live replica: it may have been deleted meanwhile, or the workspace switched.
+    const sync = getSync();
+    const snapshot = sync?.getSnapshot();
+    const live = snapshot ? findLiveTask(snapshot.tasks, snapshot.idAliases, task.id) : undefined;
+    if (!mayCommitDraft(live, sync === openedWith.current, discarded.current)) return;
+    saved.current = { ...saved.current, ...patch };
+    updateTask(task.id, patch);
   };
-  const commitNotes = () => {
-    if (!writable) return;
-    if (notes !== task.notes) updateTask(task.id, { notes });
-  };
+  const commitDraftRef = useRef(commitDraft);
+  useEffect(() => {
+    commitDraftRef.current = commitDraft;
+  });
+  useEffect(() => () => commitDraftRef.current(), []);
 
   return (
-    <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <>
+    <AndroidKeyboardSettledProbe onSettled={onKeyboardSettled} />
+    <ScrollView
+      ref={scrollRef}
+      onScroll={(e) => { scrollY.current = e.nativeEvent.contentOffset.y; }}
+      scrollEventThrottle={16}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
       {/* Title row */}
       <View style={styles.titleRow}>
         <Checkbox
@@ -135,8 +233,8 @@ function DetailBody({
         <TextInput
           value={title}
           editable={writable}
-          onChangeText={setTitle}
-          onBlur={commitTitle}
+          onChangeText={(v) => setDraft({ title: v })}
+          onBlur={commitDraft}
           style={[styles.titleInput, { color: theme.textPrimary }]}
           multiline
         />
@@ -432,14 +530,19 @@ function DetailBody({
       </View>
       {/* Notes */}
       <TextInput
+        ref={notesRef}
         value={notes}
         editable={writable}
-        onChangeText={setNotes}
-        onBlur={commitNotes}
+        onChangeText={(v) => setDraft({ notes: v })}
+        onBlur={() => {
+          notesPending.current = false;
+          commitDraft();
+        }}
         placeholder={t('detail.notesPlaceholder')}
         placeholderTextColor={theme.textTertiary}
         style={[styles.notes, { color: theme.textPrimary }]}
         multiline
+        onFocus={scrollToNotes}
       />
 
       {/* Task meta */}
@@ -462,6 +565,7 @@ function DetailBody({
         <Pressable
           style={styles.delete}
           onPress={() => {
+            discarded.current = true;
             deleteTask(task.id);
             onClose();
           }}
@@ -472,6 +576,7 @@ function DetailBody({
       )}
       <View style={{ height: space.s8 }} />
     </ScrollView>
+    </>
   );
 }
 

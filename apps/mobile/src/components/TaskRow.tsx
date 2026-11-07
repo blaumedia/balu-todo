@@ -1,10 +1,10 @@
 import type { IsoDate, Label, Member, Project, Task } from '@balu/domain';
 import { initials } from '../lib/collab';
-import { useMemo, useRef, useState } from 'react';
+import { type ComponentProps, type ReactElement, useMemo, useRef, useState } from 'react';
 import { type AccessibilityActionEvent, Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useNavigation } from 'expo-router';
 import Animated, { FadeOut, useSharedValue } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureStateManager, useManualGesture } from 'react-native-gesture-handler';
 import ReanimatedSwipeable, {
   SwipeDirection,
   type SwipeableMethods,
@@ -22,6 +22,61 @@ import { Icon } from './Icon';
 
 /** Width (dp) of the left screen-edge strip left to the iOS back swipe. */
 const EDGE_BACK_ZONE = 24;
+
+type SwipeRequireToFail = ComponentProps<typeof ReanimatedSwipeable>['requireToFail'];
+
+/**
+ * Writer rows on iOS stacks: ReanimatedSwipeable's own pan covers the whole row.
+ * A Manual gesture over the edge strip never activates (it fails when the finger
+ * lifts), and the swipeable requires it to fail first, so a drag that starts
+ * in the strip stays with the back swipe. Not the swipeable's hitSlop prop:
+ * that is a view-level slop and would also kill taps on the checkbox.
+ * It also fails as soon as the touch moves leftward or vertically (the back
+ * swipe is rightward only), so UIKit does not hold a swipeable activation
+ * until lift and replay it late. The callbacks are worklets on purpose: with
+ * the 'worklet' directive RNGH takes the Reanimated path, where
+ * GestureStateManager.fail() runs synchronously on the UI thread before the
+ * swipeable's pan activates (on the JS path it works too, but asynchronously,
+ * which is too late). Worklets get a copy of captured variables, so the
+ * touch-down point lives in shared values. Separate component so rows without
+ * the guard do not create a native handler.
+ */
+function EdgeGuardedSwipeable({ renderSwipe }: { renderSwipe: (requireToFail: SwipeRequireToFail) => ReactElement }) {
+  const startX = useSharedValue(0);
+  const startY = useSharedValue(0);
+  const edgeBlock = useManualGesture(
+    useMemo(
+      () => ({
+        hitSlop: { left: 0, width: EDGE_BACK_ZONE },
+        onTouchesDown: (e) => {
+          'worklet';
+          startX.value = e.allTouches[0]?.x ?? 0;
+          startY.value = e.allTouches[0]?.y ?? 0;
+        },
+        onTouchesMove: (e) => {
+          'worklet';
+          const touch = e.allTouches[0];
+          if (!touch) return;
+          if (touch.x - startX.value < -10 || Math.abs(touch.y - startY.value) > 10) GestureStateManager.fail(e.handlerTag);
+        },
+        onTouchesUp: (e) => {
+          'worklet';
+          GestureStateManager.fail(e.handlerTag);
+        },
+        onTouchesCancel: (e) => {
+          'worklet';
+          GestureStateManager.fail(e.handlerTag);
+        },
+      }),
+      [startX, startY],
+    ),
+  );
+  return (
+    <GestureDetector gesture={edgeBlock}>
+      <View collapsable={false}>{renderSwipe(edgeBlock)}</View>
+    </GestureDetector>
+  );
+}
 
 export interface TaskRowProps {
   task: Task;
@@ -71,37 +126,6 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     if (edgeBack) pan.hitSlop({ left: -EDGE_BACK_ZONE });
     return pan.activeOffsetX([-10, 10]).failOffsetY([-10, 10]);
   }, [edgeBack]);
-  // Writer rows: ReanimatedSwipeable's own pan covers the whole row. A Manual
-  // gesture over the edge strip never activates (it fails when the finger
-  // lifts), and the swipeable requires it to fail first, so a drag that starts
-  // in the strip stays with the back swipe. Not the swipeable's hitSlop prop:
-  // that is a view-level slop and would also kill taps on the checkbox.
-  // It also fails as soon as the touch moves leftward or vertically (the back
-  // swipe is rightward only), so UIKit does not hold a swipeable activation
-  // until lift and replay it late. The callbacks must stay worklets (no
-  // runOnJS): GestureStateManager.fail() goes through Reanimated's
-  // setGestureState, which is a no-op with a warning on the JS thread. Worklets
-  // get a copy of captured variables, so the touch-down point lives in shared values.
-  const startX = useSharedValue(0);
-  const startY = useSharedValue(0);
-  const edgeBlock = useMemo(
-    () =>
-      Gesture.Manual()
-        .hitSlop({ left: 0, width: EDGE_BACK_ZONE })
-        .onTouchesDown((e) => {
-          startX.value = e.allTouches[0]?.x ?? 0;
-          startY.value = e.allTouches[0]?.y ?? 0;
-        })
-        .onTouchesMove((e, manager) => {
-          const touch = e.allTouches[0];
-          if (!touch) return;
-          if (touch.x - startX.value < -10 || Math.abs(touch.y - startY.value) > 10) manager.fail();
-        })
-        .onTouchesUp((_e, manager) => manager.fail())
-        .onTouchesCancelled((_e, manager) => manager.fail()),
-    [startX, startY],
-  );
-
   const completed = task.completed_at != null;
   const checked = completed || done;
 
@@ -306,10 +330,10 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
     );
   }
 
-  const swipe = (
+  const renderSwipe = (requireToFail?: SwipeRequireToFail) => (
     <ReanimatedSwipeable
       ref={swipeRef}
-      requireExternalGestureToFail={edgeBack ? edgeBlock : undefined}
+      requireToFail={requireToFail}
       friction={2}
       leftThreshold={56}
       rightThreshold={56}
@@ -333,13 +357,7 @@ export function TaskRow({ task, today, projects, labels, members, commentCount =
 
   return (
     <Animated.View exiting={FadeOut.duration(duration.medium)}>
-      {edgeBack ? (
-        <GestureDetector gesture={edgeBlock}>
-          <View collapsable={false}>{swipe}</View>
-        </GestureDetector>
-      ) : (
-        swipe
-      )}
+      {edgeBack ? <EdgeGuardedSwipeable renderSwipe={renderSwipe} /> : renderSwipe()}
     </Animated.View>
   );
 }

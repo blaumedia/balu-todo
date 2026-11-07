@@ -1,4 +1,7 @@
-// Reusable bottom sheet (DESIGN §7: radius 16, drag handle). Rendered as a
+// Reusable bottom sheet (DESIGN §7: radius 16, drag handle). On windows at least 600
+// wide it is a centred card (max 600), and with `full` from 900 a side sheet docked on
+// the right; over the tabs on an Android tablet cards clear the navigation rail (the
+// scrim still covers it). Rendered as a
 // plain absolute-fill overlay — the sheet components live at the root layout,
 // as siblings after the navigator, so they already stack above every screen
 // and the tab bar. Deliberately NOT an RN <Modal>: modals get their own
@@ -9,11 +12,11 @@
 //   props driven from useAnimatedStyle don't reliably relayout a view that
 //   also runs a layout animation (the sheet stayed behind the keyboard until
 //   some content change forced a reflow).
-// - The slide-in is a manual spring on translateY, not an entering()
+// - The slide-in is a manual spring on the offset (translateY, translateX for the side sheet), not an entering()
 //   animation, for the same reason.
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { BackHandler, Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { BackHandler, Keyboard, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
@@ -23,6 +26,10 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useT } from '../i18n';
+import { useVisibleNavRailExtent } from '../hooks/use-layout';
+import { sheetLayout } from '../lib/layout';
+import { registerOpenSheet } from '../lib/openSheets';
 import { useTheme } from '../theme/ThemeProvider';
 import { radius, space } from '../theme/tokens';
 import { AndroidKeyboardSpacer } from './AndroidKeyboardSpacer';
@@ -55,17 +62,29 @@ function useKeyboardHeight(): number {
 }
 
 export function BottomSheet({ visible, onClose, children, full }: BottomSheetProps) {
+  const { t } = useT();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const translateY = useSharedValue(SLIDE_FROM);
+  const offset = useSharedValue(SLIDE_FROM);
   const keyboardHeight = useKeyboardHeight();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // Over the tabs on an Android tablet the rail takes the left edge (it already contains insets.left).
+  const insetLeft = Math.max(insets.left, useVisibleNavRailExtent());
+  const layout = sheetLayout(windowWidth, insetLeft, insets.right, full === true);
+  const side = layout.kind === 'side';
+  // bottom: the historical 700 (phones unchanged); card: tablets are taller than 700; side: from the right edge.
+  const slideFrom = layout.kind === 'bottom' ? SLIDE_FROM : side ? layout.width + insets.right : Math.max(SLIDE_FROM, windowHeight);
 
   useEffect(() => {
     if (visible) {
-      translateY.value = SLIDE_FROM;
-      translateY.value = withSpring(0, { damping: 24, stiffness: 240 });
+      offset.value = slideFrom;
+      offset.value = withSpring(0, { damping: 24, stiffness: 240 });
     }
-  }, [visible, translateY]);
+    // A resize while open must not replay the entrance, so slideFrom is not a dependency.
+  }, [visible, offset]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The root layout hides the screen behind from TalkBack only while a sheet is really on screen.
+  useEffect(() => (visible ? registerOpenSheet() : undefined), [visible]);
 
   // Android hardware back closes the sheet (the Modal used to do this).
   useEffect(() => {
@@ -79,17 +98,19 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
 
   const pan = Gesture.Pan()
     .onUpdate((e) => {
-      translateY.value = Math.max(0, e.translationY);
+      offset.value = Math.max(0, e.translationY);
     })
     .onEnd((e) => {
       if (e.translationY > 120 || e.velocityY > 900) {
         runOnJS(onClose)();
       } else {
-        translateY.value = withSpring(0, { damping: 22, stiffness: 220 });
+        offset.value = withSpring(0, { damping: 22, stiffness: 220 });
       }
     });
 
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  const sheetStyle = useAnimatedStyle(() =>
+    side ? { transform: [{ translateX: offset.value }] } : { transform: [{ translateY: offset.value }] },
+  );
 
   if (!visible) return null;
 
@@ -102,9 +123,18 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
       : insets.bottom + space.s4;
 
   return (
-    <View style={[StyleSheet.absoluteFill, styles.container]}>
+    <View
+      accessibilityViewIsModal
+      onAccessibilityEscape={() => {
+        Keyboard.dismiss();
+        onClose();
+      }}
+      style={[StyleSheet.absoluteFill, styles.container, !side && { paddingLeft: insetLeft, paddingRight: insets.right }]}
+    >
       <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
         <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('common.close')}
           style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
           onPress={() => {
             Keyboard.dismiss();
@@ -115,21 +145,25 @@ export function BottomSheet({ visible, onClose, children, full }: BottomSheetPro
       <Animated.View
         style={[
           styles.sheet,
+          layout.kind === 'card' ? { width: layout.width, alignSelf: 'center' } : null,
+          side ? [styles.side, { right: insets.right, width: layout.width, paddingTop: insets.top + space.s3 }] : null,
           {
             backgroundColor: theme.surfaceRaised,
             borderColor: theme.border,
             paddingBottom: bottomPad,
-            maxHeight: full ? '92%' : '88%',
-            minHeight: full ? '70%' : undefined,
+            maxHeight: side ? undefined : full ? '92%' : '88%',
+            minHeight: side ? undefined : full ? '70%' : undefined,
           },
           sheetStyle,
         ]}
       >
-        <GestureDetector gesture={pan}>
-          <View style={styles.handleArea}>
-            <View style={[styles.handle, { backgroundColor: theme.border }]} />
-          </View>
-        </GestureDetector>
+        {side ? null : (
+          <GestureDetector gesture={pan}>
+            <View style={styles.handleArea}>
+              <View style={[styles.handle, { backgroundColor: theme.border }]} />
+            </View>
+          </GestureDetector>
+        )}
         {children}
         <AndroidKeyboardSpacer bottomInset={insets.bottom} animated />
       </Animated.View>
@@ -145,6 +179,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: space.s5,
   },
+  side: { position: 'absolute', top: 0, bottom: 0, borderTopRightRadius: 0, borderBottomLeftRadius: radius.sheet },
   handleArea: { alignItems: 'center', paddingVertical: space.s3 },
   handle: { width: 36, height: 4, borderRadius: 2 },
 });

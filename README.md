@@ -1,12 +1,18 @@
 # Balu
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/hero-dark.png">
+  <img alt="Balu on an Android tablet, an iPad, an iPhone Duo, an iPhone and an Android phone" src="docs/screenshots/hero-light.png">
+</picture>
+
 A self-hostable, multi-tenant todo app with first-class iOS and Android apps.
 **The self-hostable todo app that feels like Things and syncs like Todoist.**
 
 - Offline-first everywhere: every client keeps a full local replica and a durable
   command queue - no spinners, airplane mode just works.
 - Natural-language quick-add in German and English ("Wäsche waschen jeden zweiten
-  Dienstag #Haushalt bis Freitag"), with live token highlighting.
+  Dienstag #Haushalt bis Freitag"), with live token highlighting -
+  see [Quick-add syntax](#quick-add-syntax).
 - Start dates and deadlines are separate things, like they should be.
 - Workspaces, roles (incl. read-only viewers), invite links, task assignment,
   per-task comments.
@@ -23,10 +29,95 @@ The same data, on the phone - the mobile apps are full clients, not a web view:
 |---|---|---|
 | ![iOS Today, light](docs/screenshots/ios-today-light.png) | ![iOS Today, dark](docs/screenshots/ios-today-dark.png) | ![iOS task detail](docs/screenshots/ios-detail.png) |
 
+And on the big screens: iPad, the foldable iPhone Duo and Android tablets get a readable
+column, a side rail on Android, and the task detail as a side sheet next to the list.
+
+| iPad | iPhone Duo, unfolded | Android tablet |
+|---|---|---|
+| ![iPad, Today with the task detail side sheet](docs/screenshots/ipad-landscape.png) | ![iPhone Duo inner display, Today](docs/screenshots/duo-inner.png) | ![Android tablet, Today with the navigation rail and the task detail side sheet](docs/screenshots/android-tablet.png) |
+
 Point them at your own server on first launch - there is no account with us.
 [App Store](https://apps.apple.com/app/balu-private-todo-tasks/id6794310209) ·
 [Google Play](https://play.google.com/store/apps/details?id=com.blaumedia.balutodo) ·
 or build `apps/mobile/` yourself.
+
+## Quick-add syntax
+
+Type a sentence into quick-add and Balu picks out the parts it understands. Recognised
+parts are highlighted while you type and removed from the title; everything else stays
+the title. A plain date sets the **start date** (when the task shows up in Today), a
+date with `by`/`due` (German: `bis`) sets the **deadline**. The parser follows the
+app's language setting: German phrases only work with the app set to German, English
+phrases with English. Examples below assume today is Wednesday, 11 June 2025.
+
+**Dates and times**
+
+| You type (English) | You type (German) | What it sets |
+|---|---|---|
+| `today`, `tomorrow` (`tmrw`) | `heute`, `morgen`, `übermorgen` | start date |
+| `fri`, `friday` | `fr`, `freitag` | start = next such weekday, never today (`2025-06-13`) |
+| `next monday`, `next week` | `nächsten Montag`, `nächste Woche` | start in next calendar week (`2025-06-16`) |
+| `in 3 days`, `in 2 weeks` | `in 3 Tagen`, `in 2 Wochen` | start = today + N (`2025-06-14`, `2025-06-25`) |
+| `24.12.`, `24.12.2026`, `2025-12-24` | same | start; without a year the next occurrence |
+| `dec 24`, `24th dec` | - | start (English month names only) |
+| `tonight` | `heute abend` | start today, flagged as evening |
+| `by friday`, `due fri`, `by jun 20` | `bis Freitag`, `bis 20.6.` | **deadline** instead of start |
+| `at 9`, `at 9am`, `at 5:30pm`, `17:30`, `at noon` | `um 9`, `9 Uhr`, `17:30`, `um 17.30 Uhr` | time of day = reminder (`09:00`, `17:30`) |
+| `by 5pm`, `by noon` | `bis 17 Uhr` | reminder at that time and due that day; a date next to it (`by 5pm friday`) is the deadline |
+
+A time without a date reminds you today, or tomorrow if it has already passed. A time
+next to a date reminds on that day. A bare number is never a time (`Call 9` stays text).
+
+**Recurrence**
+
+| You type (English) | You type (German) | What it sets |
+|---|---|---|
+| `every monday` | `jeden Montag` | weekly on that weekday |
+| `every other tuesday` | `jeden zweiten Dienstag` | every 2 weeks on that weekday |
+| `every day`, `daily` | `jeden Tag`, `täglich` | daily |
+| `every 3 days` | `alle 3 Tage` | every 3 days |
+| `every week`, `weekly` | `jede Woche`, `wöchentlich` | weekly |
+| `every 2 weeks` | `alle 2 Wochen` | every 2 weeks |
+| `monthly`, `yearly` (`annually`) | `monatlich`, `jährlich` | monthly, yearly |
+
+Typing a recurrence with a weekday and no date, `every monday at 9am`, puts the first
+reminder on the next Monday.
+
+**Projects, labels, priority**
+
+| You type | What it sets |
+|---|---|
+| `#Home`, `#"Home renovation"` | project; use the quoted form for names with spaces |
+| `@urgent @home` | labels, any number |
+| `!p1`, `!p2`, `!p3`, `!!` | priority 1 to 3; `!!` is `!p1` |
+
+`#project` and `@label` only match names that already exist (case-insensitive). An
+unknown one stays in the title as typed. Inside a project, tasks go there by default;
+an explicit `#project` wins. Quick-add has no syntax for sections or assignees: set
+those on the task afterwards.
+
+**Combined examples**
+
+- `Wäsche waschen jeden zweiten Dienstag #Haushalt bis Freitag` - title "Wäsche waschen",
+  every 2 weeks on Tuesday, project Haushalt, deadline `2025-06-13`.
+- `Standup every monday at 9am @work` - weekly on Monday, reminder 09:00 on the next Monday.
+- `Ship release by friday at 9am !p1 #Work` - deadline `2025-06-13`, reminder 09:00, priority 1.
+- `Anruf bei Oma morgen um 17.30 Uhr` - start `2025-06-12`, reminder 17:30.
+- `Pay rent monthly tomorrow` - start `2025-06-12`, repeats monthly.
+
+**Good to know**
+
+- Words are matched anywhere in the sentence, so a title word can be eaten: German `so`,
+  `do`, `mi`, `di` are weekday abbreviations (`Das so machen` starts on Sunday), and
+  English `sat`, `sun`, `mon`, `wed` are too. There is no escape character; the
+  highlighting shows what was taken before you press Enter.
+- One value per kind: if you type two start dates (`fri tmrw`), the last one wins and
+  the other is dropped from the title as well.
+- Weekday lists (`every mon, wed`) are not supported: `every mon, wed` repeats on Monday only and reads `wed` as a start date.
+- Impossible values stay text: `31.02.`, `25:00`, `13pm`.
+- Filler words stay in the title: `Arzt am Montag` becomes "Arzt am". Only `by`/`due`/`bis`
+  are absorbed.
+- English dates like `9 jul` win over a time (`at 9 jul` is 9 July, not 09:00).
 
 ## Run it
 

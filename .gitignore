@@ -33,3 +33,9 @@ apps/mobile/eas.json
 # Local agent scratch: skills and throwaway worktrees
 .claude/skills/
 .claude/worktrees/
+
+# Repo-local agent skills are shared; everything else under .pi/ (task logs, state) stays local.
+# Overrides a global ignore of .pi/.
+!/.pi/
+/.pi/*
+!/.pi/skills/

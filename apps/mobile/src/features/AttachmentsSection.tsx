@@ -21,6 +21,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '../components/Icon';
 import { useT } from '../i18n';
 import { deleteAttachment } from '../lib/actions';
@@ -51,6 +52,7 @@ export function AttachmentsSection({
   const theme = useTheme();
   const { t } = useT();
   const workspaceId = useApp((s) => s.workspace?.id) ?? null;
+  const insets = useSafeAreaInsets();
 
   const attachments = attachmentsForTask(snap.attachments, taskId);
   const images = attachments.filter(isImageAttachment);
@@ -209,7 +211,7 @@ export function AttachmentsSection({
         <Pressable style={styles.backdrop} onPress={() => setLightbox(null)}>
           {lightbox ? <Image source={{ uri: lightbox }} style={styles.full} resizeMode="contain" /> : null}
           <Pressable
-            style={styles.close}
+            style={[styles.close, { right: 20 + insets.right }]}
             onPress={() => setLightbox(null)}
             hitSlop={12}
             accessibilityLabel={t('common.cancel')}
@@ -321,5 +323,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   full: { width: '100%', height: '100%' },
-  close: { position: 'absolute', top: 48, right: 20 },
+  close: { position: 'absolute', top: 48 },
 });

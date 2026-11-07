@@ -5,7 +5,7 @@ import {
   type NativeScrollEvent,
   type LayoutChangeEvent,
   type NativeSyntheticEvent,
-  type View,
+  type ViewInstance,
 } from 'react-native';
 import {
   pendingAfter,
@@ -69,7 +69,7 @@ export function useKeyboardReveal({ topInset = 0 }: { topInset?: number } = {}) 
   const touching = useRef(false);
   const pending = useRef(false);
   const lastRevealed = useRef<unknown>(null);
-  const targetRef = useRef<View>(null);
+  const targetRef = useRef<ViewInstance>(null);
   const targetHeight = useRef<number | undefined>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const android = Platform.OS === 'android';

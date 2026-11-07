@@ -70,9 +70,18 @@ export function leaveForOnboarding(boot: Boot, segments: readonly string[], navi
  * the first Back press appeared to do nothing (e2e dce0f6d0 F1).
  */
 export function leaveGate(href: Href, canDismiss: boolean): void {
-  if (canDismiss) router.dismissAll();
-  if (href === '/today' && canDismiss) return;
-  router.replace(href);
+  try {
+    if (canDismiss) router.dismissAll();
+    if (href === '/today' && canDismiss) return;
+    router.replace(href);
+  } catch (e) {
+    // The imperative router is unbound while its root is torn down: this gate's effect
+    // can still run after an activity recreation (font scale, density) destroyed the
+    // surface, and an uncaught throw in an effect kills the process. The surface that
+    // replaces it mounts a fresh gate, which navigates then (router rebinding relies on
+    // patches/expo-router@58.0.30.patch). Logged so a blank gate screen is diagnosable.
+    console.warn('leaveGate: imperative router unavailable', e);
+  }
 }
 
 /** Minimal shape of a navigation state, enough to walk down to the focused stack. */

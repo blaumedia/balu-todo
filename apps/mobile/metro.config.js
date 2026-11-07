@@ -7,6 +7,14 @@
 //   2. @balu/* packages ship raw TypeScript (`main: ./src/index.ts`) whose
 //      relative imports use `.js` extensions (ESM/NodeNext style) that actually
 //      point at `.ts` files. Metro must retry a failed `.js` resolution as `.ts`.
+//
+// Keep React Native's own fetch as the global `fetch`. Since SDK 56 Expo installs
+// expo/fetch globally, and expo/fetch rejects React Native's `{ uri, name, type }`
+// FormData parts ("Unsupported FormDataPart implementation") - exactly what the
+// attachment upload sends (src/lib/attachments.ts). babel-preset-expo inlines this
+// into expo's runtime from the transform workers' env, so it must be set here,
+// before Metro starts them. Adopting expo/fetch is a separate, deliberate change.
+process.env.EXPO_PUBLIC_USE_RN_FETCH ??= '1';
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
 

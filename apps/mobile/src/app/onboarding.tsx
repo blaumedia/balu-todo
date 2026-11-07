@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AndroidKeyboardSpacer } from '../components/AndroidKeyboardSpacer';
@@ -25,10 +26,12 @@ import { hasExplicitScheme, isInsecureUrl, normalizeUrl, toInsecureUrl } from '.
 import { useApp } from '../store/app';
 import { useTheme } from '../theme/ThemeProvider';
 import { font, gutter, radius, space } from '../theme/tokens';
+import { useColumnPadding } from '../hooks/use-layout';
+import { FORM_MAX_WIDTH } from '../lib/layout';
 
 // The form view whose bottom (its lowest button) must end up above the IME.
 interface RevealTarget {
-  ref: React.Ref<View>;
+  ref: React.Ref<ViewInstance>;
   onLayout: (e: LayoutChangeEvent) => void;
 }
 
@@ -36,6 +39,7 @@ export default function Onboarding() {
   const theme = useTheme();
   const { t } = useT();
   const insets = useSafeAreaInsets();
+  const column = useColumnPadding(FORM_MAX_WIDTH);
   const keyboardReveal = useKeyboardReveal({ topInset: insets.top });
   const serverUrl = useApp((s) => s.serverUrl);
   const setServerUrl = useApp((s) => s.setServerUrl);
@@ -46,7 +50,7 @@ export default function Onboarding() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} onTouchCancel={keyboardReveal.onTouchCancel} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={keyboardReveal.ref} onScroll={keyboardReveal.onScroll} onTouchStart={keyboardReveal.onTouchStart} onTouchEnd={keyboardReveal.onTouchEnd} onTouchCancel={keyboardReveal.onTouchCancel} scrollEventThrottle={keyboardReveal.scrollEventThrottle} contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 48, paddingBottom: insets.bottom + 24, paddingLeft: gutter + column.left, paddingRight: gutter + column.right }]} keyboardShouldPersistTaps="handled">
         <View style={styles.brand}>
           <LinearGradient colors={[theme.gradientFrom, theme.gradientTo]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.logo}>
             <Icon name="check" size={34} color="#fff" strokeWidth={3} />
@@ -121,6 +125,7 @@ function ServerStep({ initialValue, onConfirm, revealTarget }: { initialValue: s
       <Text style={[styles.hint, { color: theme.textSecondary }]}>{t('onboarding.serverHint')}</Text>
       <Field
         icon="server"
+        label={t('settings.server')}
         placeholder={t('onboarding.serverPlaceholder')}
         value={value}
         onChangeText={(next) => {
@@ -252,10 +257,10 @@ function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: stri
       ) : null}
 
       {mode === 'register' ? (
-        <Field icon="settings" placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
+        <Field icon="settings" label={t('auth.name')} placeholder={t('auth.name')} value={name} onChangeText={setName} theme={theme} />
       ) : null}
-      <Field icon="server" placeholder={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" theme={theme} hideIcon />
-      <Field icon="server" placeholder={t('auth.password')} value={password} onChangeText={setPassword} secureTextEntry theme={theme} hideIcon />
+      <Field icon="server" label={t('auth.email')} placeholder={t('auth.email')} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" theme={theme} hideIcon />
+      <Field icon="server" label={t('auth.password')} placeholder={t('auth.password')} value={password} onChangeText={setPassword} secureTextEntry theme={theme} hideIcon />
       {error ? <Text style={[styles.error, { color: theme.danger }]}>{error}</Text> : null}
 
       <Button
@@ -275,20 +280,27 @@ function AuthStep({ serverUrl, onChangeServer, revealTarget }: { serverUrl: stri
   );
 }
 
+// The placeholder is the label on Android (TalkBack reads it); iOS needs an explicit one because VoiceOver drops the placeholder once text is typed.
+function iosLabel(label: string): string | undefined {
+  return Platform.OS === 'ios' ? label : undefined;
+}
+
 function Field({
   icon,
   theme,
   hideIcon,
+  label,
   ...props
 }: {
   icon: 'server' | 'settings';
+  label: string;
   theme: ReturnType<typeof useTheme>;
   hideIcon?: boolean;
 } & React.ComponentProps<typeof TextInput>) {
   return (
     <View style={[styles.field, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       {!hideIcon ? <Icon name={icon} size={18} color={theme.textTertiary} strokeWidth={2} /> : null}
-      <TextInput style={[styles.input, { color: theme.textPrimary }]} placeholderTextColor={theme.textTertiary} {...props} />
+      <TextInput style={[styles.input, { color: theme.textPrimary }]} placeholderTextColor={theme.textTertiary} accessibilityLabel={iosLabel(label)} {...props} />
     </View>
   );
 }

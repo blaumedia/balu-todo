@@ -2,7 +2,7 @@ import { activeProjects, todayLocalISO } from '@balu/domain';
 import { wasSaved } from '@balu/sync-client';
 import { parseQuickAdd } from '@balu/nl-parser';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, type TextInputInstance, View } from 'react-native';
 import { BottomSheet } from '../components/BottomSheet';
 import { Icon } from '../components/Icon';
 import { TokenPill } from '../components/TokenPill';
@@ -29,8 +29,10 @@ export function QuickAddSheet() {
   // Newest typed text; `text` lags by a render, so a press in that window would drop a character.
   const latestText = useRef('');
   const [inputEpoch, setInputEpoch] = useState(0);
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   const lastSubmitAt = useRef(0);
+  // The 80 ms add-another focus timer in submit; cleared on close and unmount.
+  const refocusTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const today = todayLocalISO();
 
   // Refocus + clear each time the sheet opens (capture is sacred, DESIGN §1).
@@ -42,9 +44,14 @@ export function QuickAddSheet() {
       // text that a reopened composer would silently submit — remount too.
       if (Platform.OS === 'android') setInputEpoch((e) => e + 1);
       const timer = setTimeout(() => inputRef.current?.focus(), 250);
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+        clearTimeout(refocusTimer.current);
+      };
     }
   }, [open]);
+
+  useEffect(() => () => clearTimeout(refocusTimer.current), []);
 
   // The role can drop while the sheet is open. Close it (the typed text is not
   // kept: the sheet clears on every open anyway). Unknown role stays open.
@@ -98,7 +105,8 @@ export function QuickAddSheet() {
     // then refocus so submit-and-add-another keeps the keyboard up.
     if (Platform.OS === 'android') {
       setInputEpoch((e) => e + 1);
-      setTimeout(() => inputRef.current?.focus(), 80);
+      clearTimeout(refocusTimer.current);
+      refocusTimer.current = setTimeout(() => inputRef.current?.focus(), 80);
     }
   };
 
@@ -120,7 +128,12 @@ export function QuickAddSheet() {
         <TextInput
           key={inputEpoch}
           ref={inputRef}
-          autoFocus={open}
+          // Android: no autoFocus. It focuses the view at mount, before the window's IME focus has settled (first open
+          // after login or after the app returns to the front); the later focus() then does nothing because the view
+          // is already focused, and the IME never attaches: the field is focused with the keyboard up but takes no text
+          // (7 of 15 opens with autoFocus, 0 of 45 without, release build). The focus() timers do the focusing: the 250 ms one on open, the 80 ms
+          // one in submit after add-another.
+          autoFocus={open && Platform.OS !== 'android'}
           value={text}
           onChangeText={(v) => {
             // A hardware Return arrives here as a newline, not as an editor

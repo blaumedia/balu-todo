@@ -1,7 +1,9 @@
-// Floating add button — brand-gradient circle, bottom-right above the tab bar
+// Floating add button - brand-gradient circle, bottom-right above the tab bar or, with the
+// Android rail, above the bottom inset
 // (DESIGN §7 mobile). Tap creates in the current context.
 import { LinearGradient } from 'expo-linear-gradient';
 import { Pressable, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
 
@@ -16,12 +18,13 @@ export function Fab({
   label: string;
 }) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.wrap, { bottom, shadowColor: theme.accent }, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.wrap, { bottom, right: FAB_RIGHT + insets.right, shadowColor: theme.accent }, pressed && styles.pressed]}
     >
       <LinearGradient
         colors={[theme.gradientFrom, theme.gradientTo]}
@@ -35,10 +38,11 @@ export function Fab({
   );
 }
 
+const FAB_RIGHT = 20;
+
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    right: 20,
     width: 60,
     height: 60,
     borderRadius: 30,

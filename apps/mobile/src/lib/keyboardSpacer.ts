@@ -45,6 +45,14 @@ export function revealScrollDelta(
   return Math.max(inputWindowY + inputHeight + reserve - (windowBottom - keyboardHeight), 0);
 }
 
+// Bottom edge (window y) of the area a scroll view really shows above the
+// keyboard: its own bottom, or the keyboard top when the scroll view's layout
+// has not (yet) shrunk for the keyboard. Pass keyboardHeight 0 where the layout
+// is already correct (iOS pads the sheet by the keyboard).
+export function visibleBottom(scrollViewBottom: number, windowBottom: number, keyboardHeight: number): number {
+  return Math.min(scrollViewBottom, windowBottom - keyboardHeight);
+}
+
 // Like revealScrollDelta, but also brings a "reveal target" (the bottom edge of a
 // whole short form, including any links under its submit button) above the
 // keyboard, so the button stays

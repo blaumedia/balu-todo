@@ -80,6 +80,20 @@ function StateInner({ bottomInset, onKeyboardSettled }: StateProps) {
   return <View style={{ height }} />;
 }
 
+function SettledProbeInner({ onSettled }: { onSettled: (keyboardHeight: number) => void }) {
+  const keyboard = useAnimatedKeyboard();
+  useKeyboardSettled(keyboard, onSettled);
+  return null;
+}
+
+// Renders nothing and takes no space: reports the settled IME height (see
+// useKeyboardSettled) to a screen that has no spacer of its own but needs the
+// real keyboard height (Android only, nothing on iOS for the reason below).
+export function AndroidKeyboardSettledProbe({ onSettled }: { onSettled: (keyboardHeight: number) => void }) {
+  if (Platform.OS !== 'android') return null;
+  return <SettledProbeInner onSettled={onSettled} />;
+}
+
 // Renders nothing off Android: on iOS 26 useAnimatedKeyboard is broken
 // (reanimated #8270) and the Keyboard-event path / automaticallyAdjustKeyboardInsets
 // works fine, so the hook lives in the Android-only inner component.

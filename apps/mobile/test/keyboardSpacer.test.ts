@@ -8,6 +8,7 @@ import {
   settledKeyboardHeight,
   targetResizeAction,
   touchingAfter,
+  visibleBottom,
 } from '../src/lib/keyboardSpacer';
 
 describe('keyboardSpacerHeight', () => {
@@ -145,5 +146,21 @@ describe('targetResizeAction', () => {
   it('never moves the content with the keyboard closed', () => {
     expect(targetResizeAction(300, 420, 0, false)).toBe('none');
     expect(targetResizeAction(300, 420, 0, true)).toBe('none');
+  });
+});
+
+describe('visibleBottom with the notes reveal', () => {
+  it('caps a stale (too tall) scroll view by the real keyboard top', () => {
+    expect(visibleBottom(2000, 2400, 900)).toBe(1500);
+  });
+
+  it('keeps the scroll view bottom when it already shrank, and with keyboard height 0 (iOS)', () => {
+    expect(visibleBottom(1200, 2400, 900)).toBe(1200);
+    expect(visibleBottom(1200, 2400, 0)).toBe(1200);
+  });
+
+  it('does not scroll for a notes field that is visible, scrolls just enough for a covered one', () => {
+    expect(revealScrollDelta(300, 100, 16, visibleBottom(2000, 2400, 900), 0)).toBe(0);
+    expect(revealScrollDelta(1450, 100, 16, visibleBottom(2000, 2400, 900), 0)).toBe(66);
   });
 });
