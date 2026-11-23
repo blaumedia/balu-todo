@@ -1,0 +1,12 @@
+# Trivy config for the dependency-audit workflow. Trivy loads ./trivy.yaml from the checkout root
+# automatically; --config only makes that explicit. In a repo that already has a trivy.yaml, merge.
+# Docker Hub limits anonymous pulls per egress IP, and the runners share that IP with the image
+# builds. Remote pulls of Docker Hub images (node, debian, python, nginx, clamav) go through the
+# Google mirror first; Trivy falls back to Docker Hub itself when the mirror lacks the image.
+# Supported since Trivy 0.59 (experimental); the key for Docker Hub is index.docker.io.
+# Caveat: Docker official tags are re-pushed for OS patches and mirror.gcr.io is only a cache, so
+# a base-image scan of a tag-only image can lag the digest the build pulls from Docker Hub.
+registry:
+  mirrors:
+    index.docker.io:
+      - mirror.gcr.io

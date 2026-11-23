@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": {"enabled": true},
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 5,
+  "rebaseWhen": "conflicted",
+  "automerge": false,
+  "osvVulnerabilityAlerts": true,
+  "major": {"dependencyDashboardApproval": true},
+  "packageRules": [
+    {
+      "description": "One PR for all minor, patch and digest updates; every major update gets its own PR, opened only after it is approved in the Dependency Dashboard (security-fix PRs from OSV data excepted).",
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "all non-major dependencies",
+      "groupSlug": "all-minor-patch"
+    },
+    {
+      "description": "npm, PyPI, Go and Maven/Gradle releases wait one day against supply-chain attacks. Security-fix PRs from OSV data (direct dependencies only; transitive osv-scanner findings need a manual lockfile update or an overrides entry) are not delayed: they are forced through the vulnerabilityAlerts block, whose default sets minimumReleaseAge to null. Docker images, GitHub Actions and digests are not delayed.",
+      "matchDatasources": ["npm", "pypi", "go", "maven"],
+      "matchUpdateTypes": ["major", "minor", "patch"],
+      "minimumReleaseAge": "1 day"
+    }
+  ]
+}

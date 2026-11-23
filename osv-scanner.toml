@@ -1,0 +1,8 @@
+# Allowlist for osv-scanner, read by .gitea/workflows/dependency-audit.yml (--config).
+# Only for a finding that cannot be fixed yet, never to silence a fixable one. Every entry needs
+# a reason and an effectiveUntil at most 90 days out; after that date it fails the audit again.
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# effectiveUntil = 2027-02-28
+# reason = "No fixed version yet; the vulnerable function is not reachable from our code."

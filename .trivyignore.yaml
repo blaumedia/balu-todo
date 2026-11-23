@@ -1,0 +1,12 @@
+# Allowlist for Trivy, read by .gitea/workflows/dependency-audit.yml (--ignorefile).
+# Unfixed findings are already skipped (--ignore-unfixed). Add an entry only for a fixed CVE that
+# cannot be taken yet (e.g. the upstream base image is not rebuilt), with a statement and an
+# expired_at at most 30 days out.
+#
+# vulnerabilities:
+#   - id: CVE-2026-12345
+#     purls:
+#       - "pkg:deb/debian/libexample"
+#     expired_at: 2026-12-31
+#     statement: "Fixed in Debian, the debian:trixie-slim image is not rebuilt yet."
+vulnerabilities: []
