@@ -1,0 +1,273 @@
+# Daily dependency audit: Renovate opens update PRs, osv-scanner and Trivy look for known
+# vulnerabilities, and the run fails when they find something actionable.
+#
+# The schedule does not do the work itself: Gitea starts scheduled runs as its internal
+# gitea-actions user, which has no mailbox, so a failing scheduled run mails nobody. The
+# scheduled run only re-dispatches this workflow with the Renovate bot account's token; that run is
+# triggered by the bot account, and Gitea mails the bot when it fails.
+#
+# If the scheduled `kick` dispatch fails (token revoked or missing, API down) nobody is mailed. That
+# is covered by the staleness watchdog in the monitoring stack (newest renovate-bot
+# workflow_dispatch run < ~26 h old), enabled per repository after merge.
+#
+# RENOVATE_TOKEN is effectively production-equivalent: a holder can push workflows that run on the
+# self-hosted runners. Misuse is detected by the same monitoring watchdog.
+#
+# Renovate's OSV security PRs cover direct dependencies only; transitive osv-scanner findings need a
+# manual lockfile update or an `overrides` entry.
+#
+# A red run means one of: a fixable HIGH/CRITICAL finding (Trivy; deployed images: OS packages and
+# libraries, base images: OS packages only), any osv finding (dev-only ones included),
+# an expired allowlist entry, a Renovate error (including failed OSV data fetches or evaluation),
+# a skipped repository (no renovate.json on the default branch, disabled, or no bot access),
+# or a scanner error. Fix it, or add a time-boxed entry with a reason to osv-scanner.toml or
+# .trivyignore.yaml.
+#
+# Tool pins: Renovate keeps the action SHAs current. Renovate, osv-scanner and Trivy
+# are pinned here by hand: bump the version together with the SHA-256 of the release asset (from
+# the release's checksums file), then dispatch this workflow once. Renovate also has an install-date
+# cap (NPM_CONFIG_BEFORE) that must be bumped together with RENOVATE_VERSION.
+#
+# Template note: on the first run in a Go or Maven repo, check the Dependency Dashboard's pending
+# section for updates held back because their release timestamp is missing (renovate.json
+# release-age rule). When copying trivy.yaml to a repo that already has one, merge the two.
+name: dependency-audit
+
+on:
+  schedule:
+    # Europe/Berlin, not UTC: Gitea honours the CRON_TZ= prefix.
+    - cron: "CRON_TZ=Europe/Berlin 16 7 * * *"
+  workflow_dispatch:
+
+# The job token is only used by checkout; Renovate and the re-dispatch use RENOVATE_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  kick:
+    name: Start the audit as the Renovate bot
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch this workflow with the bot token
+        env:
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          DISPATCH_URL: ${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows/dependency-audit.yml/dispatches
+          REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 3 -X POST \
+            -H "Authorization: token ${RENOVATE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{\"ref\":\"${REF}\"}" \
+            "$DISPATCH_URL"
+
+  renovate:
+    name: Renovate
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: renovate
+      cancel-in-progress: false
+    steps:
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@11.16.0 --activate
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/0.13.9/install.sh | sh && echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Renovate
+        env:
+          # Bump RENOVATE_VERSION and NPM_CONFIG_BEFORE together: pick a release at least 7 days old;
+          # BEFORE = its publish time (npm view renovate@<ver> time --json). It freezes the dependency
+          # tree of the install, so nothing newer than that release can enter this job.
+          RENOVATE_VERSION: "44.239.1"
+          NPM_CONFIG_BEFORE: "2026-11-13T18:55:47.070Z"
+          # Download only the OSV ecosystems that are queried (npm ~31 MB) instead of the full ~87 MB zip.
+          OSV_OFFLINE_DATABASE_FORMAT: split
+          RENOVATE_PLATFORM: gitea
+          RENOVATE_ENDPOINT: ${{ github.server_url }}
+          RENOVATE_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          # github.com lookups (github-actions, changelogs); without it the rate limit is 60 requests/hour.
+          GITHUB_COM_TOKEN: ${{ secrets.RENOVATE_GITHUB_COM_TOKEN }}
+          RENOVATE_GIT_AUTHOR: Renovate Bot <renovate@blaumedia.com>
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_ONBOARDING: "false"
+          RENOVATE_REQUIRE_CONFIG: required
+          # Without this Renovate exits 0 on bad credentials, rate limits, git and external-host errors
+          # (renovate 44.239.1: global/index.js:132, repository/result.js exit codes 3-8).
+          RENOVATE_EXIT_CODE_FOR_ERRORS: "true"
+          RENOVATE_BINARY_SOURCE: global
+          LOG_LEVEL: info
+        run: |
+          set -euo pipefail
+          # Renovate exits 0 when the OSV download fails, which silently stops security PRs; keep a
+          # local copy of its log (never uploaded, deleted with the job) to detect that. The message
+          # depends on the database format: the zip format logs "Unable to read vulnerability
+          # information" at startup; the split format (set above) downloads lazily and fails per
+          # package ("Error fetching vulnerability information for package"). Match both (renovate
+          # 44.239.1 / osv-offline 4.5.10; re-check the strings when bumping). A stale database
+          # (only possible if Renovate's cacheDir were ever persisted) logs only via the `debug`
+          # module and is invisible here; do not persist cacheDir without revisiting this.
+          # Post-merge negative test: dispatch from a temp branch with
+          # OSV_OFFLINE_DATABASE_INDEX_URL=https://invalid.example/index.json set on this step; it must go red.
+          log="$RUNNER_TEMP/renovate.log"
+          rc=0
+          npx --yes "renovate@${RENOVATE_VERSION}" 2>&1 | tee "$log" || rc=$?
+          if grep -qE "Unable to read vulnerability information|Error fetching vulnerability information for package" "$log"; then
+            echo "::error::Renovate could not fetch or evaluate OSV vulnerability data (see the WARN lines above); security PRs may be missing."
+            exit 1
+          fi
+          # A skipped repository (no renovate.json on the default branch, disabled, archived, PRs
+          # disabled, no bot access, ...) still exits 0 even with RENOVATE_EXIT_CODE_FOR_ERRORS:
+          # these RepositoryErrors log only at info level (result.js, error-messages.js). Match the
+          # outcome, not one message: the "Repository finished" INFO line carries "status": "disabled"
+          # (repository/index.js:146); a normal run reports activated, onboarded or onboarding. A
+          # green run that did nothing is the worst outcome. Consequence: a branch dispatch before
+          # this branch's renovate.json is on the default branch (RENOVATE_REQUIRE_CONFIG reads the
+          # default branch) is red by design.
+          if grep -qE '"status": "disabled"' "$log"; then
+            echo "::error::Renovate skipped the repository: disabled, no renovate.json on the default branch, or no access - see the INFO line above."
+            exit 1
+          fi
+          exit "$rc"
+
+  scan:
+    name: CVE scan
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OSV_SCANNER_VERSION: "2.7.1"
+      OSV_SCANNER_SHA256: fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8
+      TRIVY_VERSION: "0.76.2"
+      TRIVY_SHA256: bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf
+      # Registry of the images we deploy; empty = nothing private to pull.
+      REGISTRY: ${{ vars.REGISTRY_HOST }}
+      # Images exactly as deployed, space-separated.
+      DEPLOYED_IMAGES: ${{ vars.REGISTRY_HOST }}/${{ github.repository_owner }}/balu:latest
+      # A compose file whose image: lines are deployed as they are (empty = none).
+      DEPLOYED_COMPOSE: ""
+      # Shipped Dockerfiles; the runtime base image of each (last FROM, stage aliases followed) is scanned
+      # too, for OS packages only (its libraries are not what we ship).
+      BASE_DOCKERFILES: server/Dockerfile
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          submodules: false
+          persist-credentials: false
+      - name: Install osv-scanner and Trivy
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64 || { echo "The pinned scanner binaries are linux/amd64, the runner is $(uname -m)." >&2; exit 1; }
+          bin="$RUNNER_TEMP/audit-bin"
+          mkdir -p "$bin" "$RUNNER_TEMP/docker-config"
+          curl -fsSL --retry 3 -o "$bin/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $bin/osv-scanner" | sha256sum -c -
+          chmod +x "$bin/osv-scanner"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$bin" trivy
+          echo "$bin" >> "$GITHUB_PATH"
+          echo "DOCKER_CONFIG=$RUNNER_TEMP/docker-config" >> "$GITHUB_ENV"
+          echo "TRIVY_CACHE_DIR=$RUNNER_TEMP/trivy-cache" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/audit-failures"
+      - name: osv-scanner (lockfiles)
+        continue-on-error: true
+        run: |
+          rc=0
+          osv-scanner scan source -r --config=osv-scanner.toml . || rc=$?
+          # 0 clean, 1 vulnerabilities found, 127 scanner error, 128 no lockfile found
+          if [ "$rc" -ne 0 ]; then echo "osv-scanner: exit $rc" >> "$RUNNER_TEMP/audit-failures"; fi
+          exit "$rc"
+      - name: Log in to the registry (read-only token)
+        env:
+          REGISTRY_READ_USER: ${{ vars.REGISTRY_READ_USER }}
+          REGISTRY_READ_TOKEN: ${{ secrets.REGISTRY_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REGISTRY" ]; then echo "No private registry for this repository."; exit 0; fi
+          # trivy registry login scopes the credentials to this one registry; TRIVY_USERNAME/PASSWORD
+          # would be sent to Docker Hub as well when the base images are pulled.
+          printf '%s' "$REGISTRY_READ_TOKEN" | trivy registry login --username "$REGISTRY_READ_USER" --password-stdin "$REGISTRY"
+      - name: Trivy (deployed images and their base images)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          fail() { echo "$1" >> "$RUNNER_TEMP/audit-failures"; }
+          # Runtime base image of a Dockerfile: the image of its last FROM, following stage
+          # aliases ("FROM base AS runner" resolves to what "base" was built FROM).
+          runtime_base() {
+            awk '
+              toupper($1) == "FROM" {
+                img = ""; alias = ""
+                for (i = 2; i <= NF; i++) {
+                  if ($i ~ /^--/) continue
+                  if (img == "") { img = $i; continue }
+                  if (toupper($i) == "AS") { alias = tolower($(i + 1)); break }
+                }
+                if (alias != "") stage[alias] = img
+                last = img
+              }
+              END {
+                for (n = 0; n < 20 && (tolower(last) in stage); n++) last = stage[tolower(last)]
+                print last
+              }' "$1"
+          }
+          # "name:tag@sha256:..." -> "name@sha256:..." (the digest is what is pinned).
+          normalise() {
+            case "$1" in
+              *@*)
+                name="${1%%@*}"
+                case "${name##*/}" in *:*) name="${name%:*}" ;; esac
+                echo "${name}@${1#*@}" ;;
+              *) echo "$1" ;;
+            esac
+          }
+          deployed="$DEPLOYED_IMAGES"
+          if [ -n "$DEPLOYED_COMPOSE" ]; then
+            deployed="$deployed $(awk '$1 == "image:" { print $2 }' "$DEPLOYED_COMPOSE")"
+          fi
+          bases=""
+          for f in $BASE_DOCKERFILES; do bases="$bases $(runtime_base "$f")"; done
+          dlist=""
+          for i in $deployed; do dlist="$dlist $(normalise "$i")"; done
+          dlist="$(printf '%s\n' $dlist | sort -u)"
+          blist=""
+          for i in $bases; do blist="$blist $(normalise "$i")"; done
+          blist="$(printf '%s\n' $blist | sort -u)"
+          if [ -z "$dlist$blist" ]; then fail "trivy: no image to scan"; exit 1; fi
+          if ! trivy image --download-db-only --no-progress; then fail "trivy: vulnerability DB download failed"; exit 1; fi
+          rc_all=0
+          # $1 = package types to scan, then the images.
+          scan() {
+            types="$1"; shift
+            for img in "$@"; do
+              echo "::group::$img ($types)"
+              rc=0
+              trivy image --config trivy.yaml --image-src remote --platform linux/amd64 \
+                --scanners vuln --pkg-types "$types" --severity HIGH,CRITICAL --ignore-unfixed \
+                --ignorefile .trivyignore.yaml --skip-db-update \
+                --exit-code 1 --no-progress --timeout 15m "$img" || rc=$?
+              echo "::endgroup::"
+              if [ "$rc" -ne 0 ]; then fail "trivy $img ($types): exit $rc"; rc_all=1; fi
+            done
+          }
+          # shellcheck disable=SC2086
+          scan os,library $dlist
+          # shellcheck disable=SC2086
+          scan os $blist
+          exit "$rc_all"
+      - name: Verdict
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/docker-config"
+          f="$RUNNER_TEMP/audit-failures"
+          if [ ! -f "$f" ]; then echo "The scanners did not run, see the steps above." >&2; exit 1; fi
+          if [ -s "$f" ]; then echo "Actionable findings or scanner errors:" >&2; cat "$f" >&2; exit 1; fi
+          echo "No actionable findings."
