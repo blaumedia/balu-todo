@@ -198,7 +198,7 @@ test/                      vitest - pure logic and hooks-free helpers (reminders
 
 ## Troubleshooting
 
-- **expo-router patch** (`patches/expo-router@58.0.30.patch`): expo-router's imperative
+- **expo-router patch** (`patches/expo-router@58.0.32.patch`): expo-router's imperative
   router bridge unbinds the shared `router` on unmount even when a newer root has already
   bound it, which an Android activity recreation (system font size or display size change)
   triggers: the app then shows a blank start screen or crashes with "The imperative router

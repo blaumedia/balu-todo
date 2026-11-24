@@ -39,7 +39,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # uv from the official distroless image, pinned: `:latest` made every rebuild a
 # different toolchain.
-COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
