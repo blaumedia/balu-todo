@@ -20,6 +20,12 @@
       "matchDatasources": ["npm", "pypi", "go", "maven"],
       "matchUpdateTypes": ["major", "minor", "patch"],
       "minimumReleaseAge": "1 day"
+    },
+    {
+      "description": "Do not propose Python 3.15 or newer (python Docker image, server/.python-version) until psycopg-binary ships wheels for it: 3.3.4 has none, so uv sync --frozen fails on 3.15. Remove this rule once psycopg-binary publishes 3.15 wheels.",
+      "matchDatasources": ["docker", "python-version"],
+      "matchPackageNames": ["python"],
+      "allowedVersions": "!/^(3\\.(1[5-9]|[2-9][0-9])|[4-9])(\\.|-|$)/"
     }
   ]
 }
