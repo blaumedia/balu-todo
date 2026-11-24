@@ -79,7 +79,7 @@ export function leaveGate(href: Href, canDismiss: boolean): void {
     // can still run after an activity recreation (font scale, density) destroyed the
     // surface, and an uncaught throw in an effect kills the process. The surface that
     // replaces it mounts a fresh gate, which navigates then (router rebinding relies on
-    // patches/expo-router@58.0.30.patch). Logged so a blank gate screen is diagnosable.
+    // patches/expo-router@58.0.32.patch). Logged so a blank gate screen is diagnosable.
     console.warn('leaveGate: imperative router unavailable', e);
   }
 }
