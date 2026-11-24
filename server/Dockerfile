@@ -19,7 +19,7 @@ RUN if [ "$SKIP_WEB" = "0" ] && [ -d apps/web ]; then \
     fi
 
 # ---- Stage 2: python runtime ----------------------------------------------
-FROM python:3.15-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ARG VERSION=dev
 # `image.source` is not decoration: GHCR links a package to its repository (and
