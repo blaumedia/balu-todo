@@ -19,7 +19,7 @@ RUN if [ "$SKIP_WEB" = "0" ] && [ -d apps/web ]; then \
     fi
 
 # ---- Stage 2: python runtime ----------------------------------------------
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ARG VERSION=dev
 # `image.source` is not decoration: GHCR links a package to its repository (and
@@ -39,7 +39,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 # uv from the official distroless image, pinned: `:latest` made every rebuild a
 # different toolchain.
-COPY --from=ghcr.io/astral-sh/uv:0.13.9 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.10 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
