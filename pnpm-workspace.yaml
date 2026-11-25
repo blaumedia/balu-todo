@@ -43,3 +43,8 @@ packageExtensions:
 # see apps/mobile/README.md "Troubleshooting" for how to re-check before dropping the patch.
 patchedDependencies:
   expo-router@58.0.32: patches/expo-router@58.0.32.patch
+
+# minimatch 10.x has no fix for GHSA-g3hv-75wg-m249 (fixed in 11.0.1); its consumers (eslint's
+# typescript-estree, @expo/fingerprint) only call minimatch(), whose API is unchanged in 11.
+overrides:
+  "minimatch@10": "^11.0.9"
