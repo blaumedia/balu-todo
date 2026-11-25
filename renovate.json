@@ -7,6 +7,12 @@
   "rebaseWhen": "conflicted",
   "automerge": false,
   "osvVulnerabilityAlerts": true,
+  "timezone": "Europe/Berlin",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "description": "Weekly refresh of pnpm-lock.yaml and server/uv.lock (transitive dependencies). The only Renovate run is the daily dependency-audit.yml one at 07:16 Europe/Berlin, so the window must contain that time: Renovate's default (before 4am on monday) would never fire. Not subject to minimumReleaseAge; the PR still needs green CI and a human merge.",
+    "schedule": ["after 6am and before 9am on monday"]
+  },
   "major": {"dependencyDashboardApproval": true},
   "packageRules": [
     {

@@ -37,6 +37,13 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 
+# The official base image lags Debian's security fixes (libzstd1 CVE-2026-124851 was fixed in
+# Debian before python:3.14-slim was rebuilt). Upgrade early, as root, so every rebuild of this
+# image is clean regardless of the base image's age; the daily audit scans the result.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # uv from the official distroless image, pinned: `:latest` made every rebuild a
 # different toolchain.
 COPY --from=ghcr.io/astral-sh/uv:0.13.10 /uv /usr/local/bin/uv

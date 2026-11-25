@@ -19,11 +19,14 @@
 # Renovate's OSV security PRs cover direct dependencies only; transitive osv-scanner findings need a
 # manual lockfile update or an `overrides` entry.
 #
-# A red run means one of: a fixable HIGH/CRITICAL finding (Trivy; deployed images: OS packages and
-# libraries, base images: OS packages only), any osv finding (dev-only ones included),
+# A red run means one of: a fixable HIGH/CRITICAL finding (Trivy, deployed images only: OS packages
+# and libraries), any osv finding (dev-only ones included),
 # an expired allowlist entry, a Renovate error (including failed OSV data fetches or evaluation),
 # a skipped repository (no renovate.json on the default branch, disabled, or no bot access),
-# or a scanner error. Fix it, or add a time-boxed entry with a reason to osv-scanner.toml or
+# or a scanner error. Findings in the pure base images (Trivy, OS packages) are only warnings: we
+# cannot fix a base image, and our own images upgrade their OS packages at build time (see the
+# Dockerfile), so the deployed-image scan is the gate. Scanner errors on a base image still fail.
+# Fix it, or add a time-boxed entry with a reason to osv-scanner.toml or
 # .trivyignore.yaml.
 #
 # Tool pins: Renovate keeps the action SHAs current. Renovate, uv, osv-scanner and Trivy
@@ -262,6 +265,7 @@ jobs:
           if ! trivy image --download-db-only --no-progress; then fail "trivy: vulnerability DB download failed"; exit 1; fi
           rc_all=0
           # $1 = package types to scan, then the images.
+          # $WARN_ONLY=1: a findings result (exit 1) is only a warning; any other exit code is an error.
           scan() {
             types="$1"; shift
             for img in "$@"; do
@@ -272,13 +276,18 @@ jobs:
                 --ignorefile .trivyignore.yaml --skip-db-update \
                 --exit-code 1 --no-progress --timeout 15m "$img" || rc=$?
               echo "::endgroup::"
-              if [ "$rc" -ne 0 ]; then fail "trivy $img ($types): exit $rc"; rc_all=1; fi
+              if [ "$rc" -eq 1 ] && [ "${WARN_ONLY:-0}" = 1 ]; then
+                echo "::warning::trivy $img ($types): findings in the base image (not failing the run)"
+                echo "WARNING (not failing): trivy $img ($types): findings in the base image" >> "$RUNNER_TEMP/audit-warnings"
+              elif [ "$rc" -ne 0 ]; then
+                fail "trivy $img ($types): exit $rc"; rc_all=1
+              fi
             done
           }
           # shellcheck disable=SC2086
           scan os,library $dlist
           # shellcheck disable=SC2086
-          scan os $blist
+          WARN_ONLY=1 scan os $blist
           exit "$rc_all"
       - name: Verdict
         if: always()
@@ -286,5 +295,6 @@ jobs:
           rm -rf "$RUNNER_TEMP/docker-config"
           f="$RUNNER_TEMP/audit-failures"
           if [ ! -f "$f" ]; then echo "The scanners did not run, see the steps above." >&2; exit 1; fi
+          if [ -s "$RUNNER_TEMP/audit-warnings" ]; then echo "Warnings (base images, not failing the run):"; cat "$RUNNER_TEMP/audit-warnings"; fi
           if [ -s "$f" ]; then echo "Actionable findings or scanner errors:" >&2; cat "$f" >&2; exit 1; fi
           echo "No actionable findings."
