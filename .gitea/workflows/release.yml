@@ -169,11 +169,15 @@ jobs:
             OUTPUT="--output=type=cacheonly"
             echo "Dry run: authenticated, building $VERSION for $PLATFORMS. Pushing nothing."
           fi
+          # --pull: always take the current base image. OS_REFRESH: unique per run so the
+          # apt upgrade layer is never served from a stale build cache.
           docker buildx build \
+            --pull \
             -f server/Dockerfile \
             --platform "$PLATFORMS" \
             --build-arg SKIP_WEB=0 \
             --build-arg VERSION="$VERSION" \
+            --build-arg OS_REFRESH="${GITHUB_RUN_ID:-$GITHUB_SHA}" \
             $TAGS $OUTPUT .
       - name: Publish the GitHub release
         # Release notes have to live where people can actually read them: this
