@@ -8,7 +8,7 @@
     "@balu/nl-parser": "workspace:*",
     "@balu/sync-client": "workspace:*",
     "@react-native-community/datetimepicker": "9.3.0",
-    "expo": "~58.0.23",
+    "expo": "~58.1.0",
     "expo-build-properties": "~58.0.12",
     "expo-constants": "~58.0.15",
     "expo-crypto": "~58.0.7",
